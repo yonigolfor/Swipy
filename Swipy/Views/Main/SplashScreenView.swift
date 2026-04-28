@@ -21,7 +21,7 @@ struct SplashScreenView: View {
                     .ignoresSafeArea()
                 
                 VStack(spacing: 20) {
-                    Image("SplashScreen")
+                    Image("AppIconImage")
                         .resizable()
                         .scaledToFit()
                         .frame(width: 150, height: 150)
@@ -29,7 +29,7 @@ struct SplashScreenView: View {
                         .shadow(color: .black.opacity(0.3), radius: 20, x: 0, y: 10)
                     
                     VStack(spacing: 8) {
-                        Text("CleanSwipe")
+                        Text("Swipy")
                             .font(.system(size: 32, weight: .bold, design: .rounded))
                             .foregroundColor(.white)
                         

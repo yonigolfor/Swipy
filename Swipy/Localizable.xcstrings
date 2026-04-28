@@ -277,9 +277,6 @@
         }
       }
     },
-    "CleanSwipe" : {
-
-    },
     "Declutter your memories" : {
       "localizations" : {
         "he" : {
@@ -1107,6 +1104,9 @@
         }
       }
     },
+    "Swipy" : {
+
+    },
     "tab.filters" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1216,6 +1216,24 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "סיימת את הערימה שלך. חזור מאוחר יותר לעוד!"
+          }
+        }
+      }
+    },
+    "victory.subtitle_filter" : {
+      "comment" : "MARK: - Victory View (filter-specific)",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You've swiped through all %@ for now.\nHead back to Filters to tackle another category!"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "עברת על כל ה%@ לעת עתה.\nחזור לפילטרים כדי לנקות קטגוריה נוספת!"
           }
         }
       }

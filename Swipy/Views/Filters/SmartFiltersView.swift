@@ -52,7 +52,7 @@ struct SmartFiltersView: View {
         return Button {
             guard !isEmpty else { return }
             stackViewModel.loadPhotos(filter: category)
-            selectedTab = 0
+            selectedTab = 1
         } label: {
             HStack(spacing: 16) {
                 // Icon

@@ -35,7 +35,9 @@ struct VictoryView: View {
                     .minimumScaleFactor(0.8)
                     .lineLimit(1)
 
-                Text(String(localized: "victory.subtitle"))
+                Text(currentFilter == .all
+                     ? String(localized: "victory.subtitle")
+                     : String(format: String(localized: "victory.subtitle_filter"), currentFilter.displayName))
                     .font(.body)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)

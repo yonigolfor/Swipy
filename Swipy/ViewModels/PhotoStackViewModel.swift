@@ -214,6 +214,9 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
             guard !newItems.isEmpty else { return }
             self.photoStack.insert(contentsOf: newItems, at: 0)
+
+            // Burst detection — fires only when app is in foreground
+            NotificationScheduler.shared.checkBurstFromLibraryChange(insertedCount: insertedIndexes.count)
         }
     }
 

@@ -19,6 +19,11 @@ struct ContentView: View {
             .onAppear {
                 checkPhotoLibraryAuthorization()
             }
+            .onReceive(NotificationCenter.default.publisher(for: .notificationNavigate)) { note in
+                if let tab = note.object as? Int {
+                    withAnimation { selectedTab = tab }
+                }
+            }
     }
     
     // MARK: - Main Tab View
