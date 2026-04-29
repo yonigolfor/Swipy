@@ -16,14 +16,11 @@ import Photos
 
 struct OnboardingView: View {
 
+    @ObservedObject var viewModel: PhotoStackViewModel
     /// Called when onboarding completes — parent should show ContentView.
     let onComplete: () -> Void
 
     @State private var currentStep = 0
-    @State private var photoCount = 0
-    @State private var videoCount = 0
-    @State private var largeVideoCount = 0
-    @State private var scanComplete = false
 
     // Step 3 demo swipe state
     @State private var demoOffset: CGSize = .zero
@@ -185,7 +182,7 @@ struct OnboardingView: View {
                         .font(.headline)
                         .foregroundColor(.white)
                     Spacer()
-                    if scanComplete {
+                    if viewModel.onboardingScanComplete {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
                             .transition(.scale.combined(with: .opacity))
@@ -199,22 +196,22 @@ struct OnboardingView: View {
                     scanRow(
                         icon: "photo.fill",
                         label: String(localized: "onboarding.scan.photos"),
-                        value: photoCount,
-                        isScanning: photoCount == 0 && !scanComplete,
+                        value: viewModel.onboardingPhotoCount,
+                        isScanning: viewModel.onboardingPhotoCount == 0 && !viewModel.onboardingScanComplete,
                         color: .blue
                     )
                     scanRow(
                         icon: "video.fill",
                         label: String(localized: "onboarding.scan.videos"),
-                        value: videoCount,
-                        isScanning: videoCount == 0 && !scanComplete,
+                        value: viewModel.onboardingVideoCount,
+                        isScanning: viewModel.onboardingVideoCount == 0 && !viewModel.onboardingScanComplete,
                         color: .purple
                     )
                     scanRow(
                         icon: "film.fill",
                         label: String(localized: "onboarding.scan.large_videos"),
-                        value: largeVideoCount,
-                        isScanning: largeVideoCount == 0 && !scanComplete,
+                        value: viewModel.onboardingLargeVideoCount,
+                        isScanning: viewModel.onboardingLargeVideoCount == 0 && !viewModel.onboardingScanComplete,
                         color: .orange
                     )
                 }
@@ -245,7 +242,7 @@ struct OnboardingView: View {
 
             VStack(spacing: 12) {
                 // Primary CTA — appears when scan completes
-                if scanComplete {
+                if viewModel.onboardingScanComplete {
                     Button {
                         haptic.impactOccurred()
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
@@ -271,7 +268,7 @@ struct OnboardingView: View {
                 }
 
                 // Skip button — always visible while scanning
-                if !scanComplete {
+                if !viewModel.onboardingScanComplete {
                     Button {
                         haptic.impactOccurred()
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
@@ -357,13 +354,12 @@ struct OnboardingView: View {
                         .gesture(
                             DragGesture()
                                 .onChanged { value in
-                                    let isRTL = UIApplication.shared.userInterfaceLayoutDirection == .rightToLeft
-                                    let normalizedX = value.translation.width * (isRTL ? -1 : 1)
-                                    demoOffset = CGSize(width: normalizedX, height: value.translation.height)
-                                    demoRotation = Double(normalizedX / 20)
+                                    let dx = value.translation.width
+                                    demoOffset = CGSize(width: dx, height: value.translation.height)
+                                    demoRotation = Double(dx / 20)
                                     withAnimation(.spring(response: 0.2)) {
-                                        demoLabel = normalizedX < -30 ? String(localized: "swipe.delete") :
-                                                    normalizedX > 30 ? String(localized: "swipe.keep") : nil
+                                        demoLabel = dx < -30 ? String(localized: "swipe.delete") :
+                                                    dx > 30 ? String(localized: "swipe.keep") : nil
                                     }
                                     softHaptic.impactOccurred()
                                 }
@@ -398,6 +394,7 @@ struct OnboardingView: View {
                                 }
                         )
                         .shadow(color: .black.opacity(0.4), radius: 15, y: 8)
+                        .environment(\.layoutDirection, .leftToRight)
                 }
             }
             .frame(height: 320)
@@ -600,73 +597,6 @@ struct OnboardingView: View {
         }
     }
 
-    /// Fetches real PHAsset counts for the scan screen.
-    /// Only works if the user has already granted permission (e.g. on re-install).
-    /// If no permission yet, counts stay at 0 and the scan still looks good.
-    private func startScan() {
-    Task.detached(priority: .userInitiated) {
-        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        guard status == .authorized || status == .limited else {
-            try? await Task.sleep(for: .seconds(1.5))
-            await MainActor.run { withAnimation { scanComplete = true } }
-            return
-        }
-
-        let options = PHFetchOptions()
-        let allPhotos = PHAsset.fetchAssets(with: .image, options: options)
-        let allVideos = PHAsset.fetchAssets(with: .video, options: options)
-
-        let pCount = allPhotos.count
-        let vCount = allVideos.count
-
-        // Update photo and video counts immediately — no waiting for large video scan
-        await MainActor.run {
-            withAnimation {
-                photoCount = pCount
-                videoCount = vCount
-            }
-        }
-
-        // Animate numbers from 0 to final value immediately
-        let steps = 25
-        for step in 1...steps {
-            try? await Task.sleep(for: .milliseconds(60))
-            await MainActor.run {
-                withAnimation {
-                    photoCount = (pCount * step) / steps
-                    videoCount = (vCount * step) / steps
-                }
-            }
-        }
-
-        // Count large videos in background while animation already ran
-        var largeCount = 0
-        allVideos.enumerateObjects { asset, _, _ in
-            let resources = PHAssetResource.assetResources(for: asset)
-            let size = resources.first.flatMap {
-                $0.value(forKey: "fileSize") as? Int64
-            } ?? 0
-            if size > 50_000_000 { largeCount += 1 }
-        }
-
-        // Animate large video count after enumeration
-        let finalLarge = largeCount
-        let largeSteps = 15
-        for step in 1...largeSteps {
-            try? await Task.sleep(for: .milliseconds(40))
-            await MainActor.run {
-                withAnimation {
-                    largeVideoCount = (finalLarge * step) / largeSteps
-                }
-            }
-        }
-
-        await MainActor.run {
-            withAnimation { scanComplete = true }
-        }
-    }
-}
-
     /// Requests photo library permission then advances to step 5.
     private func requestPermission() {
         Task {
@@ -678,7 +608,7 @@ struct OnboardingView: View {
                 }
                 // Start scan in background — numbers will be ready by the time
                 // user finishes the demo and reaches the Scan screen
-                startScan()
+                viewModel.startOnboardingScan()
             }
         }
     }
@@ -711,5 +641,5 @@ struct ScanningDotsView: View {
 }
 
 #Preview {
-    OnboardingView(onComplete: {})
+    OnboardingView(viewModel: PhotoStackViewModel(), onComplete: {})
 }

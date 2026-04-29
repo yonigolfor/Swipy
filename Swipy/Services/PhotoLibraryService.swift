@@ -11,6 +11,7 @@ import UIKit
 /// שירות לגישה ל-Photo Library
 class PhotoLibraryService: ObservableObject {
     static let shared = PhotoLibraryService()
+    static let largeVideoThresholdBytes: Int64 = 50_000_000
 
     @Published var authorizationStatus: PHAuthorizationStatus = .notDetermined
 
@@ -105,7 +106,7 @@ class PhotoLibraryService: ObservableObject {
             case .largeVideos:
                 // fileSize requires PHAssetResource — create item only to read it.
                 let item = PhotoItem(asset: asset)
-                if item.isVideo && item.fileSize > 50_000_000 {
+                if item.isVideo && item.fileSize > PhotoLibraryService.largeVideoThresholdBytes {
                     collected.append(item)
                 }
 
@@ -258,7 +259,7 @@ class PhotoLibraryService: ObservableObject {
             guard !processedIDs.contains(asset.localIdentifier) else { return }
             let size = PHAssetResource.assetResources(for: asset)
                 .first.flatMap { $0.value(forKey: "fileSize") as? Int64 } ?? 0
-            if size > 50_000_000 { count += 1 }
+            if size > PhotoLibraryService.largeVideoThresholdBytes { count += 1 }
             if count >= cap { stop.pointee = true }
         }
         return count

@@ -22,6 +22,12 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// True while the expensive Phase 2 large video scan is running.
     @Published var isCountingLargeVideos = false
 
+    // MARK: - Onboarding Scan State
+    @Published var onboardingPhotoCount = 0
+    @Published var onboardingVideoCount = 0
+    @Published var onboardingLargeVideoCount = 0
+    @Published var onboardingScanComplete = false
+
     /// In-memory cache for the expensive large video count.
     /// Persisted to Documents/largeVideoCount.json between app launches.
     private var cachedLargeVideoCount: Int? = nil
@@ -198,6 +204,75 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                     self.categoryCounts[.largeVideos] = accurateLargeVideoCount
                     self.isCountingLargeVideos = false
                 }
+            }
+        }
+    }
+
+    // MARK: - Onboarding Scan
+
+    func startOnboardingScan() {
+        onboardingPhotoCount = 0
+        onboardingVideoCount = 0
+        onboardingLargeVideoCount = 0
+        onboardingScanComplete = false
+
+        Task.detached(priority: .utility) {
+            let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+            guard status == .authorized || status == .limited else {
+                try? await Task.sleep(for: .seconds(1.5))
+                await MainActor.run { withAnimation { self.onboardingScanComplete = true } }
+                return
+            }
+
+            let allPhotos = PHAsset.fetchAssets(with: .image, options: PHFetchOptions())
+            let allVideos = PHAsset.fetchAssets(with: .video, options: PHFetchOptions())
+
+            let pCount = allPhotos.count
+            let vCount = allVideos.count
+
+            let steps = 25
+            for step in 1...steps {
+                try? await Task.sleep(for: .milliseconds(60))
+                await MainActor.run {
+                    withAnimation {
+                        self.onboardingPhotoCount = (pCount * step) / steps
+                        self.onboardingVideoCount = (vCount * step) / steps
+                    }
+                }
+            }
+
+            // Phase 1 — instant estimate: NSPredicate on Photos DB, completes in <100ms.
+            // Videos > 10s are very likely to exceed 50 MB at typical iPhone quality.
+            // Stops the spinner immediately so the user sees a number right away.
+            let quickOptions = PHFetchOptions()
+            quickOptions.predicate = NSPredicate(
+                format: "mediaType == %d AND duration > 10",
+                PHAssetMediaType.video.rawValue
+            )
+            let quickEstimate = PHAsset.fetchAssets(with: quickOptions).count
+            await MainActor.run { withAnimation { self.onboardingLargeVideoCount = quickEstimate } }
+
+            // Phase 2 — accurate fileSize scan: concurrent, duration >= 3 s to skip tiny clips.
+            // PHFetchResult is documented thread-safe; each iteration writes to a distinct index.
+            let candidateOptions = PHFetchOptions()
+            candidateOptions.predicate = NSPredicate(
+                format: "mediaType == %d AND duration >= 3",
+                PHAssetMediaType.video.rawValue
+            )
+            let candidates = PHAsset.fetchAssets(with: candidateOptions)
+            let n = candidates.count
+
+            var hits = [UInt8](repeating: 0, count: max(1, n))
+            DispatchQueue.concurrentPerform(iterations: n) { i in
+                let size = PHAssetResource.assetResources(for: candidates.object(at: i))
+                    .first.flatMap { $0.value(forKey: "fileSize") as? Int64 } ?? 0
+                if size > PhotoLibraryService.largeVideoThresholdBytes { hits[i] = 1 }
+            }
+            let finalLarge = hits.reduce(0) { $0 + Int($1) }
+
+            await MainActor.run {
+                withAnimation(.spring(response: 0.6)) { self.onboardingLargeVideoCount = finalLarge }
+                withAnimation { self.onboardingScanComplete = true }
             }
         }
     }

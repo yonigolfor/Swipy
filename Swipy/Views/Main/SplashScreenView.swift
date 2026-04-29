@@ -18,7 +18,7 @@ struct SplashScreenView: View {
             if hasCompletedOnboarding {
                 ContentView(stackViewModel: stackViewModel)
             } else {
-                OnboardingView {
+                OnboardingView(viewModel: stackViewModel) {
                     hasCompletedOnboarding = true
                 }
             }

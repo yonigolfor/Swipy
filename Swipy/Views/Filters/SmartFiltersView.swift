@@ -10,8 +10,10 @@ import SwiftUI
 struct SmartFiltersView: View {
     @EnvironmentObject var stackViewModel: PhotoStackViewModel
     @Binding var selectedTab: Int
+    #if DEBUG
+    @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = true
+    #endif
 
-    
     var body: some View {
         NavigationView {
             List {
@@ -29,6 +31,19 @@ struct SmartFiltersView: View {
             }
             .navigationTitle(String(localized: "filters.title"))
             .navigationBarTitleDisplayMode(.large)
+            #if DEBUG
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        hasCompletedOnboarding = false
+                    } label: {
+                        Image(systemName: "arrow.counterclockwise")
+                            .foregroundColor(.orange)
+                    }
+                }
+            }
+            .onShake { hasCompletedOnboarding = false }
+            #endif
             .task {
                 // .task is lifecycle-aware: it cancels automatically if the
                 // user leaves the screen before counting finishes.
