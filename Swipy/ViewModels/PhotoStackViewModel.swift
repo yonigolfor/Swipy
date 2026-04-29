@@ -230,15 +230,10 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             let pCount = allPhotos.count
             let vCount = allVideos.count
 
-            let steps = 25
-            for step in 1...steps {
-                try? await Task.sleep(for: .milliseconds(60))
-                await MainActor.run {
-                    withAnimation {
-                        self.onboardingPhotoCount = (pCount * step) / steps
-                        self.onboardingVideoCount = (vCount * step) / steps
-                    }
-                }
+            // Set counts immediately — animation is triggered by the Scan screen on appear.
+            await MainActor.run {
+                self.onboardingPhotoCount = pCount
+                self.onboardingVideoCount = vCount
             }
 
             // Phase 1 — instant estimate: NSPredicate on Photos DB, completes in <100ms.

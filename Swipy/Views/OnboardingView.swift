@@ -22,6 +22,12 @@ struct OnboardingView: View {
 
     @State private var currentStep = 0
 
+    // Animated display values for the scan screen — driven by .onAppear / .onChange
+    // so the count-up animation plays exactly when the user arrives at that step.
+    @State private var displayedPhotoCount = 0
+    @State private var displayedVideoCount = 0
+    @State private var displayedLargeCount = 0
+
     // Step 3 demo swipe state
     @State private var demoOffset: CGSize = .zero
     @State private var demoRotation: Double = 0
@@ -196,21 +202,21 @@ struct OnboardingView: View {
                     scanRow(
                         icon: "photo.fill",
                         label: String(localized: "onboarding.scan.photos"),
-                        value: viewModel.onboardingPhotoCount,
+                        value: displayedPhotoCount,
                         isScanning: viewModel.onboardingPhotoCount == 0 && !viewModel.onboardingScanComplete,
                         color: .blue
                     )
                     scanRow(
                         icon: "video.fill",
                         label: String(localized: "onboarding.scan.videos"),
-                        value: viewModel.onboardingVideoCount,
+                        value: displayedVideoCount,
                         isScanning: viewModel.onboardingVideoCount == 0 && !viewModel.onboardingScanComplete,
                         color: .purple
                     )
                     scanRow(
                         icon: "film.fill",
                         label: String(localized: "onboarding.scan.large_videos"),
-                        value: viewModel.onboardingLargeVideoCount,
+                        value: displayedLargeCount,
                         isScanning: viewModel.onboardingLargeVideoCount == 0 && !viewModel.onboardingScanComplete,
                         color: .orange
                     )
@@ -285,6 +291,24 @@ struct OnboardingView: View {
             }
             .padding(.horizontal, 32)
             .padding(.bottom, 48)
+        }
+        .onAppear {
+            // Scan may have finished during SwipeDemo — animate immediately on arrival.
+            let p = viewModel.onboardingPhotoCount
+            let v = viewModel.onboardingVideoCount
+            if p > 0 { animateScanCounts(photo: p, video: v) }
+            if viewModel.onboardingLargeVideoCount > 0 {
+                withAnimation(.spring(response: 0.6)) { displayedLargeCount = viewModel.onboardingLargeVideoCount }
+            }
+        }
+        // Scan finishes after arriving — animate when values land.
+        .onChange(of: viewModel.onboardingPhotoCount) { _, new in
+            if new > 0 && displayedPhotoCount == 0 {
+                animateScanCounts(photo: new, video: viewModel.onboardingVideoCount)
+            }
+        }
+        .onChange(of: viewModel.onboardingLargeVideoCount) { _, new in
+            if new > 0 { withAnimation(.spring(response: 0.6)) { displayedLargeCount = new } }
         }
     }
 
@@ -594,6 +618,20 @@ struct OnboardingView: View {
             Text(text)
                 .font(.subheadline)
                 .foregroundColor(.white.opacity(0.8))
+        }
+    }
+
+    /// Animates photo and video counters from 0 to their target values.
+    private func animateScanCounts(photo: Int, video: Int) {
+        let steps = 20
+        Task {
+            for step in 1...steps {
+                try? await Task.sleep(for: .milliseconds(55))
+                withAnimation {
+                    displayedPhotoCount = (photo * step) / steps
+                    displayedVideoCount = (video * step) / steps
+                }
+            }
         }
     }
 

@@ -182,10 +182,13 @@ class PhotoLibraryService: ObservableObject {
             return max(0, result.count - processedIDs.count)
 
         case .largeVideos:
-            // Fast approximation: return total video count.
-            // Phase 2 will update this with the accurate filtered count.
+            // Duration-based estimate: videos > 10 s are very likely to exceed 50 MB.
+            // Much closer to the real count than returning all videos.
             let options = PHFetchOptions()
-            options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.video.rawValue)
+            options.predicate = NSPredicate(
+                format: "mediaType == %d AND duration > 10",
+                PHAssetMediaType.video.rawValue
+            )
             let result = PHAsset.fetchAssets(with: options)
             return max(0, result.count - processedIDs.count)
 
@@ -247,15 +250,18 @@ class PhotoLibraryService: ObservableObject {
         return count
     }
 
-    /// Counts large videos (> 50 MB) by fetching only video assets.
-    /// Avoids calling PHAssetResource on every photo in the library.
+    /// Counts large videos (> 50 MB). Duration pre-filter skips short clips;
+    /// cap stops enumeration once 100 are found (matches the "99+" UI ceiling).
     private func countLargeVideos(excluding processedIDs: Set<String>) -> Int {
         let options = PHFetchOptions()
-        options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.video.rawValue)
-        let videoResult = PHAsset.fetchAssets(with: options)
+        options.predicate = NSPredicate(
+            format: "mediaType == %d AND duration >= 3",
+            PHAssetMediaType.video.rawValue
+        )
+        let candidates = PHAsset.fetchAssets(with: options)
         let cap = 100
         var count = 0
-        videoResult.enumerateObjects { asset, _, stop in
+        candidates.enumerateObjects { asset, _, stop in
             guard !processedIDs.contains(asset.localIdentifier) else { return }
             let size = PHAssetResource.assetResources(for: asset)
                 .first.flatMap { $0.value(forKey: "fileSize") as? Int64 } ?? 0
