@@ -70,7 +70,11 @@ struct SwipeStackView: View {
                                 Array(viewModel.photoStack.prefix(cardStackSize).enumerated()),
                                 id: \.element.id
                             ) { index, item in
-                                PhotoCardView(item: item, isTopCard: index == 0)
+                                PhotoCardView(
+                                    item: item,
+                                    isTopCard: index == 0,
+                                    cachedImage: viewModel.imageCache.object(forKey: item.id as NSString)
+                                )
                                     .frame(
                                         width: geometry.size.width - 40,
                                         height: geometry.size.height - 40

@@ -33,6 +33,25 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             .appendingPathComponent("largeVideoCount.json")
     }
 
+    // MARK: - Image Cache
+
+    /// App-level UIImage cache — allows PhotoCardView to receive images synchronously
+    /// at init time, preventing any ProgressView flash on cards we've already seen.
+    /// NSCache evicts automatically under memory pressure.
+    let imageCache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 6          // top-5 stack + 1 undo slot
+        cache.totalCostLimit = 6 * 1024 * 1024  // ~6 MB ceiling
+        return cache
+    }()
+
+    /// The target pixel size used when pre-loading images into the cache.
+    /// Matches the approximate card size on screen — avoids decoding full-res assets.
+    static let cacheTargetSize = CGSize(
+        width: UIScreen.main.bounds.width - 40,
+        height: UIScreen.main.bounds.height * 0.65
+    )
+
     // MARK: - Private State
 
     /// IDs of every asset the user has already acted on (keep / delete / star).
@@ -42,6 +61,9 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// undoes an action via restoreFromBin.
     private(set) var processedAssetIDs: Set<String> = []
     private var lastAction: (item: PhotoItem, action: SwipeAction)?
+    /// Holds the cached image of the last swiped item so undo (shake) can
+    /// restore it to the top card without a reload flash.
+    private var lastSwipedImage: UIImage?
 
     // MARK: - Pagination State
 
@@ -384,6 +406,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// Swipe Right — Keep
     func keepPhoto() {
         guard let topCard = photoStack.first else { return }
+        lastSwipedImage = imageCache.object(forKey: topCard.id as NSString)
         processedAssetIDs.insert(topCard.id)
         persistence.saveKeptID(topCard.id)
         self.lastAction = (topCard, .keep)
@@ -396,6 +419,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// Swipe Left — Delete (moves to Review Bin)
     func deletePhoto() {
         guard let topCard = photoStack.first else { return }
+        lastSwipedImage = imageCache.object(forKey: topCard.id as NSString)
         processedAssetIDs.insert(topCard.id)
         self.lastAction = (topCard, .delete)
         photoStack.removeFirst()
@@ -410,6 +434,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// Swipe Up — Star Keeper
     func starPhoto() {
         guard var topCard = photoStack.first else { return }
+        lastSwipedImage = imageCache.object(forKey: topCard.id as NSString)
         processedAssetIDs.insert(topCard.id)
         self.lastAction = (topCard, .starKeeper)
         photoStack.removeFirst()
@@ -430,6 +455,15 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         guard let last = lastAction else { return }
         lastAction = nil
         let item = last.item
+
+        // Restore the cached image so the undo card appears instantly.
+        if let img = lastSwipedImage {
+            imageCache.setObject(img, forKey: item.id as NSString,
+                                 cost: Int(PhotoStackViewModel.cacheTargetSize.width *
+                                           PhotoStackViewModel.cacheTargetSize.height * 4))
+            activeCacheIDs.insert(item.id)
+            lastSwipedImage = nil
+        }
 
         processedAssetIDs.remove(item.id)
         persistence.removeKeptID(item.id)
@@ -618,13 +652,43 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     private func precacheNextImages() {
         let nextItems = Array(photoStack.prefix(5))
         guard !nextItems.isEmpty else { return }
-        photoService.startCaching(
-            for: nextItems,
-            targetSize: CGSize(width: 400, height: 600)
-        )
+        let targetSize = PhotoStackViewModel.cacheTargetSize
+        photoService.startCaching(for: nextItems, targetSize: targetSize)
+
         // Warm up the video player pool with the next upcoming video assets.
-        // VideoPlayerPool filters to videos only, so passing all items is safe.
         let nextAssets = nextItems.map { $0.asset }
         Task { await VideoPlayerPool.shared.warmUp(for: nextAssets) }
+
+        // Proactively pull the top-3 images into the app-level NSCache so
+        // PhotoCardView can receive them synchronously at init (zero flash).
+        let imageItems = nextItems.prefix(3).filter { !$0.isVideo }
+        for item in imageItems {
+            let key = item.id as NSString
+            guard imageCache.object(forKey: key) == nil else { continue }
+            PhotoLibraryService.shared.loadImage(for: item.asset, targetSize: targetSize) { [weak self] img in
+                guard let self, let img else { return }
+                self.imageCache.setObject(img, forKey: key, cost: Int(targetSize.width * targetSize.height * 4))
+            }
+        }
+
+        // Evict stale cache entries — keep only the top-5 upcoming IDs + the
+        // last swiped item (needed for shake-to-undo).
+        evictStaleCacheEntries(keeping: nextItems)
     }
+
+    private func evictStaleCacheEntries(keeping items: [PhotoItem]) {
+        // NSCache manages its own memory, but we explicitly remove keys that
+        // are no longer relevant to keep the countLimit working as intended.
+        // We can only evict keys we know about — track active cache keys.
+        let keepIDs = Set(items.map { $0.id })
+        for id in activeCacheIDs where !keepIDs.contains(id) && id != lastAction?.item.id {
+            imageCache.removeObject(forKey: id as NSString)
+        }
+        activeCacheIDs = keepIDs
+        if let lastID = lastAction?.item.id { activeCacheIDs.insert(lastID) }
+    }
+
+    /// Tracks which asset IDs currently have entries in `imageCache` so we can
+    /// perform targeted eviction without enumerating the NSCache.
+    private var activeCacheIDs: Set<String> = []
 }

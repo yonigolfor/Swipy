@@ -20,9 +20,20 @@ struct PhotoCardView: View {
     static var globalMute = false
 
     @State private var image: UIImage?
-    @State private var isLoading = true
+    @State private var isLoading: Bool
     @State private var player: AVPlayer?
     @State private var isMuted = false
+
+    /// Pass a pre-loaded image from the ViewModel cache to display it instantly,
+    /// skipping the async load path entirely and preventing any ProgressView flash.
+    init(item: PhotoItem, isTopCard: Bool, cachedImage: UIImage? = nil) {
+        self.item = item
+        self.isTopCard = isTopCard
+        _image = State(initialValue: cachedImage)
+        // For images: skip loading if we already have the pixels.
+        // For videos: pool check happens in loadVideoPlayer(), keep loading=true.
+        _isLoading = State(initialValue: item.isVideo ? true : cachedImage == nil)
+    }
 
     var body: some View {
         ZStack {
@@ -195,13 +206,14 @@ VStack {
         .clipShape(RoundedRectangle(cornerRadius: 20))
         .cardShadow()
         .onAppear {
-    if item.isVideo {
-        isMuted = PhotoCardView.globalMute
-        loadVideoPlayer()
-    } else {
-        loadImage()
-    }
-}
+            if item.isVideo {
+                isMuted = PhotoCardView.globalMute
+                loadVideoPlayer()
+            } else if image == nil {
+                // Cache hit at init already set image — skip the async round-trip.
+                loadImage()
+            }
+        }
         .onDisappear {
             stopPlayer()
             // Release the pooled player for this asset so the pool
