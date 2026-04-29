@@ -9,7 +9,7 @@ import SwiftUI
 import Photos
 
 struct ContentView: View {
-    @StateObject private var stackViewModel = PhotoStackViewModel()
+    @ObservedObject var stackViewModel: PhotoStackViewModel
     @StateObject private var photoService = PhotoLibraryService.shared
     
     @State private var selectedTab = 1
@@ -72,5 +72,5 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView()
+    ContentView(stackViewModel: PhotoStackViewModel())
 }

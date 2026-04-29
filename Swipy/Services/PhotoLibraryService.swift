@@ -172,18 +172,13 @@ class PhotoLibraryService: ObservableObject {
             return max(0, result.count - processedIDs.count)
 
         case .screenRecordings:
-                // PHAsset.isScreenRecording checks mediaSubtype internally.
-                // We enumerate only videos to keep it fast.
-                let options = PHFetchOptions()
-                options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.video.rawValue)
-                let result = PHAsset.fetchAssets(with: options)
-                var count = 0
-                result.enumerateObjects { asset, _, _ in
-                    if asset.isScreenRecording && !processedIDs.contains(asset.localIdentifier) {
-                        count += 1
-                    }
-                }
-                return count
+            let options = PHFetchOptions()
+            options.predicate = NSPredicate(
+                format: "mediaType == %d AND (pixelWidth == 1170 OR pixelWidth == 1284 OR pixelWidth == 2532)",
+                PHAssetMediaType.video.rawValue
+            )
+            let result = PHAsset.fetchAssets(with: options)
+            return max(0, result.count - processedIDs.count)
 
         case .largeVideos:
             // Fast approximation: return total video count.
@@ -221,33 +216,49 @@ class PhotoLibraryService: ObservableObject {
     func count(for category: FilterCategory, excluding processedIDs: Set<String> = []) -> Int {
         guard let fetchResult = fetchResult else { return 0 }
 
-        // Fast path: total minus already-processed.
         if category == .all {
             return max(0, fetchResult.count - processedIDs.count)
         }
 
-        // Stop counting at 100 — UI displays 99+ for anything above 99.
+        // largeVideos needs PHAssetResource (I/O per asset) — scope the fetch
+        // to videos only so we never call assetResources on photos.
+        if category == .largeVideos {
+            return countLargeVideos(excluding: processedIDs)
+        }
+
         let cap = 100
         var count = 0
         fetchResult.enumerateObjects { asset, _, stop in
             guard !processedIDs.contains(asset.localIdentifier) else { return }
             switch category {
-            case .all: count += 1
+            case .all, .largeVideos: break
             case .screenshots:
                 if asset.isScreenshot { count += 1 }
             case .screenRecordings:
                 if asset.isScreenRecording { count += 1 }
-            case .largeVideos:
-                let resources = PHAssetResource.assetResources(for: asset)
-                let size = resources.first.flatMap {
-                    $0.value(forKey: "fileSize") as? Int64
-                } ?? 0
-                if asset.mediaType == .video && size > 50_000_000 { count += 1 }
             case .burstPhotos:
                 count += 1
             case .blurryPhotos:
                 if asset.mediaType == .image && !asset.isScreenshot { count += 1 }
             }
+            if count >= cap { stop.pointee = true }
+        }
+        return count
+    }
+
+    /// Counts large videos (> 50 MB) by fetching only video assets.
+    /// Avoids calling PHAssetResource on every photo in the library.
+    private func countLargeVideos(excluding processedIDs: Set<String>) -> Int {
+        let options = PHFetchOptions()
+        options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.video.rawValue)
+        let videoResult = PHAsset.fetchAssets(with: options)
+        let cap = 100
+        var count = 0
+        videoResult.enumerateObjects { asset, _, stop in
+            guard !processedIDs.contains(asset.localIdentifier) else { return }
+            let size = PHAssetResource.assetResources(for: asset)
+                .first.flatMap { $0.value(forKey: "fileSize") as? Int64 } ?? 0
+            if size > 50_000_000 { count += 1 }
             if count >= cap { stop.pointee = true }
         }
         return count

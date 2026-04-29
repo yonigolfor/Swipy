@@ -80,28 +80,36 @@ struct SmartFiltersView: View {
                 Spacer()
                 
                 // Count badge
-                // For largeVideos: show shimmer during Phase 2 scan,
-                // then animate to the accurate count when ready.
-                let isLoadingCount = stackViewModel.categoryCounts[category] == nil ||
-                    (category == .largeVideos && stackViewModel.isCountingLargeVideos)
+                let cachedCount = stackViewModel.categoryCounts[category]
+                let isRecalculating = category == .largeVideos && stackViewModel.isCountingLargeVideos
 
-                if isLoadingCount {
+                if cachedCount == nil {
+                    // No data at all yet — show full shimmer placeholder.
                     ShimmerView()
-                } else if let count = stackViewModel.categoryCounts[category] {
-                    if count > 0 {
-                        // All Photos shows exact count. Other categories cap at 99+.
-                        Text(count >= 100 && category != .all ? "99+" : "\(count)")
-                            .font(.subheadline)
-                            .fontWeight(.semibold)
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 5)
-                            .background(Capsule().fill(category.color))
-                            .contentTransition(.numericText())
-                    } else {
-                        Text(String(localized: "filters.empty"))
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                } else if let count = cachedCount {
+                    HStack(spacing: 6) {
+                        if count > 0 {
+                            Text(count >= 100 && category != .all ? "99+" : "\(count)")
+                                .font(.subheadline)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 5)
+                                .background(Capsule().fill(category.color))
+                                .contentTransition(.numericText())
+                                // Dim while Phase 2 is verifying — shows stale value
+                                // is present but being refreshed.
+                                .opacity(isRecalculating ? 0.5 : 1.0)
+                        } else {
+                            Text(String(localized: "filters.empty"))
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        // Subtle spinner while Phase 2 runs in background.
+                        if isRecalculating {
+                            ProgressView()
+                                .scaleEffect(0.65)
+                        }
                     }
                 }
 

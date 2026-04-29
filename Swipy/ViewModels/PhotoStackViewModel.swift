@@ -126,24 +126,31 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         Task.detached(priority: .userInitiated) {
             let service = PhotoLibraryService.shared
 
-            // Ensure fetchResult is populated
             if service.fetchResult == nil {
                 service.fetchAllPhotos()
             }
 
             let processed = await self.processedAssetIDs
 
-            // ── Phase 1: Instant estimates (milliseconds) ─────────────────
-            // Builds fast counts for all categories except largeVideos.
-            // largeVideos uses cached value from previous run if available.
-            var fastCounts: [FilterCategory: Int] = Dictionary(
-                uniqueKeysWithValues: FilterCategory.allCases.map {
-                    ($0, service.countFast(for: $0, excluding: processed))
+            // ── Phase 1: All categories in parallel (milliseconds) ────────
+            // withTaskGroup runs each countFast() on a separate thread,
+            // so total time = slowest single call instead of their sum.
+            var fastCounts: [FilterCategory: Int] = await withTaskGroup(
+                of: (FilterCategory, Int).self
+            ) { group in
+                for category in FilterCategory.allCases {
+                    group.addTask {
+                        (category, service.countFast(for: category, excluding: processed))
+                    }
                 }
-            )
+                var results: [FilterCategory: Int] = [:]
+                for await (category, count) in group {
+                    results[category] = count
+                }
+                return results
+            }
 
-            // If we have a cached large video count, use it immediately.
-            // This means the user NEVER sees shimmer on repeat launches.
+            // Overlay cached large-video count so the user never waits for Phase 2.
             let cached = await self.cachedLargeVideoCount
             if let cached {
                 fastCounts[.largeVideos] = cached
@@ -151,18 +158,17 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
             await MainActor.run {
                 withAnimation { self.categoryCounts = fastCounts }
-                // Only show shimmer if we have NO cached value yet
-                self.isCountingLargeVideos = cached == nil
+                // Show smart-shimmer indicator while Phase 2 verifies the count.
+                // If there is no cached value (first launch) the badge itself is nil
+                // → the view falls back to the full shimmer placeholder.
+                self.isCountingLargeVideos = true
             }
 
-            // ── Phase 2: Accurate large video count in background ─────────
-            // Always runs to verify/update the cache, but only shows
-            // shimmer when there is no cached value (first ever launch).
+            // ── Phase 2: Accurate large-video count in background ─────────
             let accurateLargeVideoCount = await Task.detached(priority: .background) {
                 service.count(for: .largeVideos, excluding: processed)
             }.value
 
-            // Save to cache so next launch is instant
             await self.saveLargeVideoCountToCache(accurateLargeVideoCount)
 
             await MainActor.run {

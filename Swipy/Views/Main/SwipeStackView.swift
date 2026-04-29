@@ -137,7 +137,9 @@ struct SwipeStackView: View {
         }
         .toolbarBackground(.visible, for: .tabBar)
         .onAppear {
-            viewModel.refreshPhotos()
+            if viewModel.photoStack.isEmpty && !viewModel.isLoading {
+                viewModel.refreshPhotos()
+            }
         }
         .onDisappear {
             NotificationCenter.default.post(name: .stopCurrentVideo, object: nil)
