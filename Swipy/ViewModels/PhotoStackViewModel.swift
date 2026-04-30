@@ -22,6 +22,15 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// True while the expensive Phase 2 large video scan is running.
     @Published var isCountingLargeVideos = false
 
+    // MARK: - Shuffle Mode State
+
+    /// True when the user has jumped to a random point in the timeline.
+    @Published var isShuffleModeActive = false
+
+    /// Bumped each time a new shuffle (or linear-return) batch lands —
+    /// the view observes this to trigger the landing animation.
+    @Published var shuffleBatchID = UUID()
+
     // MARK: - Onboarding Scan State
     @Published var onboardingPhotoCount = 0
     @Published var onboardingVideoCount = 0
@@ -79,6 +88,10 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     /// True while a background page-fetch is in flight — prevents concurrent fetches.
     private var isFetchingNextPage = false
+
+    /// Saved linear cursor position before a shuffle jump.
+    /// Restored when the user exits shuffle mode.
+    private var savedLinearCursor: Int = 0
 
     /// Number of PhotoItems to materialize in the initial load.
     private let initialPageSize = 50
@@ -349,6 +362,10 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         currentFilter = filter
         fetchCursor = 0
         isFetchingNextPage = false
+        // Reset shuffle so stale savedLinearCursor/isShuffleModeActive
+        // don't leak across filter changes or tab refreshes.
+        isShuffleModeActive = false
+        savedLinearCursor = 0
 
         Task {
             // Ensure we have an up-to-date fetch result (no-op if already fresh).
@@ -412,13 +429,103 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         }
     }
 
+    // MARK: - Shuffle Mode
+
+    /// User-triggered: jump to a random point in the timeline.
+    /// Saves the current linear cursor so the user can return later.
+    func activateShuffle() {
+        guard photoService.totalAssetCount > 0 else { return }
+        savedLinearCursor = fetchCursor
+        isShuffleModeActive = true
+        isLoading = true
+        isFetchingNextPage = false
+
+        let total = photoService.totalAssetCount
+        let randomStart = Int.random(in: 0..<total)
+
+        Task {
+            let (items, nextIdx) = photoService.fetchPageOfAssets(
+                for: currentFilter,
+                startIndex: randomStart,
+                pageSize: initialPageSize,
+                excluding: processedAssetIDs
+            )
+            await MainActor.run {
+                self.fetchCursor = nextIdx ?? self.photoService.totalAssetCount
+                self.photoStack = items
+                self.isLoading = false
+                self.shuffleBatchID = UUID()
+                if !items.isEmpty { self.precacheNextImages() }
+            }
+        }
+    }
+
+    /// User-triggered: exit shuffle mode and return to where the user left off.
+    func deactivateShuffle() {
+        isShuffleModeActive = false
+        isLoading = true
+        isFetchingNextPage = false
+
+        let cursor = savedLinearCursor
+        Task {
+            let (items, nextIdx) = photoService.fetchPageOfAssets(
+                for: currentFilter,
+                startIndex: cursor,
+                pageSize: initialPageSize,
+                excluding: processedAssetIDs
+            )
+            await MainActor.run {
+                self.fetchCursor = nextIdx ?? self.photoService.totalAssetCount
+                self.photoStack = items
+                self.isLoading = false
+                self.shuffleBatchID = UUID()
+                if !items.isEmpty { self.precacheNextImages() }
+            }
+        }
+    }
+
+    /// Auto-triggered: the shuffle segment reached the end of the library.
+    /// Silently resumes the linear stream without replacing the whole stack.
+    private func shuffleExhausted() {
+        isShuffleModeActive = false
+        fetchCursor = savedLinearCursor
+        guard !isFetchingNextPage else { return }
+        isFetchingNextPage = true
+
+        let cursor = savedLinearCursor
+        Task {
+            let (rawItems, nextIdx) = photoService.fetchPageOfAssets(
+                for: currentFilter,
+                startIndex: cursor,
+                pageSize: nextPageSize,
+                excluding: processedAssetIDs
+            )
+            let newCursor = nextIdx ?? photoService.totalAssetCount
+            await MainActor.run {
+                if !rawItems.isEmpty {
+                    self.photoStack.append(contentsOf: rawItems)
+                    self.photoService.startCaching(for: rawItems, targetSize: CGSize(width: 400, height: 600))
+                }
+                self.fetchCursor = newCursor
+                self.isFetchingNextPage = false
+            }
+        }
+    }
+
     /// Appends the next page of assets to `photoStack` when the stack is running low.
     /// No-op for filters that need up-front analysis (burst / blurry) since their
     /// pool is already bounded by the initial large page.
     private func loadNextPageIfNeeded() {
         guard !isFetchingNextPage,
-              photoStack.count <= lowWatermark,
-              fetchCursor < photoService.totalAssetCount else { return }
+              photoStack.count <= lowWatermark else { return }
+
+        // Shuffle segment exhausted — silently return to the linear stream.
+        if isShuffleModeActive && fetchCursor >= photoService.totalAssetCount {
+            shuffleExhausted()
+            return
+        }
+
+        guard fetchCursor < photoService.totalAssetCount else { return }
 
         // For analysis-heavy filters, use the refill mechanism
         // which scans continuously until the buffer is full.

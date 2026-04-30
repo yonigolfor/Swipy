@@ -23,6 +23,40 @@
         }
       }
     },
+    "shuffle.mode_badge" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shuffle Mode"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "מצב שאפל"
+          }
+        }
+      }
+    },
+    "shuffle.time_traveled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Time traveled to"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "קפצת ל"
+          }
+        }
+      }
+    },
     "badge.recording" : {
       "extractionState" : "manual",
       "localizations" : {

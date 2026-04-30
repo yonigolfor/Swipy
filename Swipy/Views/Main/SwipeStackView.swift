@@ -18,12 +18,24 @@ struct SwipeStackView: View {
     // Particle explosion state
     @State private var showParticles = false
     @State private var particleOrigin: CGPoint = .zero
-// Top-right destination — DopamineMeter is centered but particles fly to top-right
+    // Top-right destination — DopamineMeter is centered but particles fly to top-right
     private let meterDestination = CGPoint(x: UIScreen.main.bounds.width - 40, y: 55)
     private let largeFileSizeThreshold: Int64 = 2_000_000 // 2 MB for dev
-    
+
+    // Shuffle animation state
+    @State private var cardStackOffset: CGFloat = 0
+    @State private var cardStackOpacity: Double = 1
+    @State private var cardStackScale: CGFloat = 1
+    /// True between fly-out completion and the new batch landing —
+    /// prevents double-triggering the landing animation.
+    @State private var awaitingShuffleLanding = false
+
+    // Time indicator
+    @State private var showTimeIndicator = false
+    @State private var timeIndicatorText = ""
+
     private let cardStackSize = 3 // כמה קלפים מציגים מאחור
-    
+
     var body: some View {
         // Outer ZStack: background | card column | DopamineMeter floating on top.
         // DopamineMeter MUST be a direct child of this ZStack (not buried inside
@@ -98,15 +110,13 @@ struct SwipeStackView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // Shuffle transition modifiers — applied to the whole card area
+                    .offset(y: cardStackOffset)
+                    .scaleEffect(cardStackScale)
+                    .opacity(cardStackOpacity)
                 }
                 .padding(.vertical, 10)
                 .environment(\.layoutDirection, .leftToRight)
-
-                // Instructions bar
-//                if !viewModel.photoStack.isEmpty {
-//                    instructionsView
-//                        .padding(.bottom, 20)
-//                }
             }
 
             // 3. DopamineMeter — floats above everything in this ZStack.
@@ -119,28 +129,67 @@ struct SwipeStackView: View {
             .padding(.top, 10)
             .zIndex(100)
 
-            // Particle explosion overlay — rendered above everything including DopamineMeter
-                        if showParticles {
-                            ParticleExplosionView(
-                                origin: particleOrigin,
-                                destination: meterDestination,
-                                color: .systemRed
-                            )
-                            .ignoresSafeArea()
-                            .allowsHitTesting(false)
-                            .zIndex(200)
-                            .onAppear {
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-                                    showParticles = false
-                                }
-                            }
-                        }
+            // 4. Shuffle Mode Badge — appears below DopamineMeter when shuffle is active
+            Group {
+                if viewModel.isShuffleModeActive {
+                    shuffleBadge
+                        .padding(.top, 100)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+            }
+            .animation(.spring(response: 0.4, dampingFraction: 0.75), value: viewModel.isShuffleModeActive)
+            .zIndex(110)
+
+            // 5. Time Indicator — month/year overlay that appears on shuffle jump
+            if showTimeIndicator {
+                timeIndicatorView
+                    .zIndex(150)
+                    .transition(.opacity)
+            }
+
+            // 6. Shuffle FAB — bottom-trailing floating action button
+            VStack {
+                Spacer()
+                HStack {
+                    Spacer()
+                    shuffleFAB
+                }
+                .padding(.trailing, 24)
+                .padding(.bottom, 110)
+            }
+            .zIndex(50)
+
+            // 7. Particle explosion overlay — rendered above everything including DopamineMeter
+            if showParticles {
+                ParticleExplosionView(
+                    origin: particleOrigin,
+                    destination: meterDestination,
+                    color: .systemRed
+                )
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .zIndex(200)
+                .onAppear {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        showParticles = false
+                    }
+                }
+            }
         }
         .onShake {
             viewModel.undoLastAction()
         }
         .toolbarBackground(.visible, for: .tabBar)
         .onAppear {
+            // Recover from a stuck shuffle transition (e.g. user switched tabs mid-flight).
+            // shuffleBatchID may have already changed while the view was off-screen,
+            // so onChange won't re-fire — reset transforms manually.
+            if awaitingShuffleLanding {
+                awaitingShuffleLanding = false
+                cardStackOffset = 0
+                cardStackOpacity = 1
+                cardStackScale = 1
+            }
             if viewModel.photoStack.isEmpty && !viewModel.isLoading {
                 viewModel.refreshPhotos()
             }
@@ -150,10 +199,184 @@ struct SwipeStackView: View {
             // Pause all pooled players when leaving the Swipe tab.
             viewModel.pauseVideoPool()
         }
+        // Landing trigger: fires when a shuffle (or return-home) batch arrives
+        .onChange(of: viewModel.shuffleBatchID) { _ in
+            guard awaitingShuffleLanding else { return }
+            awaitingShuffleLanding = false
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.72)) {
+                cardStackOffset = 0
+                cardStackOpacity = 1
+                cardStackScale = 1
+            }
+            // Time indicator
+            if let date = viewModel.photoStack.first?.asset.creationDate {
+                triggerTimeIndicator(for: date)
+            }
+            // Delayed haptic so it coincides with cards fully landing
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                HapticService.shared.shuffleLand()
+            }
+        }
     }
-    
+
+    // MARK: - Shuffle FAB
+
+    private var shuffleFAB: some View {
+        Button {
+            performShuffleTransition {
+                if viewModel.isShuffleModeActive {
+                    viewModel.deactivateShuffle()
+                } else {
+                    viewModel.activateShuffle()
+                }
+            }
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        Circle().fill(
+                            viewModel.isShuffleModeActive
+                                ? LinearGradient(
+                                    colors: [Color(red: 0.2, green: 0.5, blue: 1.0),
+                                             Color(red: 0.5, green: 0.2, blue: 0.9)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing)
+                                : LinearGradient(
+                                    colors: [Color.white.opacity(0.2), Color.white.opacity(0.05)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing)
+                        )
+                    )
+                    .frame(width: 56, height: 56)
+                    .shadow(
+                        color: viewModel.isShuffleModeActive ? Color(red: 0.2, green: 0.5, blue: 1.0).opacity(0.5) : .black.opacity(0.18),
+                        radius: 14, y: 5
+                    )
+
+                Image(systemName: "shuffle")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(.white)
+                    .rotationEffect(viewModel.isShuffleModeActive ? .degrees(180) : .zero)
+                    .animation(.spring(response: 0.4, dampingFraction: 0.65), value: viewModel.isShuffleModeActive)
+            }
+        }
+        .buttonStyle(.plain)
+        .scaleEffect(awaitingShuffleLanding ? 0.9 : 1.0)
+        .animation(.spring(response: 0.3), value: awaitingShuffleLanding)
+    }
+
+    // MARK: - Shuffle Mode Badge
+
+    private var shuffleBadge: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "shuffle")
+                .font(.system(size: 11, weight: .bold))
+            Text(String(localized: "shuffle.mode_badge"))
+                .font(.system(size: 12, weight: .semibold))
+            Button {
+                performShuffleTransition { viewModel.deactivateShuffle() }
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.white.opacity(0.7))
+            }
+            .buttonStyle(.plain)
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    Capsule().fill(
+                        LinearGradient(
+                            colors: [Color(red: 0.2, green: 0.5, blue: 1.0).opacity(0.55),
+                                     Color(red: 0.5, green: 0.2, blue: 0.9).opacity(0.45)],
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                    )
+                )
+        )
+        .shadow(color: .black.opacity(0.25), radius: 10, y: 3)
+    }
+
+    // MARK: - Time Indicator
+
+    private var timeIndicatorView: some View {
+        Color.clear
+            .ignoresSafeArea()
+            .allowsHitTesting(false)
+            .overlay(alignment: .center) {
+                VStack(spacing: 4) {
+                    Text(String(localized: "shuffle.time_traveled"))
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.white.opacity(0.7))
+                        .textCase(.uppercase)
+                        .kerning(1.2)
+                    Text(timeIndicatorText)
+                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                        .foregroundColor(.white)
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 14)
+                .background(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                                .fill(Color.black.opacity(0.35))
+                        )
+                )
+                .shadow(color: .black.opacity(0.4), radius: 20, y: 6)
+            }
+    }
+
+    // MARK: - Shuffle Transition
+
+    /// Executes a shuffle action with a fly-out / land-in animation.
+    /// Guards against double-triggering while a transition is already in flight.
+    private func performShuffleTransition(action: @escaping () -> Void) {
+        guard !awaitingShuffleLanding else { return }
+        HapticService.shared.shuffle()
+
+        // Phase 1: fly current cards up and out
+        withAnimation(.easeIn(duration: 0.22)) {
+            cardStackOffset = -UIScreen.main.bounds.height * 0.65
+            cardStackOpacity = 0
+            cardStackScale = 0.82
+        }
+
+        // Phase 2: after fly-out, position below screen then fire the ViewModel action
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.27) {
+            // No animation — instant reposition so new cards arrive from below
+            cardStackOffset = 55
+            cardStackScale = 0.85
+            cardStackOpacity = 0
+            awaitingShuffleLanding = true
+            action()
+        }
+    }
+
+    // MARK: - Time Indicator Helpers
+
+    private func triggerTimeIndicator(for date: Date) {
+        timeIndicatorText = formatShuffleDate(date)
+        withAnimation(.easeIn(duration: 0.2)) { showTimeIndicator = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
+            withAnimation(.easeOut(duration: 0.35)) { showTimeIndicator = false }
+        }
+    }
+
+    private func formatShuffleDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        // Template respects the device locale — shows "October 2022" in English
+        // and "אוקטובר 2022" / "2022年10月" on localized devices.
+        formatter.setLocalizedDateFormatFromTemplate("MMMM yyyy")
+        return formatter.string(from: date)
+    }
+
     // MARK: - Swipe Gesture
-    
+
     // In RTL layout iOS flips the translation.width sign.
     // We normalize it here so swipe-right always means Keep
     // and swipe-left always means Delete regardless of locale.
@@ -182,7 +405,7 @@ struct SwipeStackView: View {
                             break
                         }
                     }
-                    
+
                     // Perform action after exit-animation completes.
                     // Crucially we reset dragOffset WITHOUT animation so the
                     // incoming card never inherits the ±500 offset and slides in.
@@ -213,17 +436,16 @@ struct SwipeStackView: View {
                 }
             }
     }
-    
+
     // MARK: - Swipe Indicator Overlay
-    
+
     private var swipeIndicatorOverlay: some View {
         let direction = SwipeDirection.from(offset: dragOffset)
-        
         return SwipeIndicator(direction: direction, offset: dragOffset)
     }
-    
+
     // MARK: - Instructions View
-    
+
     private var instructionsView: some View {
         HStack(spacing: 30) {
             instructionItem(icon: "arrow.left", text: "Delete", color: .swipeRed)
@@ -239,7 +461,7 @@ struct SwipeStackView: View {
         )
         .padding(.horizontal)
     }
-    
+
     private func instructionItem(icon: String, text: String, color: Color) -> some View {
         VStack(spacing: 4) {
             Image(systemName: icon)
@@ -250,9 +472,9 @@ struct SwipeStackView: View {
                 .foregroundColor(.secondary)
         }
     }
-    
+
     // MARK: - Helper Methods
-    
+
     private func resetCardPosition() {
         withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
             dragOffset = .zero

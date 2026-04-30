@@ -53,10 +53,25 @@ class HapticService {
     }
     
     // MARK: - UI Actions
-    
+
     /// Selection - בחירה בממשק
     func selection() {
         selectionGenerator.selectionChanged()
+    }
+
+    /// Shuffle tap — light tap when the user presses the Shuffle FAB
+    func shuffle() {
+        lightGenerator.impactOccurred(intensity: 0.7)
+        lightGenerator.prepare()
+    }
+
+    /// Shuffle land — soft double-pulse when new shuffled cards land on screen
+    func shuffleLand() {
+        lightGenerator.impactOccurred(intensity: 0.5)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { [weak self] in
+            self?.lightGenerator.impactOccurred(intensity: 0.35)
+            self?.lightGenerator.prepare()
+        }
     }
     
     /// Error - שגיאה
