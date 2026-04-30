@@ -93,6 +93,10 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// Restored when the user exits shuffle mode.
     private var savedLinearCursor: Int = 0
 
+    /// Snapshot of the photoStack taken at the moment the user entered shuffle mode.
+    /// Restored on exit so the user returns to the exact card they left — no fetch needed.
+    private var preShuffleStack: [PhotoItem]? = nil
+
     /// Number of PhotoItems to materialize in the initial load.
     private let initialPageSize = 50
 
@@ -362,10 +366,10 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         currentFilter = filter
         fetchCursor = 0
         isFetchingNextPage = false
-        // Reset shuffle so stale savedLinearCursor/isShuffleModeActive
-        // don't leak across filter changes or tab refreshes.
+        // Reset shuffle so stale state doesn't leak across filter changes or tab refreshes.
         isShuffleModeActive = false
         savedLinearCursor = 0
+        preShuffleStack = nil
 
         Task {
             // Ensure we have an up-to-date fetch result (no-op if already fresh).
@@ -436,6 +440,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     func activateShuffle() {
         guard photoService.totalAssetCount > 0 else { return }
         savedLinearCursor = fetchCursor
+        preShuffleStack = photoStack          // snapshot for instant restoration on exit
         isShuffleModeActive = true
         isLoading = true
         isFetchingNextPage = false
@@ -460,56 +465,40 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         }
     }
 
-    /// User-triggered: exit shuffle mode and return to where the user left off.
+    /// User-triggered: exit shuffle mode and return to the exact stack the user left.
     func deactivateShuffle() {
         isShuffleModeActive = false
-        isLoading = true
         isFetchingNextPage = false
+        fetchCursor = savedLinearCursor
 
-        let cursor = savedLinearCursor
-        Task {
-            let (items, nextIdx) = photoService.fetchPageOfAssets(
-                for: currentFilter,
-                startIndex: cursor,
-                pageSize: initialPageSize,
-                excluding: processedAssetIDs
-            )
-            await MainActor.run {
-                self.fetchCursor = nextIdx ?? self.photoService.totalAssetCount
-                self.photoStack = items
-                self.isLoading = false
-                self.shuffleBatchID = UUID()
-                if !items.isEmpty { self.precacheNextImages() }
-            }
-        }
+        let restored = restoreLinearStack()
+        photoStack = restored
+        preShuffleStack = nil
+        shuffleBatchID = UUID()
+        if !restored.isEmpty { precacheNextImages() }
+    }
+
+    /// Returns the stack to restore after exiting shuffle mode.
+    /// Uses the pre-shuffle snapshot when available, filtered through processedAssetIDs
+    /// to drop any items the user actioned during the shuffle session.
+    /// Falls back to an empty array (loadNextPageIfNeeded will refill from fetchCursor).
+    private func restoreLinearStack() -> [PhotoItem] {
+        guard let snapshot = preShuffleStack else { return [] }
+        return snapshot.filter { !processedAssetIDs.contains($0.id) }
     }
 
     /// Auto-triggered: the shuffle segment reached the end of the library.
-    /// Silently resumes the linear stream without replacing the whole stack.
+    /// Restores the pre-shuffle stack so the user lands back where they left off.
     private func shuffleExhausted() {
         isShuffleModeActive = false
+        isFetchingNextPage = false
         fetchCursor = savedLinearCursor
-        guard !isFetchingNextPage else { return }
-        isFetchingNextPage = true
 
-        let cursor = savedLinearCursor
-        Task {
-            let (rawItems, nextIdx) = photoService.fetchPageOfAssets(
-                for: currentFilter,
-                startIndex: cursor,
-                pageSize: nextPageSize,
-                excluding: processedAssetIDs
-            )
-            let newCursor = nextIdx ?? photoService.totalAssetCount
-            await MainActor.run {
-                if !rawItems.isEmpty {
-                    self.photoStack.append(contentsOf: rawItems)
-                    self.photoService.startCaching(for: rawItems, targetSize: CGSize(width: 400, height: 600))
-                }
-                self.fetchCursor = newCursor
-                self.isFetchingNextPage = false
-            }
-        }
+        let restored = restoreLinearStack()
+        photoStack = restored
+        preShuffleStack = nil
+        if !restored.isEmpty { precacheNextImages() }
+        // loadNextPageIfNeeded will top up the stack from fetchCursor on the next swipe.
     }
 
     /// Appends the next page of assets to `photoStack` when the stack is running low.
