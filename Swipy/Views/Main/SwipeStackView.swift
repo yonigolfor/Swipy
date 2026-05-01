@@ -148,15 +148,19 @@ struct SwipeStackView: View {
             }
 
             // 6. Shuffle FAB — bottom-trailing floating action button
+            // Force LTR so the FAB stays on the right in RTL locales (e.g. Hebrew).
             VStack {
                 Spacer()
                 HStack {
-                    Spacer()
                     shuffleFAB
+                    Spacer()
                 }
-                .padding(.trailing, 24)
-                .padding(.bottom, 110)
+                .padding(.leading, 24)
+                // Extra clearance when the top card is a video so the FAB
+                // doesn't sit on top of the VideoProgressBar.
+                .padding(.bottom, 140)
             }
+            .environment(\.layoutDirection, .leftToRight)
             .zIndex(50)
 
             // 7. Particle explosion overlay — rendered above everything including DopamineMeter
@@ -198,6 +202,9 @@ struct SwipeStackView: View {
             NotificationCenter.default.post(name: .stopCurrentVideo, object: nil)
             // Pause all pooled players when leaving the Swipe tab.
             viewModel.pauseVideoPool()
+        }
+        .fullScreenCover(isPresented: $viewModel.shouldShowPaywall) {
+            PaywallView()
         }
         // Landing trigger: fires when a shuffle (or return-home) batch arrives
         .onChange(of: viewModel.shuffleBatchID) { _ in
@@ -392,6 +399,18 @@ struct SwipeStackView: View {
                 let direction = SwipeDirection.from(offset: value.translation)
 
                 if let action = direction.action {
+                    // Block keep/delete swipes when free daily limit is exhausted
+                    if (action == .keep || action == .delete), !viewModel.canSwipe {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.52)) {
+                            dragOffset = .zero
+                            dragRotation = 0
+                        }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                            viewModel.shouldShowPaywall = true
+                        }
+                        return
+                    }
+
                     // Animate card off screen
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                         switch direction {

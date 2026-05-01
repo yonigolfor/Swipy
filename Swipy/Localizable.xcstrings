@@ -7,6 +7,9 @@
     "🎉" : {
 
     },
+    "🧪" : {
+
+    },
     "10,000+" : {
 
     },
@@ -19,40 +22,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "עבודה טובה! 💪"
-          }
-        }
-      }
-    },
-    "shuffle.mode_badge" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Shuffle Mode"
-          }
-        },
-        "he" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "מצב שאפל"
-          }
-        }
-      }
-    },
-    "shuffle.time_traveled" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Time traveled to"
-          }
-        },
-        "he" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "קפצת ל"
           }
         }
       }
@@ -1055,6 +1024,143 @@
         }
       }
     },
+    "paywall.benefit.features" : {
+      "comment" : "MARK: - Paywall",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All future features, included"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "כל הפיצ'רים העתידיים, כלולים"
+          }
+        }
+      }
+    },
+    "paywall.benefit.speed" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clean your library at full speed"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "נקה את הגלריה במהירות מלאה"
+          }
+        }
+      }
+    },
+    "paywall.benefit.support" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Support independent development"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "תמוך בפיתוח עצמאי"
+          }
+        }
+      }
+    },
+    "paywall.benefit.unlimited" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unlimited swipes, every single day"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "החלקות ללא הגבלה, כל יום"
+          }
+        }
+      }
+    },
+    "paywall.cta" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Go Premium"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "עבור לפרימיום"
+          }
+        }
+      }
+    },
+    "paywall.restore" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Restore Purchases"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "שחזר רכישות"
+          }
+        }
+      }
+    },
+    "paywall.subtitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You've used all %lld free swipes for today.\nUpgrade once — swipe forever, every day."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "השתמשת בכל %lld ההחלקות החינמיות של היום.\nשדרג פעם אחת — החלק לנצח, כל יום."
+          }
+        }
+      }
+    },
+    "paywall.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unlock Unlimited Swipes"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "החלקות ללא הגבלה"
+          }
+        }
+      }
+    },
     "photos & videos" : {
       "localizations" : {
         "he" : {
@@ -1072,6 +1178,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "שחזר"
+          }
+        }
+      }
+    },
+    "shuffle.mode_badge" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shuffle Mode"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "מצב שאפל"
+          }
+        }
+      }
+    },
+    "shuffle.time_traveled" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Time traveled to"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "קפצת ל"
           }
         }
       }

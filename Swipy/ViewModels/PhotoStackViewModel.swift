@@ -22,6 +22,14 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// True while the expensive Phase 2 large video scan is running.
     @Published var isCountingLargeVideos = false
 
+    // MARK: - Paywall State
+
+    @Published var shouldShowPaywall = false
+
+    var canSwipe: Bool {
+        DailyLimitService.shared.canSwipe(isPremium: PremiumManager.shared.isPremium)
+    }
+
     // MARK: - Shuffle Mode State
 
     /// True when the user has jumped to a random point in the timeline.
@@ -577,6 +585,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         persistence.saveKeptID(topCard.id)
         self.lastAction = (topCard, .keep)
         photoStack.removeFirst()
+        DailyLimitService.shared.recordSwipe()
         hapticService.keep()
         precacheNextImages()
         loadNextPageIfNeeded()
@@ -591,6 +600,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         photoStack.removeFirst()
         reviewBin.append(topCard)
         totalSpaceSaved += topCard.fileSize
+        DailyLimitService.shared.recordSwipe()
         hapticService.delete()
         precacheNextImages()
         saveBinToDisk()

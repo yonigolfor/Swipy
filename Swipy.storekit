@@ -1,0 +1,29 @@
+{
+  "identifier" : "4A2E5F1B-8C3D-4A9E-B7F2-1D6E8C0A5B3F",
+  "autoRenewableSubscriptions" : [
+    {
+      "familyShareable" : false,
+      "groupID" : "C1D2E3F4-A5B6-7890-CDEF-123456789ABC",
+      "internalID" : "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+      "localizations" : [
+        {
+          "description" : "Unlock unlimited swipes every day. Support independent development.",
+          "displayName" : "Swipy Premium",
+          "locale" : "en_US"
+        }
+      ],
+      "productID" : "com.swipy.premium.unlimited",
+      "recurringSubscriptionPeriod" : "P1M",
+      "referenceName" : "Swipy Premium Monthly",
+      "subscriptionGroupReferenceName" : "Swipy Premium",
+      "introductoryOffer" : null,
+      "displayPrice" : "4.99",
+      "type" : "RecurringSubscription"
+    }
+  ],
+  "version" : {
+    "major" : 3,
+    "minor" : 0,
+    "patch" : 0
+  }
+}
