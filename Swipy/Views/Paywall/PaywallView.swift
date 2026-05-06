@@ -106,6 +106,8 @@ struct PaywallView: View {
                 Task { @MainActor in
                     try? await Task.sleep(nanoseconds: 3_000_000_000)
                     withAnimation(.easeOut(duration: 0.3)) { showBonusToast = false }
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    dismiss()
                 }
             }
         }
