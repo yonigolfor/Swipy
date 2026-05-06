@@ -27,6 +27,16 @@ struct PhotoCardView: View {
     @State private var player: AVPlayer?
     @State private var isMuted = false
 
+    // Thumbnail Gate state
+    /// Low-res placeholder shown immediately while full-res / AVPlayer loads.
+    @State private var thumbnailImage: UIImage?
+    /// Timestamp of the degraded-thumbnail arrival — used to decide whether
+    /// the full-res upgrade should be animated or instant (< 100 ms threshold).
+    @State private var thumbnailArrivalDate: Date?
+    /// True once the AVPlayer has had 50 ms to render its first frame.
+    /// Thumbnail is visible until this flips.
+    @State private var isVideoPlayerReady = false
+
     /// Pass a pre-loaded image from the ViewModel cache to display it instantly,
     /// skipping the async load path entirely and preventing any ProgressView flash.
     init(item: PhotoItem, isTopCard: Bool, cachedImage: UIImage? = nil) {
@@ -46,57 +56,60 @@ struct PhotoCardView: View {
 
             if item.isVideo {
                 // ── VIDEO ──────────────────────────────────────────────
-                if let player = player {
-                    let isPortrait = item.asset.pixelHeight >= item.asset.pixelWidth
-                    GeometryReader { geo in
-                        ZStack {
-                            if !isPortrait {
-                                // Blurred background — only for landscape
-                                VideoPlayerView(player: player, gravity: .resizeAspectFill)
-                                    .frame(width: geo.size.width, height: geo.size.height)
-                                    .blur(radius: 25)
-                                    .scaleEffect(1.1)
-                                    .clipped()
-                            }
-
-                            VideoPlayerView(player: player, gravity: isPortrait ? .resizeAspectFill : .resizeAspect)
-    .frame(width: geo.size.width, height: geo.size.height)
-    .clipped()
-    .onTapGesture {
-        isMuted.toggle()
-PhotoCardView.globalMute = isMuted
-player.isMuted = isMuted
-    }
-
-if item.isVideo {
-    VStack {
-        HStack {
-            Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                .font(.caption)
-                .foregroundColor(.white)
-                .padding(6)
-                .background(Circle().fill(.black.opacity(0.6)))
-                .padding(8)
-            Spacer()
-        }
-        Spacer()
-    }
-}
-                        }
+                // Thumbnail is shown immediately (loaded via loadThumbnail in onAppear).
+                // The player fades in after its first frame is ready (50 ms post-assignment).
+                ZStack {
+                    if let thumb = thumbnailImage {
+                        imageContentView(thumb)
+                            .opacity(isVideoPlayerReady ? 0 : 1)
+                            .animation(.easeIn(duration: 0.2), value: isVideoPlayerReady)
+                    } else if isLoading, !isVideoPlayerReady {
+                        ProgressView().scaleEffect(1.5)
                     }
-                } else if isLoading {
-                    ProgressView()
-                        .scaleEffect(1.5)
-                } else {
-                    // Fallback thumbnail
-                    fallbackVideoThumbnail
+
+                    if let player = player {
+                        let isPortrait = item.asset.pixelHeight >= item.asset.pixelWidth
+                        GeometryReader { geo in
+                            ZStack {
+                                if !isPortrait {
+                                    VideoPlayerView(player: player, gravity: .resizeAspectFill)
+                                        .frame(width: geo.size.width, height: geo.size.height)
+                                        .blur(radius: 25)
+                                        .scaleEffect(1.1)
+                                        .clipped()
+                                }
+                                VideoPlayerView(player: player, gravity: isPortrait ? .resizeAspectFill : .resizeAspect)
+                                    .frame(width: geo.size.width, height: geo.size.height)
+                                    .clipped()
+                                    .onTapGesture {
+                                        isMuted.toggle()
+                                        PhotoCardView.globalMute = isMuted
+                                        player.isMuted = isMuted
+                                    }
+                                VStack {
+                                    HStack {
+                                        Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                                            .font(.caption)
+                                            .foregroundColor(.white)
+                                            .padding(6)
+                                            .background(Circle().fill(.black.opacity(0.6)))
+                                            .padding(8)
+                                        Spacer()
+                                    }
+                                    Spacer()
+                                }
+                            }
+                        }
+                        .opacity(isVideoPlayerReady ? 1 : 0)
+                        .animation(.easeIn(duration: 0.2), value: isVideoPlayerReady)
+                    }
                 }
 
                 // Bottom bar: progress + duration
                 VStack {
                     Spacer()
                     VStack(spacing: 8) {
-                        if let player = player {
+                        if let player = player, isVideoPlayerReady {
                             VideoProgressBar(player: player, duration: item.duration)
                                 .padding(.horizontal, 16)
                         }
@@ -123,36 +136,27 @@ if item.isVideo {
                 }
             } else {
                 // ── IMAGE ──────────────────────────────────────────────
-                if let image = image {
-                    let isPortrait = item.asset.pixelHeight >= item.asset.pixelWidth
-                    GeometryReader { geo in
-                        ZStack {
-                            if !isPortrait {
-                                // Blurred background — only for landscape
-                                Image(uiImage: image)
-                                    .resizable()
-                                    .aspectRatio(contentMode: .fill)
-                                    .frame(width: geo.size.width, height: geo.size.height)
-                                    .blur(radius: 25)
-                                    .scaleEffect(1.1)
-                                    .clipped()
-                            }
-
-                            Image(uiImage: image)
-                                .resizable()
-                                .aspectRatio(contentMode: isPortrait ? .fill : .fit)
-                                .frame(width: geo.size.width, height: geo.size.height)
-                                .clipped()
+                // thumbnailImage (low-res) appears immediately as the base layer.
+                // Full-res image cross-fades on top when it arrives.
+                // If the asset was already in NSCache, image is set at init and no
+                // thumbnail is ever loaded — zero round-trips.
+                ZStack {
+                    if let thumb = thumbnailImage {
+                        imageContentView(thumb)
+                    }
+                    if let full = image {
+                        imageContentView(full)
+                            .transition(.opacity)
+                    }
+                    if image == nil, thumbnailImage == nil {
+                        if isLoading {
+                            ProgressView().scaleEffect(1.5)
+                        } else {
+                            Image(systemName: "photo.fill")
+                                .font(.system(size: 60))
+                                .foregroundColor(.gray)
                         }
                     }
-
-                } else if isLoading {
-                    ProgressView()
-                        .scaleEffect(1.5)
-                } else {
-                    Image(systemName: "photo.fill")
-                        .font(.system(size: 60))
-                        .foregroundColor(.gray)
                 }
             }
 
@@ -211,6 +215,7 @@ VStack {
         .onAppear {
             if item.isVideo {
                 isMuted = PhotoCardView.globalMute
+                loadVideoThumbnail()
                 loadVideoPlayer()
             } else if image == nil {
                 // Cache hit at init already set image — skip the async round-trip.
@@ -219,8 +224,8 @@ VStack {
         }
         .onDisappear {
             stopPlayer()
-            // Release the pooled player for this asset so the pool
-            // can reclaim memory for upcoming assets.
+            isVideoPlayerReady = false
+            thumbnailImage = nil
             if item.isVideo {
                 Task { await VideoPlayerPool.shared.release(for: item.asset) }
             }
@@ -246,36 +251,95 @@ VStack {
     }
 
     // MARK: - Stop Player
+
     private func stopPlayer() {
         player?.pause()
         player?.seek(to: .zero, toleranceBefore: .zero, toleranceAfter: .zero)
     }
 
-    // MARK: - Fallback thumbnail for video
-    private var fallbackVideoThumbnail: some View {
-        Image(systemName: "video.fill")
-            .font(.system(size: 60))
-            .foregroundColor(.gray)
+    // MARK: - Shared Image Layout Helper
+
+    /// Renders a UIImage in the card's portrait/landscape layout.
+    /// Used for both full-res images and low-res thumbnails so the two layers
+    /// are visually identical and cross-fades look seamless.
+    @ViewBuilder
+    private func imageContentView(_ uiImage: UIImage) -> some View {
+        let isPortrait = item.asset.pixelHeight >= item.asset.pixelWidth
+        GeometryReader { geo in
+            ZStack {
+                if !isPortrait {
+                    Image(uiImage: uiImage)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: geo.size.width, height: geo.size.height)
+                        .blur(radius: 25)
+                        .scaleEffect(1.1)
+                        .clipped()
+                }
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .aspectRatio(contentMode: isPortrait ? .fill : .fit)
+                    .frame(width: geo.size.width, height: geo.size.height)
+                    .clipped()
+            }
+        }
     }
 
     // MARK: - Image Loading
 
     private func loadImage() {
         let targetSize = CGSize(width: 600, height: 800)
-        PhotoLibraryService.shared.loadImage(for: item.asset, targetSize: targetSize) { loadedImage in
-            withAnimation {
-                self.image = loadedImage
+        PhotoLibraryService.shared.loadImageProgressive(
+            for: item.asset,
+            targetSize: targetSize
+        ) { loadedImage, isDegraded in
+            if isDegraded {
+                // First delivery: fast local thumbnail — show immediately, no animation.
+                self.thumbnailImage = loadedImage
+                self.thumbnailArrivalDate = Date()
                 self.isLoading = false
+            } else {
+                // Second delivery: full-resolution image.
+                // If it arrived within 100 ms of the thumbnail the asset was local —
+                // skip the fade to avoid an unnecessary visual event.
+                let elapsed = self.thumbnailArrivalDate.map { Date().timeIntervalSince($0) } ?? 1.0
+                if elapsed < 0.1 {
+                    self.image = loadedImage
+                } else {
+                    withAnimation(.easeIn(duration: 0.2)) { self.image = loadedImage }
+                }
+                // Free thumbnail memory after the cross-fade completes.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                    self.thumbnailImage = nil
+                    self.thumbnailArrivalDate = nil
+                }
             }
         }
     }
 
-    // MARK: - Video Player Loading
+    // MARK: - Video Loading
+
+    /// Loads a fast local thumbnail to show immediately while the AVPlayer warms up.
+    private func loadVideoThumbnail() {
+        PhotoLibraryService.shared.loadThumbnail(for: item.asset) { thumb in
+            guard self.thumbnailImage == nil else { return }
+            self.thumbnailImage = thumb
+        }
+    }
+
+    /// Flips `isVideoPlayerReady` after a 50 ms delay (allows AVLayer to render
+    /// its first frame), then releases the thumbnail once the fade completes.
+    private func markVideoReady() {
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            withAnimation(.easeIn(duration: 0.2)) { isVideoPlayerReady = true }
+            try? await Task.sleep(nanoseconds: 250_000_000)
+            thumbnailImage = nil
+        }
+    }
 
     private func loadVideoPlayer() {
         Task { @MainActor in
-            // Try to get a pre-loaded player from the pool first.
-            // This is the fast path: no PHImageManager call needed.
             if let pooledPlayer = VideoPlayerPool.shared.player(for: item.asset) {
                 pooledPlayer.isMuted = PhotoCardView.globalMute
                 self.player = pooledPlayer
@@ -284,12 +348,11 @@ VStack {
                     await pooledPlayer.seek(to: .zero)
                     pooledPlayer.play()
                 }
+                markVideoReady()
                 return
             }
 
             // Slow path: pool miss — load directly.
-            // This only happens for the very first video or if the pool
-            // has not had enough time to warm up.
             let options = PHVideoRequestOptions()
             options.deliveryMode = .automatic
             options.isNetworkAccessAllowed = true
@@ -313,9 +376,8 @@ VStack {
                     avPlayer.isMuted = PhotoCardView.globalMute
                     self.player = avPlayer
                     self.isLoading = false
-                    if self.isTopCard {
-                        avPlayer.play()
-                    }
+                    if self.isTopCard { avPlayer.play() }
+                    self.markVideoReady()
                 }
             }
         }
