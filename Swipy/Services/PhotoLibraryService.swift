@@ -290,36 +290,6 @@ class PhotoLibraryService: ObservableObject {
         }
     }
 
-    /// Progressive two-phase load using `.opportunistic` delivery.
-    ///
-    /// The completion fires **up to twice**:
-    /// - First call:  `isDegraded = true`  — fast local thumbnail (< 50 ms, never iCloud)
-    /// - Second call: `isDegraded = false` — full-resolution image (may download from iCloud)
-    ///
-    /// If the asset is fully local the first call may already be full-res (`isDegraded = false`)
-    /// and no second call is made.  Callbacks are always dispatched to the main queue.
-    func loadImageProgressive(
-        for asset: PHAsset,
-        targetSize: CGSize,
-        completion: @escaping (_ image: UIImage, _ isDegraded: Bool) -> Void
-    ) {
-        let options = PHImageRequestOptions()
-        options.deliveryMode = .opportunistic
-        options.isNetworkAccessAllowed = true
-        options.isSynchronous = false
-
-        imageManager.requestImage(
-            for: asset,
-            targetSize: targetSize,
-            contentMode: .aspectFill,
-            options: options
-        ) { image, info in
-            guard let image else { return }
-            let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-            DispatchQueue.main.async { completion(image, isDegraded) }
-        }
-    }
-
     /// Loads a fast local thumbnail — never touches iCloud.
     /// Used as the immediate placeholder for video cards while the AVPlayer warms up.
     func loadThumbnail(

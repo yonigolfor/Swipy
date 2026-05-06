@@ -30,9 +30,6 @@ struct PhotoCardView: View {
     // Thumbnail Gate state
     /// Low-res placeholder shown immediately while full-res / AVPlayer loads.
     @State private var thumbnailImage: UIImage?
-    /// Timestamp of the degraded-thumbnail arrival — used to decide whether
-    /// the full-res upgrade should be animated or instant (< 100 ms threshold).
-    @State private var thumbnailArrivalDate: Date?
     /// True once the AVPlayer has had 50 ms to render its first frame.
     /// Thumbnail is visible until this flips.
     @State private var isVideoPlayerReady = false
@@ -288,32 +285,36 @@ VStack {
     // MARK: - Image Loading
 
     private func loadImage() {
-        let targetSize = CGSize(width: 600, height: 800)
-        PhotoLibraryService.shared.loadImageProgressive(
+        // Pass 1 — instant local thumbnail, never touches iCloud.
+        // Shows immediately so the user never sees a black card or spinner.
+        PhotoLibraryService.shared.loadThumbnail(
             for: item.asset,
-            targetSize: targetSize
-        ) { loadedImage, isDegraded in
-            if isDegraded {
-                // First delivery: fast local thumbnail — show immediately, no animation.
-                self.thumbnailImage = loadedImage
-                self.thumbnailArrivalDate = Date()
-                self.isLoading = false
-            } else {
-                // Second delivery: full-resolution image.
-                // If it arrived within 100 ms of the thumbnail the asset was local —
-                // skip the fade to avoid an unnecessary visual event.
-                let elapsed = self.thumbnailArrivalDate.map { Date().timeIntervalSince($0) } ?? 1.0
-                if elapsed < 0.1 {
-                    self.image = loadedImage
-                } else {
-                    withAnimation(.easeIn(duration: 0.2)) { self.image = loadedImage }
-                }
-                // Free thumbnail memory after the cross-fade completes.
+            targetSize: CGSize(width: 300, height: 400)
+        ) { thumb in
+            guard let thumb, self.image == nil else { return }
+            self.thumbnailImage = thumb
+            self.isLoading = false
+        }
+
+        // Pass 2 — guaranteed .highQualityFormat, patient iCloud download.
+        // This call never compromises quality; iOS waits until the full asset
+        // is available before firing the callback.
+        PhotoLibraryService.shared.loadImage(
+            for: item.asset,
+            targetSize: CGSize(width: 600, height: 800)
+        ) { fullRes in
+            guard let fullRes else { return }
+            if self.thumbnailImage != nil {
+                // Thumbnail was shown — cross-fade to full-res.
+                withAnimation(.easeIn(duration: 0.18)) { self.image = fullRes }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                     self.thumbnailImage = nil
-                    self.thumbnailArrivalDate = nil
                 }
+            } else {
+                // Full-res arrived before thumbnail (fully local) — swap directly.
+                self.image = fullRes
             }
+            self.isLoading = false
         }
     }
 

@@ -25,8 +25,9 @@ SwipeStackView — ForEach(photoStack.prefix(3))
       ▼
 PhotoCardView(item:, isTopCard:, cachedImage:)
   ├── תמונה:  cachedImage != nil → מוצג מיידית (zero async round-trip)
-  │           cachedImage == nil → PhotoLibraryService.loadImage → UIImage → cache
-  └── וידאו:  VideoPlayerPool.player(for:) → AVPlayer (pre-warmed)
+  │           cachedImage == nil → Thumbnail Gate (ראה סעיף 7)
+  └── וידאו:  loadVideoThumbnail() → placeholder מיידי
+              VideoPlayerPool.player(for:) → AVPlayer (pre-warmed)
               pool miss → PHImageManager.requestPlayerItem → slow path
 ```
 
@@ -65,29 +66,31 @@ private let cardStackSize = 3
 
 ### הגדרות
 ```swift
-cache.countLimit = 6          // top-5 + 1 undo slot
-cache.totalCostLimit = 6 MB   // ~6 תמונות בגודל קלף
+cache.countLimit = 8          // top-5 stack + early-precache buffer + 1 undo slot
+cache.totalCostLimit = 8 MB   // ~8 תמונות בגודל קלף
 ```
 `cacheTargetSize` = רוחב המסך פחות 40pt × 65% גובה מסך (גודל הקלף בפועל)
 
 ### מחזור חיים של entry
 
 ```
-precacheNextImages() נקרא אחרי כל swipe
+precacheNextImages() נקרא אחרי כל swipe (וגם בטעינה ראשונית)
         │
         ├── startCaching() → רמז ל-PHCachingImageManager
         ├── VideoPlayerPool.warmUp() → מכין AVPlayers לוידאו
-        └── loadImage() עבור top-3 images → מכניס ל-NSCache
+        └── loadImage() עבור top-5 images → מכניס ל-NSCache + מסמן loadedImageIDs
                 │
                 ▼
         evictStaleCacheEntries()
           → מסיר keys שאינם ב-top-5 ואינם lastAction.item
+          → Index-0 immunity: photoStack.first לעולם לא מוסר בזמן drag
 ```
 
 ### Eviction Policy
 **נשמר ב-cache בכל נקודה:**
 - top-5 פריטים ב-`photoStack`
 - הפריט האחרון שנעשה עליו swipe (`lastSwipedImage`) — לצורך shake-to-undo
+- הקלף שב-index 0 (top card) — protected מ-eviction גם אם נקראת precache בזמן drag
 
 **מוסר מ-cache:**
 - כל פריט שאינו ב-top-5 ואינו ה-undo item
@@ -104,30 +107,63 @@ PhotoCardView.init(cachedImage:)
         │
         ▼
 onAppear:
-  image == nil → loadImage()   // cache miss: טוען async
-  image != nil → דילוג         // cache hit: אפס round-trips
+  image != nil → דילוג (cache hit: אפס round-trips)
+  image == nil → Thumbnail Gate: שתי קריאות מקבילות (ראה סעיף 7)
 ```
+
+### loadedImageIDs — Observable Readiness
+```swift
+@Published var loadedImageIDs: Set<String>
+```
+כל פעם שתמונה נכנסת ל-NSCache ה-ID שלה מסומן ב-set הזה.  
+מאפשר לviews לצפות מתי קלף "מוכן" בלי לבצע cache lookup סינכרוני.  
+מנוקה ב-`resetAndLoad` (שינוי פילטר) ומעודכן ב-eviction.
 
 ---
 
-## 4. Video Pre-warming — VideoPlayerPool
+## 4. Early Precache — prepareUpcomingCards()
+
+מנגנון חדש שמפחית מסכים שחורים בהחלקה מהירה.
+
+```
+DragGesture.onChanged (offset > 80pt, פעם אחת per gesture)
+  → viewModel.prepareUpcomingCards()
+        │
+        ├── photoStack.dropFirst().prefix(5)  ← דולג על index 0 (עוזב)
+        ├── startCaching() עבור index 1-5
+        ├── VideoPlayerPool.warmUp(protectedID: topCard.localIdentifier)
+        │     └── top card מוגן מ-eviction כל עוד הgesture לא הסתיים
+        └── loadImage() עבור index 1-5 → NSCache + loadedImageIDs
+```
+
+**מה זה נותן**: מהרגע שהמשתמש חוצה 80pt ועד שהswipe מסתיים (~200-400ms), כל הקלפים הבאים נטענים ל-NSCache. כשהקלף החדש מגיע למסך — `cachedImage != nil` ואין flash.
+
+**Video Pool Protection**: `warmUp(protectedID:)` מבטיח שה-AVPlayer של הקלף הנוכחי לא יפונה בזמן שהמשתמש עדיין מחזיק אותו. ללא ההגנה הזו, `replaceCurrentItem(nil)` היה גורם לוידאו להיהפך לשחור גם אם המשתמש מחזיר את הקלף למרכז.
+
+---
+
+## 5. Video Pre-warming — VideoPlayerPool
 
 | פרמטר | ערך |
 |--------|-----|
 | maxPoolSize | 3 players |
 | deliveryMode | `.fastFormat` |
-| warmUp נקרא עם | 5 assets הבאים (אחרי כל swipe) |
-| eviction | assets שאינם ב-5 הבאים מוסרים |
+| warmUp נקרא עם | 5 assets הבאים (אחרי כל swipe ובזמן drag) |
+| eviction | assets שאינם ב-5 הבאים מוסרים — למעט protectedID |
 
-**Fast path**: `VideoPlayerPool.shared.player(for: asset)` → מחזיר `AVPlayer` מוכן לניגון  
-**Slow path**: pool miss → `PHImageManager.requestPlayerItem` → async load
+**Fast path**: `VideoPlayerPool.shared.player(for: asset)` → מחזיר `AVPlayer` מוכן  
+**Slow path**: pool miss → `PHImageManager.requestPlayerItem` → async load  
+**Re-sync**: `resumeTopCardVideo` notification → `PhotoCardView` מחדש play אם player נעצר בטעות בזמן drag שבוטל
 
 ---
 
-## 5. Swipe Flow
+## 6. Swipe Flow
 
 ```
-DragGesture.onEnded
+DragGesture.onChanged (offset > 80pt — פעם אחת)
+  → prepareUpcomingCards()   ← Early warm-up (ראה סעיף 4)
+
+DragGesture.onEnded (swipe מושלם)
   → animate card off-screen (±500pt, 0.4s spring)
   → DispatchQueue.main.asyncAfter(0.3s):
       ├── lastSwipedImage = imageCache[topCard.id]   ← שומר לundo
@@ -137,18 +173,56 @@ DragGesture.onEnded
       │     ├── precacheNextImages()                  ← cache + pool + eviction
       │     └── loadNextPageIfNeeded()                ← אם stack ≤ 12
       └── dragOffset = .zero
+
+DragGesture.onEnded (swipe בוטל — חזר למרכז)
+  → resetCardPosition()
+  → post(.resumeTopCardVideo)   ← re-sync video אם נעצר
 ```
 
 **Undo (shake)**:
 ```
 undoLastAction()
   → imageCache.setObject(lastSwipedImage)   ← מחזיר תמונה ל-cache
+  → loadedImageIDs.insert(item.id)          ← מסמן כ-ready
   → photoStack.insert(item, at: 0)          ← קלף מופיע מיידית ללא flash
 ```
 
 ---
 
-## 6. Tab Switch — מצב נוכחי (אחרי תיקון)
+## 7. Thumbnail Gate — Cache Miss Path
+
+כשקלף לא נמצא ב-NSCache (`cachedImage == nil`), `PhotoCardView.loadImage()` מפעיל **שתי קריאות מקבילות ונפרדות**:
+
+```
+Pass 1: loadThumbnail()
+  deliveryMode = .fastFormat
+  isNetworkAccessAllowed = false
+  targetSize = 300×400 pt
+  → callback < 50ms (תמיד מקומי, לעולם לא iCloud)
+  → thumbnailImage = thumb   ← מוצג מיידית כ-base layer
+
+Pass 2: loadImage()
+  deliveryMode = .highQualityFormat
+  isNetworkAccessAllowed = true
+  targetSize = 600×800 pt
+  → callback כשהתמונה המלאה מוכנה (ממתין בסבלנות ל-iCloud)
+  → אם thumbnailImage != nil → withAnimation(.easeIn(0.18)) { image = fullRes }
+  → אם thumbnailImage == nil → image = fullRes (ללא אנימציה — asset מקומי מהיר)
+  → asyncAfter(0.35s): thumbnailImage = nil  ← פינוי זיכרון
+```
+
+**מה זה מבטיח**:
+- **אף פעם לא קלף שחור** — thumbnail מקומי תמיד מוכן לפני render
+- **ללא פשרות באיכות** — Pass 2 עם `.highQualityFormat` מחכה לגרסה המלאה
+- **iCloud slow path** — thumbnail נשאר כל עוד ההורדה לא הסתיימה; אם נכשלת, thumbnail נשאר לצמיתות
+
+**וידאו**: `loadVideoThumbnail()` נקרא ב-`onAppear` במקביל ל-`loadVideoPlayer()`.  
+`isVideoPlayerReady` מופעל 50ms אחרי שה-AVPlayer מוקצה (מאפשר ל-AVLayer לרנדר frame ראשון).  
+Thumbnail נעלם עם `animation(.easeIn(0.2))` ו-`thumbnailImage = nil` אחרי 300ms נוספים.
+
+---
+
+## 8. Tab Switch
 
 ```swift
 // SwipeStackView.onAppear
@@ -163,10 +237,3 @@ if viewModel.photoStack.isEmpty && !viewModel.isLoading {
 | בחירת קטגוריה מ-SmartFilters | `loadPhotos(filter:)` נקרא לפני המעבר → onAppear לא מבטל |
 | גלריה השתנתה (limited access וכו') | `PHPhotoLibraryChangeObserver` מטפל |
 | הפעלה ראשונה / stack ריק | `refreshPhotos()` רץ |
-
----
-
-## 7. מה לא cached (ידוע)
-
-- **וידאו ב-init**: `isLoading=true` עד ש-`loadVideoPlayer()` רץ ב-`onAppear`. pool hit מהיר מאוד אבל לא אפס. לא נפתר עדיין.
-- **תמונות בטעינה ראשונית**: `precacheNextImages()` רץ רק אחרי שהstack נטען. 10 הפריטים הראשונים מקבלים `startCaching` אבל לא NSCache proactive fill — רק הפריטים שנכנסים אחרי swipe.
