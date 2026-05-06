@@ -10,6 +10,7 @@ struct PaywallView: View {
     @State private var crownGlow: Double = 0.5
     @State private var appeared = false
     @State private var showShareSheet = false
+    @State private var showBonusToast = false
 
     var body: some View {
         ZStack {
@@ -77,11 +78,35 @@ struct PaywallView: View {
                     .padding(.bottom, 48)
             }
 
+            // Bonus toast — appears after a successful share
+            if showBonusToast {
+                VStack {
+                    Spacer()
+                    Text(String(localized: "paywall.share.bonus.toast"))
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .background(
+                            Capsule()
+                                .fill(Color(red: 0.2, green: 0.8, blue: 0.4).opacity(0.92))
+                                .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
+                        )
+                        .padding(.bottom, 110)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
         }
         .sheet(isPresented: $showShareSheet) {
             ShareSheet(items: [URL(string: "https://apps.apple.com/app/id6745854678")!]) {
                 DailyLimitService.shared.applyShareBonus()
-                dismiss()
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                    showBonusToast = true
+                }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    withAnimation(.easeOut(duration: 0.3)) { showBonusToast = false }
+                }
             }
         }
         .onAppear {
