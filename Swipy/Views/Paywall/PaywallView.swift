@@ -98,7 +98,7 @@ struct PaywallView: View {
             }
         }
         .sheet(isPresented: $showShareSheet) {
-            ShareSheet(items: [URL(string: "https://apps.apple.com/app/id6745854678")!]) {
+            ShareSheet(items: ShareSheet.makeShareItems()) {
                 DailyLimitService.shared.applyShareBonus()
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                     showBonusToast = true

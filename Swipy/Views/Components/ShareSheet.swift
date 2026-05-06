@@ -16,6 +16,17 @@ struct ShareSheet: UIViewControllerRepresentable {
         .markupAsPDF,
     ]
 
+    static func makeShareItems() -> [Any] {
+        var items: [Any] = [
+            String(localized: "paywall.share.message"),
+            URL(string: "https://apps.apple.com/app/id6745854678")!,
+        ]
+        if let icon = UIImage(named: "AppIcon") {
+            items.append(icon)
+        }
+        return items
+    }
+
     func makeUIViewController(context: Context) -> UIActivityViewController {
         let vc = UIActivityViewController(activityItems: items, applicationActivities: nil)
         vc.excludedActivityTypes = Array(Self.blocklist)

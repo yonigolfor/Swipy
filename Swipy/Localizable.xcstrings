@@ -1161,6 +1161,23 @@
         }
       }
     },
+    "paywall.share.message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A few minutes in this app and I finally have storage on my phone again 🤯"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "כמה דקות באפליקציה הזאת ועכשיו יש לי מקום בטלפון 🤯"
+          }
+        }
+      }
+    },
     "paywall.share.bonus.toast" : {
       "extractionState" : "manual",
       "localizations" : {
