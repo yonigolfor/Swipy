@@ -9,6 +9,8 @@ struct PaywallView: View {
     @State private var shimmerPhase: CGFloat = -1.0
     @State private var crownGlow: Double = 0.5
     @State private var appeared = false
+    @State private var showShareSheet = false
+    @State private var showBonusToast = false
 
     var body: some View {
         ZStack {
@@ -74,6 +76,37 @@ struct PaywallView: View {
                 Spacer()
                 restoreButton
                     .padding(.bottom, 48)
+            }
+
+            // Bonus toast — appears after a successful share
+            if showBonusToast {
+                VStack {
+                    Spacer()
+                    Text(String(localized: "paywall.share.bonus.toast"))
+                        .font(.system(size: 16, weight: .semibold, design: .rounded))
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 12)
+                        .background(
+                            Capsule()
+                                .fill(Color(red: 0.2, green: 0.8, blue: 0.4).opacity(0.92))
+                                .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
+                        )
+                        .padding(.bottom, 110)
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
+            }
+        }
+        .sheet(isPresented: $showShareSheet) {
+            ShareSheet(items: [URL(string: "https://apps.apple.com/app/id6745854678")!]) {
+                DailyLimitService.shared.applyShareBonus()
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                    showBonusToast = true
+                }
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    withAnimation(.easeOut(duration: 0.3)) { showBonusToast = false }
+                }
             }
         }
         .onAppear {
@@ -263,6 +296,30 @@ struct PaywallView: View {
                 }
             }
             .disabled(premiumManager.isPurchasing)
+
+            if !dailyLimit.hasSharedToday {
+                Button {
+                    showShareSheet = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "square.and.arrow.up")
+                            .font(.system(size: 15, weight: .semibold))
+                        Text(String(localized: "paywall.share.button"))
+                            .font(.system(size: 16, weight: .semibold, design: .rounded))
+                    }
+                    .foregroundStyle(.white.opacity(0.80))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 50)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16)
+                            .fill(.white.opacity(0.08))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(.white.opacity(0.15), lineWidth: 1)
+                            )
+                    )
+                }
+            }
 
             if let error = premiumManager.errorMessage {
                 Text(error)

@@ -1161,6 +1161,40 @@
         }
       }
     },
+    "paywall.share.bonus.toast" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You got bonus swipes 🔥"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "קיבלת סוויפים נוספים 🔥"
+          }
+        }
+      }
+    },
+    "paywall.share.button" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Share & Get Free Swipes"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "שתף וקבל החלקות חינם"
+          }
+        }
+      }
+    },
     "photos & videos" : {
       "localizations" : {
         "he" : {
