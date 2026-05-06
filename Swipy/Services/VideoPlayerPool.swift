@@ -58,9 +58,13 @@ final class VideoPlayerPool {
     /// Call this every time the visible stack changes (after each swipe).
     /// Assets that are already in the pool or currently loading are skipped.
     ///
-    /// - Parameter assets: Ordered list of upcoming PHAssets (videos only).
-    ///   Pass at most `maxPoolSize` items; extras are ignored.
-    func warmUp(for assets: [PHAsset]) {
+    /// - Parameters:
+    ///   - assets: Ordered list of upcoming PHAssets (videos only).
+    ///     Pass at most `maxPoolSize` items; extras are ignored.
+    ///   - protectedID: Asset localIdentifier that must NOT be evicted.
+    ///     Pass the top card's ID during an early (mid-drag) warm-up so the
+    ///     active player is never killed before the gesture completes.
+    func warmUp(for assets: [PHAsset], protectedID: String? = nil) {
         // Only warm up video assets we do not already have.
         let needed = assets
             .filter { $0.mediaType == .video }
@@ -71,10 +75,10 @@ final class VideoPlayerPool {
             load(asset: asset)
         }
 
-        // Evict players for assets that are no longer in the upcoming window
-        // to keep memory usage bounded.
+        // Evict players for assets that are no longer in the upcoming window,
+        // but never touch the protected (currently displayed) player.
         let upcomingIDs = Set(assets.map { $0.localIdentifier })
-        let staleIDs = pool.keys.filter { !upcomingIDs.contains($0) }
+        let staleIDs = pool.keys.filter { !upcomingIDs.contains($0) && $0 != protectedID }
         for id in staleIDs {
             evict(id: id)
         }

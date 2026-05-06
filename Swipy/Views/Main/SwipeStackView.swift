@@ -34,6 +34,9 @@ struct SwipeStackView: View {
     @State private var showTimeIndicator = false
     @State private var timeIndicatorText = ""
 
+    /// Prevents firing prepareUpcomingCards() more than once per gesture.
+    @State private var hasFiredEarlyPrecache = false
+
     private let cardStackSize = 3 // כמה קלפים מציגים מאחור
 
     var body: some View {
@@ -392,8 +395,18 @@ struct SwipeStackView: View {
             .onChanged { value in
                 dragOffset = value.translation
                 dragRotation = Double(value.translation.width / 20)
+
+                // Fire early pre-load once the drag clears 80 pt.
+                // This gives us the remainder of the gesture (~200-400 ms) to
+                // pull the next card's image into NSCache before it hits screen.
+                if !hasFiredEarlyPrecache,
+                   abs(value.translation.width) > 80 || abs(value.translation.height) > 80 {
+                    hasFiredEarlyPrecache = true
+                    viewModel.prepareUpcomingCards()
+                }
             }
             .onEnded { value in
+                hasFiredEarlyPrecache = false
                 // SwipeDirection uses the RAW translation (not flipped)
                 // because .left/.right are already correct in RTL context.
                 let direction = SwipeDirection.from(offset: value.translation)
@@ -499,6 +512,9 @@ struct SwipeStackView: View {
             dragOffset = .zero
             dragRotation = 0
         }
+        // Re-sync the top card's video in case the early warm-up interrupted
+        // playback during the drag (safety net on top of the pool protection).
+        NotificationCenter.default.post(name: .resumeTopCardVideo, object: nil)
     }
 }
 

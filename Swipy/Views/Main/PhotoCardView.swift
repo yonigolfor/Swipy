@@ -12,6 +12,9 @@ import AVKit
 extension Notification.Name {
     static let stopCurrentVideo = Notification.Name("stopCurrentVideo")
     static let resumeVideoObserver = Notification.Name("resumeVideoObserver")
+    /// Posted by SwipeStackView when a drag gesture is cancelled (card returns to centre).
+    /// Top-card video players re-sync play state in response.
+    static let resumeTopCardVideo = Notification.Name("resumeTopCardVideo")
 }
 
 struct PhotoCardView: View {
@@ -233,6 +236,12 @@ VStack {
 }
         .onReceive(NotificationCenter.default.publisher(for: .stopCurrentVideo)) { _ in
             stopPlayer()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .resumeTopCardVideo)) { _ in
+            // Gesture was cancelled — re-sync play state if the player was
+            // interrupted mid-drag (e.g. pool warm-up touched the current item).
+            guard isTopCard, let p = player, p.currentItem != nil else { return }
+            if p.timeControlStatus != .playing { p.play() }
         }
     }
 

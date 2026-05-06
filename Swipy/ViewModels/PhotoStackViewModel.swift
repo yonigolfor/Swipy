@@ -22,6 +22,11 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// True while the expensive Phase 2 large video scan is running.
     @Published var isCountingLargeVideos = false
 
+    /// IDs of assets whose full-res card image is currently stored in `imageCache`.
+    /// @Published so views can react when a card becomes ready — used by the
+    /// thumbnail-gate in Layer 3 and for observability in general.
+    @Published var loadedImageIDs: Set<String> = []
+
     // MARK: - Paywall State
 
     @Published var shouldShowPaywall = false
@@ -63,8 +68,8 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// NSCache evicts automatically under memory pressure.
     let imageCache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
-        cache.countLimit = 6          // top-5 stack + 1 undo slot
-        cache.totalCostLimit = 6 * 1024 * 1024  // ~6 MB ceiling
+        cache.countLimit = 8          // top-5 stack + early-precache buffer + 1 undo slot
+        cache.totalCostLimit = 8 * 1024 * 1024  // ~8 MB ceiling
         return cache
     }()
 
@@ -374,6 +379,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         currentFilter = filter
         fetchCursor = 0
         isFetchingNextPage = false
+        loadedImageIDs = []
         // Reset shuffle so stale state doesn't leak across filter changes or tab refreshes.
         isShuffleModeActive = false
         savedLinearCursor = 0
@@ -426,12 +432,10 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 self.isLoading = false
 
                 if !items.isEmpty {
-                    photoService.startCaching(
-                        for: Array(items.prefix(10)),
-                        targetSize: CGSize(width: 400, height: 600)
-                    )
-                    let firstAssets = Array(items.prefix(5)).map { $0.asset }
-                    Task { await VideoPlayerPool.shared.warmUp(for: firstAssets) }
+                    // precacheNextImages pulls top-5 into NSCache and warms the video
+                    // pool — covers the initial load gap noted in the architecture doc
+                    // (previously only startCaching hints were sent, not NSCache fills).
+                    self.precacheNextImages()
                 }
 
                 if self.categoryCounts.isEmpty {
@@ -638,6 +642,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                                  cost: Int(PhotoStackViewModel.cacheTargetSize.width *
                                            PhotoStackViewModel.cacheTargetSize.height * 4))
             activeCacheIDs.insert(item.id)
+            loadedImageIDs.insert(item.id)
             lastSwipedImage = nil
         }
 
@@ -825,40 +830,73 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         persistence.reviewBinSpaceSaved = totalSpaceSaved
     }
 
+    /// Early warm-up called at the 80 pt drag threshold in SwipeStackView.
+    /// Starts loading the *next* cards (index 1…5) into NSCache while the user
+    /// is still mid-drag, giving us the full remaining gesture duration as
+    /// headstart before the new top card hits the screen.
+    func prepareUpcomingCards() {
+        // index 0 is the card being dragged away — skip it.
+        let upcomingItems = Array(photoStack.dropFirst().prefix(5))
+        guard !upcomingItems.isEmpty else { return }
+
+        let targetSize = PhotoStackViewModel.cacheTargetSize
+        photoService.startCaching(for: upcomingItems, targetSize: targetSize)
+
+        // Pass the top card's ID as protected so its AVPlayer is never evicted
+        // while the gesture is still in flight (user may drag back to centre).
+        let topCardID = photoStack.first?.asset.localIdentifier
+        let upcomingAssets = upcomingItems.map { $0.asset }
+        Task { await VideoPlayerPool.shared.warmUp(for: upcomingAssets, protectedID: topCardID) }
+
+        for item in upcomingItems where !item.isVideo {
+            let key = item.id as NSString
+            if imageCache.object(forKey: key) != nil {
+                loadedImageIDs.insert(item.id)
+                continue
+            }
+            PhotoLibraryService.shared.loadImage(for: item.asset, targetSize: targetSize) { [weak self] img in
+                guard let self, let img else { return }
+                self.imageCache.setObject(img, forKey: key, cost: Int(targetSize.width * targetSize.height * 4))
+                Task { @MainActor [weak self] in self?.loadedImageIDs.insert(item.id) }
+            }
+        }
+    }
+
     private func precacheNextImages() {
         let nextItems = Array(photoStack.prefix(5))
         guard !nextItems.isEmpty else { return }
         let targetSize = PhotoStackViewModel.cacheTargetSize
         photoService.startCaching(for: nextItems, targetSize: targetSize)
 
-        // Warm up the video player pool with the next upcoming video assets.
         let nextAssets = nextItems.map { $0.asset }
         Task { await VideoPlayerPool.shared.warmUp(for: nextAssets) }
 
-        // Proactively pull the top-3 images into the app-level NSCache so
-        // PhotoCardView can receive them synchronously at init (zero flash).
-        let imageItems = nextItems.prefix(3).filter { !$0.isVideo }
-        for item in imageItems {
+        // Pull all top-5 non-video images into NSCache (was top-3).
+        // countLimit is now 8 so there is room for 5 cards + undo slot.
+        for item in nextItems where !item.isVideo {
             let key = item.id as NSString
-            guard imageCache.object(forKey: key) == nil else { continue }
+            if imageCache.object(forKey: key) != nil {
+                loadedImageIDs.insert(item.id)
+                continue
+            }
             PhotoLibraryService.shared.loadImage(for: item.asset, targetSize: targetSize) { [weak self] img in
                 guard let self, let img else { return }
                 self.imageCache.setObject(img, forKey: key, cost: Int(targetSize.width * targetSize.height * 4))
+                Task { @MainActor [weak self] in self?.loadedImageIDs.insert(item.id) }
             }
         }
 
-        // Evict stale cache entries — keep only the top-5 upcoming IDs + the
-        // last swiped item (needed for shake-to-undo).
         evictStaleCacheEntries(keeping: nextItems)
     }
 
     private func evictStaleCacheEntries(keeping items: [PhotoItem]) {
-        // NSCache manages its own memory, but we explicitly remove keys that
-        // are no longer relevant to keep the countLimit working as intended.
-        // We can only evict keys we know about — track active cache keys.
-        let keepIDs = Set(items.map { $0.id })
+        var keepIDs = Set(items.map { $0.id })
+        // Index-0 immunity: never evict the card currently on screen,
+        // even if called unexpectedly while a drag is in progress.
+        if let topID = photoStack.first?.id { keepIDs.insert(topID) }
         for id in activeCacheIDs where !keepIDs.contains(id) && id != lastAction?.item.id {
             imageCache.removeObject(forKey: id as NSString)
+            loadedImageIDs.remove(id)
         }
         activeCacheIDs = keepIDs
         if let lastID = lastAction?.item.id { activeCacheIDs.insert(lastID) }
