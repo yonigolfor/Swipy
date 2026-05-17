@@ -41,6 +41,9 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// Snapshot of photoStack taken the moment offline mode is activated.
     /// Restored on deactivation so the user returns to exact chronological position.
     private var preOfflineModeStack: [PhotoItem]? = nil
+    /// fetchCursor saved at offline activation — restored alongside the stack snapshot
+    /// so pagination picks up exactly where the user was before going offline.
+    private var preOfflineFetchCursor: Int = 0
 
     // MARK: - Paywall State
 
@@ -55,8 +58,8 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// True when the user has jumped to a random point in the timeline.
     @Published var isShuffleModeActive = false
 
-    /// Bumped each time a new shuffle (or linear-return) batch lands —
-    /// the view observes this to trigger the landing animation.
+    /// Bumped each time a shuffle, return-home, or offline-mode batch lands —
+    /// the view observes this to trigger the card landing animation.
     @Published var shuffleBatchID = UUID()
 
     // MARK: - Onboarding Scan State
@@ -563,8 +566,11 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
               photoStack.count <= lowWatermark else { return }
 
         // Offline mode: continue scanning the local universe from where we left off.
+        // Guard against empty stack — once the user has swiped everything, we show
+        // the offline VictoryView rather than silently refilling behind it.
         if isOfflineMode {
-            guard offlineFetchCursor < photoService.totalAssetCount else { return }
+            guard offlineFetchCursor < photoService.totalAssetCount,
+                  !photoStack.isEmpty else { return }
             Task { await scanLocalUniverse(targetCount: photoStack.count + nextPageSize) }
             return
         }
@@ -765,6 +771,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     func activateOfflineMode() {
         preOfflineModeStack = photoStack   // snapshot for instant restoration on exit
+        preOfflineFetchCursor = fetchCursor
         isOfflineMode = true
         offlineFetchCursor = 0
         PhotoLibraryService.shared.isOfflineMode = true
@@ -778,6 +785,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             isLoading = true
             await scanLocalUniverse(targetCount: initialPageSize, batchSize: 150)
             isLoading = false
+            // Landing animation is triggered in SwipeStackView by onChange(of: isLoading)
         }
     }
 
@@ -785,16 +793,51 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         isOfflineMode = false
         PhotoLibraryService.shared.isOfflineMode = false
 
-        // Restore pre-offline snapshot, dropping items swiped during the offline session.
-        // Mirrors the preShuffleStack pattern — zero loading screens, instant return.
-        if let snapshot = preOfflineModeStack {
-            photoStack = snapshot.filter { !processedAssetIDs.contains($0.id) }
-            preOfflineModeStack = nil
-        } else {
-            photoStack = photoStack.map { var i = $0; i.isCloudOnly = false; return i }
-        }
+        // Shared reset state.
+        currentFilter = .all
+        offlineFetchCursor = 0
+        isFetchingNextPage = false
+        loadedImageIDs = []
+        isShuffleModeActive = false
+        savedLinearCursor = 0
+        preShuffleStack = nil
+        isLoading = true
 
-        startBackgroundPrefetch()
+        // Try to restore the pre-offline snapshot first — instant, no PHFetchResult scan.
+        let snapshot = preOfflineModeStack?.filter { !processedAssetIDs.contains($0.id) } ?? []
+        preOfflineModeStack = nil
+
+        Task {
+            if !snapshot.isEmpty {
+                // Fast path: show the exact cards the user had queued before going offline.
+                // Wrapped in Task so isLoading true→false crosses a run-loop boundary,
+                // allowing onChange(of: isLoading) in SwipeStackView to fire.
+                fetchCursor = preOfflineFetchCursor
+                photoStack = snapshot
+                isLoading = false
+                precacheNextImages()
+                startBackgroundPrefetch()
+                if categoryCounts.isEmpty { refreshCategoryCounts() }
+            } else {
+                // Slow path: snapshot exhausted (user swiped everything before going offline).
+                // Fresh fetch from index 0 — shows newest items, same as first app launch.
+                fetchCursor = 0
+                if photoService.fetchResult == nil { photoService.fetchAllPhotos() }
+                let (rawItems, nextIdx) = photoService.fetchPageOfAssets(
+                    for: .all,
+                    startIndex: 0,
+                    pageSize: initialPageSize,
+                    excluding: processedAssetIDs
+                )
+                fetchCursor = nextIdx ?? photoService.totalAssetCount
+                photoStack = rawItems
+                isLoading = false
+                if !rawItems.isEmpty { precacheNextImages() }
+                if categoryCounts.isEmpty { refreshCategoryCounts() }
+                startBackgroundPrefetch()
+            }
+        }
+        // Landing animation is triggered in SwipeStackView by onChange(of: isLoading).
     }
 
     func dismissOfflinePrompt() {

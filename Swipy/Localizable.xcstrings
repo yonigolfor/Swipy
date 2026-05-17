@@ -7,9 +7,6 @@
     "🎉" : {
 
     },
-    "🧪" : {
-
-    },
     "10,000+" : {
 
     },
@@ -581,6 +578,9 @@
         }
       }
     },
+    "iCloud" : {
+
+    },
     "items" : {
       "localizations" : {
         "he" : {
@@ -631,6 +631,9 @@
           }
         }
       }
+    },
+    "Offline Mode" : {
+
     },
     "onboarding.demo.cta" : {
       "extractionState" : "manual",
@@ -1127,57 +1130,6 @@
         }
       }
     },
-    "paywall.subtitle" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "You've used all %lld free swipes for today.\nUpgrade once — swipe forever, every day."
-          }
-        },
-        "he" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "השתמשת בכל %lld ההחלקות החינמיות של היום.\nשדרג פעם אחת — החלק לנצח, כל יום."
-          }
-        }
-      }
-    },
-    "paywall.title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unlock Unlimited Swipes"
-          }
-        },
-        "he" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "החלקות ללא הגבלה"
-          }
-        }
-      }
-    },
-    "paywall.share.message" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "A few minutes in this app and I finally have storage on my phone again 🤯"
-          }
-        },
-        "he" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "כמה דקות באפליקציה הזאת ועכשיו יש לי מקום בטלפון 🤯"
-          }
-        }
-      }
-    },
     "paywall.share.bonus.toast" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1208,6 +1160,57 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "שתף וקבל החלקות חינם"
+          }
+        }
+      }
+    },
+    "paywall.share.message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A few minutes in this app and I finally have storage on my phone again 🤯"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "כמה דקות באפליקציה הזאת ועכשיו יש לי מקום בטלפון 🤯"
+          }
+        }
+      }
+    },
+    "paywall.subtitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You've used all %lld free swipes for today.\nUpgrade once — swipe forever, every day."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "השתמשת בכל %lld ההחלקות החינמיות של היום.\nשדרג פעם אחת — החלק לנצח, כל יום."
+          }
+        }
+      }
+    },
+    "paywall.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unlock Unlimited Swipes"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "החלקות ללא הגבלה"
           }
         }
       }
@@ -1332,6 +1335,9 @@
     "Swipy" : {
 
     },
+    "Switch" : {
+
+    },
     "tab.filters" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1383,6 +1389,9 @@
           }
         }
       }
+    },
+    "Tap to swipe only locally stored photos" : {
+
     },
     "Total Storage Freed" : {
       "localizations" : {
@@ -1481,6 +1490,108 @@
         }
       }
     },
+    "offline.indicator_header_enter" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switched to"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "עברת ל"
+          }
+        }
+      }
+    },
+    "offline.indicator_text_enter" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "✈ Offline Mode"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "✈ מצב Offline"
+          }
+        }
+      }
+    },
+    "offline.indicator_header_exit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Back to"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "חזרת ל"
+          }
+        }
+      }
+    },
+    "offline.indicator_text_exit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "📶 Normal Mode"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "📶 מצב רגיל"
+          }
+        }
+      }
+    },
+    "victory.title_offline" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All Offline Photos Done ✈️"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "סיימת את כל התמונות במצב Offline ✈️"
+          }
+        }
+      }
+    },
+    "victory.subtitle_offline" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You've swiped through all your locally stored photos.\nTurn off Offline Mode to continue."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "עברת על כל התמונות הזמינות במכשיר.\nכבה את מצב Offline כדי להמשיך."
+          }
+        }
+      }
+    },
     "You freed up" : {
       "localizations" : {
         "he" : {
@@ -1490,6 +1601,9 @@
           }
         }
       }
+    },
+    "You're offline" : {
+
     }
   },
   "version" : "1.0"

@@ -22,17 +22,20 @@ struct SwipeStackView: View {
     private let meterDestination = CGPoint(x: UIScreen.main.bounds.width - 40, y: 55)
     private let largeFileSizeThreshold: Int64 = 2_000_000 // 2 MB for dev
 
-    // Shuffle animation state
+    // Shuffle / Offline animation state (shared card stack transforms)
     @State private var cardStackOffset: CGFloat = 0
     @State private var cardStackOpacity: Double = 1
     @State private var cardStackScale: CGFloat = 1
-    /// True between fly-out completion and the new batch landing —
-    /// prevents double-triggering the landing animation.
+    /// True between shuffle fly-out and its landing — prevents double-trigger.
     @State private var awaitingShuffleLanding = false
+    /// True between offline-mode fly-out and its landing — prevents double-trigger.
+    @State private var awaitingOfflineLanding = false
 
-    // Time indicator
+    // Time / mode indicator overlay
     @State private var showTimeIndicator = false
     @State private var timeIndicatorText = ""
+    /// Small label shown above the bold indicator text. Set per-transition type.
+    @State private var timeIndicatorHeader = ""
 
     /// Prevents firing prepareUpcomingCards() more than once per gesture.
     @State private var hasFiredEarlyPrecache = false
@@ -79,7 +82,8 @@ struct SwipeStackView: View {
                                     UIApplication.shared.open(url)
                                 } : nil,
                                 reviewBinCount: viewModel.reviewBin.count,
-                                currentFilter: viewModel.currentFilter
+                                currentFilter: viewModel.currentFilter,
+                                isOfflineMode: viewModel.isOfflineMode
                             )
                             .id("victory")
                         } else {
@@ -206,11 +210,11 @@ struct SwipeStackView: View {
         }
         .toolbarBackground(.visible, for: .tabBar)
         .onAppear {
-            // Recover from a stuck shuffle transition (e.g. user switched tabs mid-flight).
-            // shuffleBatchID may have already changed while the view was off-screen,
-            // so onChange won't re-fire — reset transforms manually.
-            if awaitingShuffleLanding {
+            // Recover from a stuck shuffle or offline transition (e.g. user switched
+            // tabs mid-flight). The batchID onChange won't re-fire, so reset manually.
+            if awaitingShuffleLanding || awaitingOfflineLanding {
                 awaitingShuffleLanding = false
+                awaitingOfflineLanding = false
                 cardStackOffset = 0
                 cardStackOpacity = 1
                 cardStackScale = 1
@@ -227,7 +231,7 @@ struct SwipeStackView: View {
         .fullScreenCover(isPresented: $viewModel.shouldShowPaywall) {
             PaywallView()
         }
-        // Landing trigger: fires when a shuffle (or return-home) batch arrives
+        // Shuffle landing: fires when shuffleBatchID changes (activateShuffle / deactivateShuffle).
         .onChange(of: viewModel.shuffleBatchID) { _ in
             guard awaitingShuffleLanding else { return }
             awaitingShuffleLanding = false
@@ -236,11 +240,24 @@ struct SwipeStackView: View {
                 cardStackOpacity = 1
                 cardStackScale = 1
             }
-            // Time indicator
             if let date = viewModel.photoStack.first?.asset.creationDate {
                 triggerTimeIndicator(for: date)
             }
-            // Delayed haptic so it coincides with cards fully landing
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                HapticService.shared.shuffleLand()
+            }
+        }
+        // Offline landing: fires when isLoading transitions false — directly observing
+        // the scan/load completion is more reliable than a separate batch-ID signal.
+        .onChange(of: viewModel.isLoading) { isNowLoading in
+            guard !isNowLoading, awaitingOfflineLanding else { return }
+            awaitingOfflineLanding = false
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.72)) {
+                cardStackOffset = 0
+                cardStackOpacity = 1
+                cardStackScale = 1
+            }
+            triggerOfflineIndicator(entering: viewModel.isOfflineMode)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                 HapticService.shared.shuffleLand()
             }
@@ -332,10 +349,12 @@ struct SwipeStackView: View {
 
     private var offlineFAB: some View {
         Button {
-            if viewModel.isOfflineMode {
-                viewModel.deactivateOfflineMode()
-            } else {
-                viewModel.activateOfflineMode()
+            performOfflineTransition {
+                if viewModel.isOfflineMode {
+                    viewModel.deactivateOfflineMode()
+                } else {
+                    viewModel.activateOfflineMode()
+                }
             }
         } label: {
             ZStack {
@@ -380,7 +399,7 @@ struct SwipeStackView: View {
             Text("Offline Mode")
                 .font(.system(size: 12, weight: .semibold))
             Button {
-                viewModel.deactivateOfflineMode()
+                performOfflineTransition { viewModel.deactivateOfflineMode() }
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 14))
@@ -436,7 +455,7 @@ struct SwipeStackView: View {
                     withAnimation(.spring(response: 0.35)) {
                         viewModel.showOfflinePrompt = false
                     }
-                    viewModel.activateOfflineMode()
+                    performOfflineTransition { viewModel.activateOfflineMode() }
                 } label: {
                     Text("Switch")
                         .font(.system(size: 12, weight: .semibold))
@@ -490,11 +509,13 @@ struct SwipeStackView: View {
             .allowsHitTesting(false)
             .overlay(alignment: .center) {
                 VStack(spacing: 4) {
-                    Text(String(localized: "shuffle.time_traveled"))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.white.opacity(0.7))
-                        .textCase(.uppercase)
-                        .kerning(1.2)
+                    if !timeIndicatorHeader.isEmpty {
+                        Text(timeIndicatorHeader)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.white.opacity(0.7))
+                            .textCase(.uppercase)
+                            .kerning(1.2)
+                    }
                     Text(timeIndicatorText)
                         .font(.system(size: 26, weight: .bold, design: .rounded))
                         .foregroundColor(.white)
@@ -521,16 +542,13 @@ struct SwipeStackView: View {
         guard !awaitingShuffleLanding else { return }
         HapticService.shared.shuffle()
 
-        // Phase 1: fly current cards up and out
         withAnimation(.easeIn(duration: 0.22)) {
             cardStackOffset = -UIScreen.main.bounds.height * 0.65
             cardStackOpacity = 0
             cardStackScale = 0.82
         }
 
-        // Phase 2: after fly-out, position below screen then fire the ViewModel action
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.27) {
-            // No animation — instant reposition so new cards arrive from below
             cardStackOffset = 55
             cardStackScale = 0.85
             cardStackOpacity = 0
@@ -539,10 +557,46 @@ struct SwipeStackView: View {
         }
     }
 
-    // MARK: - Time Indicator Helpers
+    // MARK: - Offline Transition
+
+    /// Fly-out / land-in animation for offline mode toggle — mirrors performShuffleTransition.
+    private func performOfflineTransition(action: @escaping () -> Void) {
+        guard !awaitingOfflineLanding else { return }
+        HapticService.shared.shuffle()
+
+        withAnimation(.easeIn(duration: 0.22)) {
+            cardStackOffset = -UIScreen.main.bounds.height * 0.65
+            cardStackOpacity = 0
+            cardStackScale = 0.82
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.27) {
+            cardStackOffset = 55
+            cardStackScale = 0.85
+            cardStackOpacity = 0
+            awaitingOfflineLanding = true
+            action()
+        }
+    }
+
+    // MARK: - Time / Mode Indicator Helpers
 
     private func triggerTimeIndicator(for date: Date) {
+        timeIndicatorHeader = String(localized: "shuffle.time_traveled")
         timeIndicatorText = formatShuffleDate(date)
+        withAnimation(.easeIn(duration: 0.2)) { showTimeIndicator = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
+            withAnimation(.easeOut(duration: 0.35)) { showTimeIndicator = false }
+        }
+    }
+
+    private func triggerOfflineIndicator(entering: Bool) {
+        timeIndicatorHeader = entering
+            ? String(localized: "offline.indicator_header_enter")
+            : String(localized: "offline.indicator_header_exit")
+        timeIndicatorText = entering
+            ? String(localized: "offline.indicator_text_enter")
+            : String(localized: "offline.indicator_text_exit")
         withAnimation(.easeIn(duration: 0.2)) { showTimeIndicator = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
             withAnimation(.easeOut(duration: 0.35)) { showTimeIndicator = false }
