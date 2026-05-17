@@ -117,8 +117,13 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// True while a background page-fetch is in flight — prevents concurrent fetches.
     private var isFetchingNextPage = false
 
-    /// Saved linear cursor position before a shuffle jump.
-    /// Restored when the user exits shuffle mode.
+    /// The index in the PHFetchResult where the next offline-mode local scan resumes.
+    /// Separate from fetchCursor — the two universes (full library vs. local-only) are
+    /// tracked independently so switching between modes never corrupts either cursor.
+    private var offlineFetchCursor: Int = 0
+
+    /// Saved cursor before a shuffle jump.
+    /// In normal mode stores fetchCursor; in offline mode stores offlineFetchCursor.
     private var savedLinearCursor: Int = 0
 
     /// Snapshot of the photoStack taken at the moment the user entered shuffle mode.
@@ -397,6 +402,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         isLoading = true
         currentFilter = filter
         fetchCursor = 0
+        offlineFetchCursor = 0
         isFetchingNextPage = false
         loadedImageIDs = []
         // Reset shuffle so stale state doesn't leak across filter changes or tab refreshes.
@@ -405,15 +411,22 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         preShuffleStack = nil
 
         Task {
-            // Ensure we have an up-to-date fetch result (no-op if already fresh).
-            if photoService.fetchResult == nil {
-                photoService.fetchAllPhotos()
+            if photoService.fetchResult == nil { photoService.fetchAllPhotos() }
+
+            // Offline mode owns its own universe — scan locally-available assets
+            // from the start of the library regardless of filter.
+            if isOfflineMode {
+                photoStack = []
+                await scanLocalUniverse(targetCount: initialPageSize, batchSize: 150)
+                isLoading = false
+                if categoryCounts.isEmpty { refreshCategoryCounts() }
+                return
             }
 
             let pageSize: Int
             switch filter {
-            case .burstPhotos:  pageSize = 500  // BurstAnalyzer needs a pool
-            case .blurryPhotos: pageSize = 200  // Enough to find blurry images
+            case .burstPhotos:  pageSize = 500
+            case .blurryPhotos: pageSize = 200
             default:            pageSize = initialPageSize
             }
 
@@ -426,40 +439,24 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
             self.fetchCursor = nextIdx ?? photoService.totalAssetCount
 
-            // For blurry and burst — skip the standard initial load entirely.
-            // scanUntilFull handles everything: it scans continuously until
-            // it finds results, never showing an empty stack mid-scan.
             if filter == .blurryPhotos || filter == .burstPhotos {
                 await MainActor.run {
                     self.photoStack = []
-                    self.isLoading = true  // Keep loading indicator visible
+                    self.isLoading = true
                 }
                 await scanUntilFull(filter: filter, targetCount: 15, batchSize: 300)
                 await MainActor.run { self.isLoading = false }
-                if self.categoryCounts.isEmpty {
-                    self.refreshCategoryCounts()
-                }
+                if self.categoryCounts.isEmpty { self.refreshCategoryCounts() }
                 return
             }
 
-            var items = rawItems
-
-            print("📸 initial page: \(items.count) items, cursor: \(self.fetchCursor)/\(self.photoService.totalAssetCount)")
+            print("📸 initial page: \(rawItems.count) items, cursor: \(self.fetchCursor)/\(self.photoService.totalAssetCount)")
 
             await MainActor.run {
-                self.photoStack = items
+                self.photoStack = rawItems
                 self.isLoading = false
-
-                if !items.isEmpty {
-                    // precacheNextImages pulls top-5 into NSCache and warms the video
-                    // pool — covers the initial load gap noted in the architecture doc
-                    // (previously only startCaching hints were sent, not NSCache fills).
-                    self.precacheNextImages()
-                }
-
-                if self.categoryCounts.isEmpty {
-                    self.refreshCategoryCounts()
-                }
+                if !rawItems.isEmpty { self.precacheNextImages() }
+                if self.categoryCounts.isEmpty { self.refreshCategoryCounts() }
             }
         }
     }
@@ -467,11 +464,12 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     // MARK: - Shuffle Mode
 
     /// User-triggered: jump to a random point in the timeline.
-    /// Saves the current linear cursor so the user can return later.
+    /// In offline mode, jumps to a random position within the local-only universe.
     func activateShuffle() {
         guard photoService.totalAssetCount > 0 else { return }
-        savedLinearCursor = fetchCursor
-        preShuffleStack = photoStack          // snapshot for instant restoration on exit
+        // Save the appropriate cursor for whichever universe is active.
+        savedLinearCursor = isOfflineMode ? offlineFetchCursor : fetchCursor
+        preShuffleStack = photoStack
         isShuffleModeActive = true
         isLoading = true
         isFetchingNextPage = false
@@ -480,33 +478,57 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         let randomStart = Int.random(in: 0..<total)
 
         Task {
-            let (items, nextIdx) = photoService.fetchPageOfAssets(
-                for: currentFilter,
-                startIndex: randomStart,
-                pageSize: initialPageSize,
-                excluding: processedAssetIDs
-            )
-            await MainActor.run {
-                self.fetchCursor = nextIdx ?? self.photoService.totalAssetCount
-                self.photoStack = items
-                self.isLoading = false
-                self.shuffleBatchID = UUID()
-                if !items.isEmpty { self.precacheNextImages() }
+            if isOfflineMode {
+                // Jump to a random position in the full library but scan forward
+                // collecting only locally-available assets — no iCloud downloads.
+                offlineFetchCursor = randomStart
+                photoStack = []
+                await scanLocalUniverse(targetCount: initialPageSize, batchSize: 200)
+                isLoading = false
+                shuffleBatchID = UUID()
+                if !photoStack.isEmpty { precacheNextImages() }
+            } else {
+                let (items, nextIdx) = photoService.fetchPageOfAssets(
+                    for: currentFilter,
+                    startIndex: randomStart,
+                    pageSize: initialPageSize,
+                    excluding: processedAssetIDs
+                )
+                await MainActor.run {
+                    self.fetchCursor = nextIdx ?? self.photoService.totalAssetCount
+                    self.photoStack = items
+                    self.isLoading = false
+                    self.shuffleBatchID = UUID()
+                    if !items.isEmpty { self.precacheNextImages() }
+                }
             }
         }
     }
 
-    /// User-triggered: exit shuffle mode and return to the exact stack the user left.
+    /// User-triggered: exit shuffle and return to the exact stack the user left.
     func deactivateShuffle() {
         isShuffleModeActive = false
         isFetchingNextPage = false
-        fetchCursor = savedLinearCursor
 
         let restored = restoreLinearStack()
         photoStack = restored
         preShuffleStack = nil
         shuffleBatchID = UUID()
-        if !restored.isEmpty { precacheNextImages() }
+
+        if isOfflineMode {
+            // Restore the offline universe cursor to where it was before the shuffle.
+            offlineFetchCursor = savedLinearCursor
+            // Keep preOfflineModeStack in sync: it now points to the current
+            // (post-shuffle-deactivation) stack, so deactivating offline later
+            // restores to this correct chronological position, not a stale shuffle batch.
+            preOfflineModeStack = restored
+            if !restored.isEmpty { precacheNextImages() }
+            // Refill from the restored offline cursor if the snapshot was depleted.
+            Task { await scanLocalUniverse() }
+        } else {
+            fetchCursor = savedLinearCursor
+            if !restored.isEmpty { precacheNextImages() }
+        }
     }
 
     /// Returns the stack to restore after exiting shuffle mode.
@@ -523,21 +545,32 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     private func shuffleExhausted() {
         isShuffleModeActive = false
         isFetchingNextPage = false
-        fetchCursor = savedLinearCursor
 
         let restored = restoreLinearStack()
         photoStack = restored
         preShuffleStack = nil
+
+        if isOfflineMode {
+            offlineFetchCursor = savedLinearCursor
+            preOfflineModeStack = restored
+        } else {
+            fetchCursor = savedLinearCursor
+        }
+
         if !restored.isEmpty { precacheNextImages() }
-        // loadNextPageIfNeeded will top up the stack from fetchCursor on the next swipe.
     }
 
     /// Appends the next page of assets to `photoStack` when the stack is running low.
-    /// No-op for filters that need up-front analysis (burst / blurry) since their
-    /// pool is already bounded by the initial large page.
     private func loadNextPageIfNeeded() {
         guard !isFetchingNextPage,
               photoStack.count <= lowWatermark else { return }
+
+        // Offline mode: continue scanning the local universe from where we left off.
+        if isOfflineMode {
+            guard offlineFetchCursor < photoService.totalAssetCount else { return }
+            Task { await scanLocalUniverse(targetCount: photoStack.count + nextPageSize) }
+            return
+        }
 
         // Shuffle segment exhausted — silently return to the linear stream.
         if isShuffleModeActive && fetchCursor >= photoService.totalAssetCount {
@@ -547,8 +580,6 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
         guard fetchCursor < photoService.totalAssetCount else { return }
 
-        // For analysis-heavy filters, use the refill mechanism
-        // which scans continuously until the buffer is full.
         if currentFilter == .blurryPhotos || currentFilter == .burstPhotos {
             Task { await scanUntilFull(filter: currentFilter) }
             return
@@ -571,7 +602,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             await MainActor.run {
                 if !rawItems.isEmpty {
                     self.photoStack.append(contentsOf: rawItems)
-                    photoService.startCaching(
+                    self.photoService.startCaching(
                         for: rawItems,
                         targetSize: CGSize(width: 400, height: 600)
                     )
@@ -736,12 +767,20 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     // MARK: - Offline Mode
 
     func activateOfflineMode() {
-        preOfflineModeStack = photoStack   // snapshot before any reorder
+        preOfflineModeStack = photoStack   // snapshot for instant restoration on exit
         isOfflineMode = true
+        offlineFetchCursor = 0
         UserDefaults.standard.set(true, forKey: "isOfflineModeEnabled")
         PhotoLibraryService.shared.isOfflineMode = true
         cancelPrefetch()
-        applyOfflineModeFilter()
+        // Scan the full library for locally-available assets — owns its own universe,
+        // independent of any shuffle or filter state.
+        Task {
+            photoStack = []
+            isLoading = true
+            await scanLocalUniverse(targetCount: initialPageSize, batchSize: 150)
+            isLoading = false
+        }
     }
 
     func deactivateOfflineMode() {
@@ -763,30 +802,6 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     func dismissOfflinePrompt() {
         showOfflinePrompt = false
-    }
-
-    /// Partitions the stack: locally-available cards first, iCloud-only cards deferred to end.
-    /// Per-asset PHAssetResource check runs on a background thread — no main thread stall.
-    private func applyOfflineModeFilter() {
-        let stack = photoStack
-        Task.detached(priority: .utility) { [weak self] in
-            guard let self else { return }
-            var local: [PhotoItem] = []
-            var cloudOnly: [PhotoItem] = []
-            let service = PhotoLibraryService.shared
-            let diskCache = OfflineCacheService.shared
-
-            for var item in stack {
-                let isLocal = service.isLocallyAvailable(item.asset)
-                    || diskCache.retrieve(for: item.id) != nil
-                item.isCloudOnly = !isLocal
-                if isLocal { local.append(item) } else { cloudOnly.append(item) }
-            }
-
-            await MainActor.run { [weak self] in
-                self?.photoStack = local + cloudOnly
-            }
-        }
     }
 
     // MARK: - Background Pre-fetch
@@ -876,6 +891,55 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     }
 
     // MARK: - Private Helpers
+
+    // MARK: - Local Universe Scanner
+
+    /// Scans the full PHFetchResult for locally-available assets, streaming results
+    /// to photoStack as they are found. Used exclusively when isOfflineMode == true.
+    ///
+    /// The availability check (PHAssetResource) runs in a Task.detached block at
+    /// .userInitiated priority — off the main thread, no UI stalls.
+    /// Results are published back to the @MainActor photoStack immediately per batch.
+    private func scanLocalUniverse(targetCount: Int = 15, batchSize: Int = 150) async {
+        guard let fetchResult = photoService.fetchResult else { return }
+        let service = PhotoLibraryService.shared
+        let diskCache = OfflineCacheService.shared
+        let total = fetchResult.count
+
+        while photoStack.count < targetCount && offlineFetchCursor < total {
+            guard isOfflineMode else { break }
+
+            let start = offlineFetchCursor
+            let end = min(start + batchSize, total)
+            let processed = processedAssetIDs
+            let existingIDs = Set(photoStack.map { $0.id })
+
+            // Push PHAssetResource checks off the main thread
+            let batch = await Task.detached(priority: .userInitiated) {
+                var result: [PhotoItem] = []
+                for i in start..<end {
+                    let asset = fetchResult.object(at: i)
+                    guard !processed.contains(asset.localIdentifier),
+                          !existingIDs.contains(asset.localIdentifier) else { continue }
+                    let isLocal = service.isLocallyAvailable(asset) ||
+                                  diskCache.retrieve(for: asset.localIdentifier) != nil
+                    if isLocal { result.append(PhotoItem(asset: asset)) }
+                }
+                return result
+            }.value
+
+            offlineFetchCursor = end
+            if !batch.isEmpty {
+                photoStack.append(contentsOf: batch)
+                if isLoading { isLoading = false }
+                precacheNextImages()
+            }
+
+            await Task.yield()
+        }
+
+        isLoading = false
+    }
 
     /// Scans items for blur and returns only blurry ones.
     /// Processes images concurrently for maximum speed.
