@@ -205,6 +205,34 @@ VStack {
                     Spacer()
                 }
             }
+
+            // ── iCloud badge (bottom-left) — shown when offline mode is active
+            // and this card hasn't been downloaded to the device yet. ───────────
+            if item.isCloudOnly {
+                VStack {
+                    Spacer()
+                    HStack {
+                        HStack(spacing: 4) {
+                            Image(systemName: "icloud.slash.fill")
+                                .font(.system(size: 10, weight: .medium))
+                            Text("iCloud")
+                                .font(.system(size: 10, weight: .semibold))
+                        }
+                        .foregroundColor(.white.opacity(0.9))
+                        .padding(.horizontal, 9)
+                        .padding(.vertical, 5)
+                        .background(
+                            Capsule()
+                                .fill(.ultraThinMaterial)
+                                .overlay(Capsule().fill(Color.black.opacity(0.45)))
+                        )
+                        .padding(.leading, 12)
+                        .padding(.bottom, item.isVideo ? 56 : 12)
+
+                        Spacer()
+                    }
+                }
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -285,8 +313,14 @@ VStack {
     // MARK: - Image Loading
 
     private func loadImage() {
+        // Disk cache hit — asset was pre-fetched while on WiFi. Serve instantly.
+        if let diskCached = OfflineCacheService.shared.retrieve(for: item.id) {
+            self.image = diskCached
+            self.isLoading = false
+            return
+        }
+
         // Pass 1 — instant local thumbnail, never touches iCloud.
-        // Shows immediately so the user never sees a black card or spinner.
         PhotoLibraryService.shared.loadThumbnail(
             for: item.asset,
             targetSize: CGSize(width: 300, height: 400)
@@ -296,22 +330,19 @@ VStack {
             self.isLoading = false
         }
 
-        // Pass 2 — guaranteed .highQualityFormat, patient iCloud download.
-        // This call never compromises quality; iOS waits until the full asset
-        // is available before firing the callback.
+        // Pass 2 — full-res. Respects isOfflineMode via PhotoLibraryService.
+        // In offline mode: .opportunistic + no network → returns best local quality.
         PhotoLibraryService.shared.loadImage(
             for: item.asset,
             targetSize: CGSize(width: 600, height: 800)
         ) { fullRes in
             guard let fullRes else { return }
             if self.thumbnailImage != nil {
-                // Thumbnail was shown — cross-fade to full-res.
                 withAnimation(.easeIn(duration: 0.18)) { self.image = fullRes }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                     self.thumbnailImage = nil
                 }
             } else {
-                // Full-res arrived before thumbnail (fully local) — swap directly.
                 self.image = fullRes
             }
             self.isLoading = false
@@ -356,7 +387,7 @@ VStack {
             // Slow path: pool miss — load directly.
             let options = PHVideoRequestOptions()
             options.deliveryMode = .automatic
-            options.isNetworkAccessAllowed = true
+            options.isNetworkAccessAllowed = !PhotoLibraryService.shared.isOfflineMode
 
             PHImageManager.default().requestPlayerItem(forVideo: item.asset, options: options) { playerItem, _ in
                 guard let playerItem else {

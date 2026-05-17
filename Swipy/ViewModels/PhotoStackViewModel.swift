@@ -27,6 +27,21 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// thumbnail-gate in Layer 3 and for observability in general.
     @Published var loadedImageIDs: Set<String> = []
 
+    // MARK: - Offline Mode State
+
+    /// True when the stack is filtered to locally-available assets only.
+    @Published var isOfflineMode: Bool = false
+    /// Shown once per session when connectivity drops while offline mode is inactive.
+    @Published var showOfflinePrompt: Bool = false
+    private var hasPromptedOfflineThisSession = false
+    /// Background pre-fetch task. Cancelled on drag start, restarted on drag end.
+    private var prefetchTask: Task<Void, Never>?
+    /// Long-lived task that observes NetworkMonitorService.
+    private var networkObserverTask: Task<Void, Never>?
+    /// Snapshot of photoStack taken the moment offline mode is activated.
+    /// Restored on deactivation so the user returns to exact chronological position.
+    private var preOfflineModeStack: [PhotoItem]? = nil
+
     // MARK: - Paywall State
 
     @Published var shouldShowPaywall = false
@@ -153,12 +168,16 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         super.init()
         persistence.resetIfOld()
         self.processedAssetIDs = persistence.keptPhotoIDs
+        // Restore persisted offline mode before any loads so the first
+        // page fetch already respects the correct isNetworkAccessAllowed state.
+        let savedOffline = UserDefaults.standard.bool(forKey: "isOfflineModeEnabled")
+        self.isOfflineMode = savedOffline
+        PhotoLibraryService.shared.isOfflineMode = savedOffline
         loadPhotos()
         restoreBinFromDisk()
         PHPhotoLibrary.shared().register(self)
-        // Load cached large video count immediately so Filters screen
-        // shows last known value without any scanning on launch.
         loadCachedLargeVideoCount()
+        startNetworkObserver()
         // NOTE: refreshCategoryCounts() is NOT called here.
         // It is triggered lazily by SmartFiltersView.onAppear via .task.
     }
@@ -589,6 +608,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         persistence.saveKeptID(topCard.id)
         self.lastAction = (topCard, .keep)
         photoStack.removeFirst()
+        OfflineCacheService.shared.evict(for: topCard.id)
         DailyLimitService.shared.recordSwipe()
         hapticService.keep()
         precacheNextImages()
@@ -604,6 +624,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         photoStack.removeFirst()
         reviewBin.append(topCard)
         totalSpaceSaved += topCard.fileSize
+        OfflineCacheService.shared.evict(for: topCard.id)
         DailyLimitService.shared.recordSwipe()
         hapticService.delete()
         precacheNextImages()
@@ -618,6 +639,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         processedAssetIDs.insert(topCard.id)
         self.lastAction = (topCard, .starKeeper)
         photoStack.removeFirst()
+        OfflineCacheService.shared.evict(for: topCard.id)
         topCard.isStarred = true
         hapticService.starKeeper()
         precacheNextImages()
@@ -708,6 +730,148 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         case .delete:     deletePhoto()
         case .starKeeper: starPhoto()
         case .undo:       undoLastAction()
+        }
+    }
+
+    // MARK: - Offline Mode
+
+    func activateOfflineMode() {
+        preOfflineModeStack = photoStack   // snapshot before any reorder
+        isOfflineMode = true
+        UserDefaults.standard.set(true, forKey: "isOfflineModeEnabled")
+        PhotoLibraryService.shared.isOfflineMode = true
+        cancelPrefetch()
+        applyOfflineModeFilter()
+    }
+
+    func deactivateOfflineMode() {
+        isOfflineMode = false
+        UserDefaults.standard.set(false, forKey: "isOfflineModeEnabled")
+        PhotoLibraryService.shared.isOfflineMode = false
+
+        // Restore pre-offline snapshot, dropping items swiped during the offline session.
+        // Mirrors the preShuffleStack pattern — zero loading screens, instant return.
+        if let snapshot = preOfflineModeStack {
+            photoStack = snapshot.filter { !processedAssetIDs.contains($0.id) }
+            preOfflineModeStack = nil
+        } else {
+            photoStack = photoStack.map { var i = $0; i.isCloudOnly = false; return i }
+        }
+
+        startBackgroundPrefetch()
+    }
+
+    func dismissOfflinePrompt() {
+        showOfflinePrompt = false
+    }
+
+    /// Partitions the stack: locally-available cards first, iCloud-only cards deferred to end.
+    /// Per-asset PHAssetResource check runs on a background thread — no main thread stall.
+    private func applyOfflineModeFilter() {
+        let stack = photoStack
+        Task.detached(priority: .utility) { [weak self] in
+            guard let self else { return }
+            var local: [PhotoItem] = []
+            var cloudOnly: [PhotoItem] = []
+            let service = PhotoLibraryService.shared
+            let diskCache = OfflineCacheService.shared
+
+            for var item in stack {
+                let isLocal = service.isLocallyAvailable(item.asset)
+                    || diskCache.retrieve(for: item.id) != nil
+                item.isCloudOnly = !isLocal
+                if isLocal { local.append(item) } else { cloudOnly.append(item) }
+            }
+
+            await MainActor.run { [weak self] in
+                self?.photoStack = local + cloudOnly
+            }
+        }
+    }
+
+    // MARK: - Background Pre-fetch
+
+    /// Starts silently downloading the next 20 images to disk while on WiFi.
+    /// Runs at .utility priority — swipe gestures (.userInteractive) always win CPU.
+    /// No-op on cellular, Low Data Mode, or when offline mode is already active.
+    func startBackgroundPrefetch() {
+        cancelPrefetch()
+        guard !isOfflineMode else { return }
+        let network = NetworkMonitorService.shared
+        guard network.isOnline && !network.isExpensive && !network.isConstrained else { return }
+
+        let items = Array(photoStack.dropFirst().prefix(20)).filter { !$0.isVideo }
+        guard !items.isEmpty else { return }
+        let targetSize = PhotoStackViewModel.cacheTargetSize
+
+        prefetchTask = Task.detached(priority: .utility) { [weak self] in
+            for item in items {
+                guard !Task.isCancelled else { break }
+                // Skip if already in NSCache
+                let inMemory = await MainActor.run { [weak self] in
+                    self?.imageCache.object(forKey: item.id as NSString) != nil
+                } ?? false
+                if inMemory { continue }
+                // Skip if already on disk
+                if OfflineCacheService.shared.retrieve(for: item.id) != nil { continue }
+
+                await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+                    PhotoLibraryService.shared.loadImage(
+                        for: item.asset,
+                        targetSize: targetSize,
+                        forceNetworkAccess: true   // always allow download during pre-fetch
+                    ) { image in
+                        if let image {
+                            OfflineCacheService.shared.store(image: image, for: item.id)
+                        }
+                        cont.resume()
+                    }
+                }
+                // Yield between each fetch so swipe gestures are never starved
+                await Task.yield()
+            }
+        }
+    }
+
+    func cancelPrefetch() {
+        prefetchTask?.cancel()
+        prefetchTask = nil
+    }
+
+    func resumePrefetch() {
+        startBackgroundPrefetch()
+    }
+
+    // MARK: - Network Observer
+
+    /// Observes connectivity and auto-prompts once per session when going offline.
+    private func startNetworkObserver() {
+        networkObserverTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            // Skip the first value (current state at subscription time)
+            var isFirst = true
+            for await isOnline in NetworkMonitorService.shared.$isOnline.values {
+                if isFirst { isFirst = false; continue }
+                if !isOnline {
+                    cancelPrefetch()
+                    if !isOfflineMode && !hasPromptedOfflineThisSession {
+                        withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
+                            showOfflinePrompt = true
+                        }
+                        hasPromptedOfflineThisSession = true
+                        // Auto-dismiss after 8 seconds if user ignores it
+                        Task { @MainActor [weak self] in
+                            try? await Task.sleep(nanoseconds: 8_000_000_000)
+                            withAnimation(.easeOut(duration: 0.3)) {
+                                self?.showOfflinePrompt = false
+                            }
+                        }
+                    }
+                } else if !isOfflineMode {
+                    // Back online — kick off pre-fetch silently
+                    startBackgroundPrefetch()
+                }
+            }
         }
     }
 

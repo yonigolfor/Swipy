@@ -36,6 +36,8 @@ struct SwipeStackView: View {
 
     /// Prevents firing prepareUpcomingCards() more than once per gesture.
     @State private var hasFiredEarlyPrecache = false
+    /// True between drag start and drag end — used to cancel/resume pre-fetch.
+    @State private var isDragging = false
 
     private let cardStackSize = 3 // כמה קלפים מציגים מאחור
 
@@ -132,16 +134,28 @@ struct SwipeStackView: View {
             .padding(.top, 10)
             .zIndex(100)
 
-            // 4. Shuffle Mode Badge — appears below DopamineMeter when shuffle is active
-            Group {
+            // 4. Mode Badges — shuffle and/or offline, stacked below DopamineMeter
+            VStack(spacing: 8) {
                 if viewModel.isShuffleModeActive {
                     shuffleBadge
-                        .padding(.top, 100)
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                if viewModel.isOfflineMode {
+                    offlineBadge
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
             }
+            .padding(.top, 100)
             .animation(.spring(response: 0.4, dampingFraction: 0.75), value: viewModel.isShuffleModeActive)
+            .animation(.spring(response: 0.4, dampingFraction: 0.75), value: viewModel.isOfflineMode)
             .zIndex(110)
+
+            // 5b. Offline prompt banner — one-per-session, auto-dismisses after 8s
+            if viewModel.showOfflinePrompt {
+                offlinePromptBanner
+                    .zIndex(120)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
 
             // 5. Time Indicator — month/year overlay that appears on shuffle jump
             if showTimeIndicator {
@@ -150,17 +164,18 @@ struct SwipeStackView: View {
                     .transition(.opacity)
             }
 
-            // 6. Shuffle FAB — bottom-trailing floating action button
-            // Force LTR so the FAB stays on the right in RTL locales (e.g. Hebrew).
+            // 6. FAB row — shuffle (left) + offline mode (right)
+            // Force LTR so FABs stay on correct sides in RTL locales (e.g. Hebrew).
             VStack {
                 Spacer()
                 HStack {
                     shuffleFAB
                     Spacer()
+                    offlineFAB
                 }
-                .padding(.leading, 24)
-                // Extra clearance when the top card is a video so the FAB
-                // doesn't sit on top of the VideoProgressBar.
+                .padding(.horizontal, 24)
+                // Extra clearance when the top card is a video so the FABs
+                // don't sit on top of the VideoProgressBar.
                 .padding(.bottom, 140)
             }
             .environment(\.layoutDirection, .leftToRight)
@@ -310,6 +325,160 @@ struct SwipeStackView: View {
         .shadow(color: .black.opacity(0.25), radius: 10, y: 3)
     }
 
+    // MARK: - Offline FAB
+
+    private var offlineFAB: some View {
+        Button {
+            if viewModel.isOfflineMode {
+                viewModel.deactivateOfflineMode()
+            } else {
+                viewModel.activateOfflineMode()
+            }
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        Circle().fill(
+                            viewModel.isOfflineMode
+                                ? LinearGradient(
+                                    colors: [Color(red: 0.1, green: 0.35, blue: 0.9),
+                                             Color(red: 0.3, green: 0.1, blue: 0.75)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing)
+                                : LinearGradient(
+                                    colors: [Color.white.opacity(0.2), Color.white.opacity(0.05)],
+                                    startPoint: .topLeading, endPoint: .bottomTrailing)
+                        )
+                    )
+                    .frame(width: 56, height: 56)
+                    .shadow(
+                        color: viewModel.isOfflineMode
+                            ? Color(red: 0.1, green: 0.35, blue: 0.9).opacity(0.5)
+                            : .black.opacity(0.18),
+                        radius: 14, y: 5
+                    )
+
+                Image(systemName: viewModel.isOfflineMode ? "airplane.circle.fill" : "airplane")
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundColor(.white)
+                    .scaleEffect(viewModel.isOfflineMode ? 1.1 : 1.0)
+                    .animation(.spring(response: 0.35, dampingFraction: 0.65), value: viewModel.isOfflineMode)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Offline Badge
+
+    private var offlineBadge: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "airplane")
+                .font(.system(size: 11, weight: .bold))
+            Text("Offline Mode")
+                .font(.system(size: 12, weight: .semibold))
+            Button {
+                viewModel.deactivateOfflineMode()
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.white.opacity(0.7))
+            }
+            .buttonStyle(.plain)
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 7)
+        .background(
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    Capsule().fill(
+                        LinearGradient(
+                            colors: [Color(red: 0.1, green: 0.35, blue: 0.9).opacity(0.55),
+                                     Color(red: 0.3, green: 0.1, blue: 0.75).opacity(0.45)],
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                    )
+                )
+        )
+        .shadow(color: .black.opacity(0.25), radius: 10, y: 3)
+    }
+
+    // MARK: - Offline Prompt Banner
+
+    private var offlinePromptBanner: some View {
+        VStack {
+            HStack(spacing: 12) {
+                ZStack {
+                    Circle()
+                        .fill(Color.white.opacity(0.15))
+                        .frame(width: 34, height: 34)
+                    Image(systemName: "wifi.slash")
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.white)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("You're offline")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(.white)
+                    Text("Tap to swipe only locally stored photos")
+                        .font(.system(size: 11))
+                        .foregroundColor(.white.opacity(0.78))
+                }
+
+                Spacer(minLength: 0)
+
+                Button {
+                    withAnimation(.spring(response: 0.35)) {
+                        viewModel.showOfflinePrompt = false
+                    }
+                    viewModel.activateOfflineMode()
+                } label: {
+                    Text("Switch")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(Color.white.opacity(0.22)))
+                }
+                .buttonStyle(.plain)
+
+                Button {
+                    withAnimation(.spring(response: 0.35)) {
+                        viewModel.showOfflinePrompt = false
+                    }
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .bold))
+                        .foregroundColor(.white.opacity(0.6))
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(
+                                LinearGradient(
+                                    colors: [Color(red: 0.08, green: 0.25, blue: 0.75).opacity(0.75),
+                                             Color(red: 0.2, green: 0.05, blue: 0.55).opacity(0.55)],
+                                    startPoint: .leading, endPoint: .trailing
+                                )
+                            )
+                    )
+            )
+            .shadow(color: .black.opacity(0.3), radius: 14, y: 5)
+            .padding(.horizontal, 16)
+            .padding(.top, 100)
+
+            Spacer()
+        }
+    }
+
     // MARK: - Time Indicator
 
     private var timeIndicatorView: some View {
@@ -393,6 +562,10 @@ struct SwipeStackView: View {
     private var dragGesture: some Gesture {
         DragGesture()
             .onChanged { value in
+                if !isDragging {
+                    isDragging = true
+                    viewModel.cancelPrefetch()
+                }
                 dragOffset = value.translation
                 dragRotation = Double(value.translation.width / 20)
 
@@ -406,6 +579,7 @@ struct SwipeStackView: View {
                 }
             }
             .onEnded { value in
+                isDragging = false
                 hasFiredEarlyPrecache = false
                 // SwipeDirection uses the RAW translation (not flipped)
                 // because .left/.right are already correct in RTL context.
@@ -466,6 +640,7 @@ struct SwipeStackView: View {
                     // Spring back to centre
                     resetCardPosition()
                 }
+                viewModel.resumePrefetch()
             }
     }
 

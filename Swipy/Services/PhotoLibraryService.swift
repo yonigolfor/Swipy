@@ -15,6 +15,10 @@ class PhotoLibraryService: ObservableObject {
 
     @Published var authorizationStatus: PHAuthorizationStatus = .notDetermined
 
+    /// When true, all image/video requests skip iCloud downloads.
+    /// Set by PhotoStackViewModel when offline mode is activated.
+    var isOfflineMode: Bool = false
+
     private let imageManager = PHCachingImageManager()
 
     // The raw PHFetchResult — treated as a lazy index, never fully enumerated.
@@ -271,13 +275,35 @@ class PhotoLibraryService: ObservableObject {
         return count
     }
 
+    // MARK: - Local Availability
+
+    /// Returns true if the asset's primary resource is fully stored on-device.
+    /// Uses PHAssetResource metadata — no file I/O, safe to call on any thread.
+    func isLocallyAvailable(_ asset: PHAsset) -> Bool {
+        let resources = PHAssetResource.assetResources(for: asset)
+        let primaryTypes: Set<PHAssetResourceType> = [.photo, .video, .audio,
+                                                       .fullSizePhoto, .fullSizeVideo,
+                                                       .fullSizePairedVideo]
+        for resource in resources where primaryTypes.contains(resource.type) {
+            return (resource.value(forKey: "locallyAvailable") as? Bool) ?? true
+        }
+        return true
+    }
+
     // MARK: - Image Loading
 
     /// Loads an image for a given asset asynchronously.
-    func loadImage(for asset: PHAsset, targetSize: CGSize, completion: @escaping (UIImage?) -> Void) {
+    /// Pass forceNetworkAccess:true to bypass offline mode (e.g. background pre-fetch).
+    func loadImage(
+        for asset: PHAsset,
+        targetSize: CGSize,
+        forceNetworkAccess: Bool = false,
+        completion: @escaping (UIImage?) -> Void
+    ) {
+        let allowsNetwork = forceNetworkAccess || !isOfflineMode
         let options = PHImageRequestOptions()
-        options.deliveryMode = .highQualityFormat
-        options.isNetworkAccessAllowed = true
+        options.deliveryMode = allowsNetwork ? .highQualityFormat : .opportunistic
+        options.isNetworkAccessAllowed = allowsNetwork
         options.isSynchronous = false
 
         imageManager.requestImage(
