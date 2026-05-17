@@ -134,9 +134,9 @@ struct SwipeStackView: View {
             .padding(.top, 10)
             .zIndex(100)
 
-            // 4. Mode Badges — shuffle and/or offline, stacked below DopamineMeter
+            // 4. Mode Badges — shuffle (hidden in offline mode) and/or offline badge
             VStack(spacing: 8) {
-                if viewModel.isShuffleModeActive {
+                if viewModel.isShuffleModeActive && !viewModel.isOfflineMode {
                     shuffleBadge
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
@@ -164,12 +164,15 @@ struct SwipeStackView: View {
                     .transition(.opacity)
             }
 
-            // 6. FAB row — shuffle (left) + offline mode (right)
+            // 6. FAB row — shuffle (left, hidden in offline mode) + offline mode (right)
             // Force LTR so FABs stay on correct sides in RTL locales (e.g. Hebrew).
             VStack {
                 Spacer()
                 HStack {
-                    shuffleFAB
+                    if !viewModel.isOfflineMode {
+                        shuffleFAB
+                            .transition(.opacity.combined(with: .scale))
+                    }
                     Spacer()
                     offlineFAB
                 }

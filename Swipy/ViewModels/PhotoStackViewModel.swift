@@ -173,11 +173,8 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         super.init()
         persistence.resetIfOld()
         self.processedAssetIDs = persistence.keptPhotoIDs
-        // Restore persisted offline mode before any loads so the first
-        // page fetch already respects the correct isNetworkAccessAllowed state.
-        let savedOffline = UserDefaults.standard.bool(forKey: "isOfflineModeEnabled")
-        self.isOfflineMode = savedOffline
-        PhotoLibraryService.shared.isOfflineMode = savedOffline
+        // Offline mode is intentionally NOT restored across launches.
+        // It's a session-level "I'm boarding a flight now" action, not a persistent setting.
         loadPhotos()
         restoreBinFromDisk()
         PHPhotoLibrary.shared().register(self)
@@ -483,7 +480,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 // collecting only locally-available assets — no iCloud downloads.
                 offlineFetchCursor = randomStart
                 photoStack = []
-                await scanLocalUniverse(targetCount: initialPageSize, batchSize: 200)
+                await scanLocalUniverse(targetCount: initialPageSize, batchSize: 200, wrapAround: true)
                 isLoading = false
                 shuffleBatchID = UUID()
                 if !photoStack.isEmpty { precacheNextImages() }
@@ -770,11 +767,12 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         preOfflineModeStack = photoStack   // snapshot for instant restoration on exit
         isOfflineMode = true
         offlineFetchCursor = 0
-        UserDefaults.standard.set(true, forKey: "isOfflineModeEnabled")
         PhotoLibraryService.shared.isOfflineMode = true
         cancelPrefetch()
-        // Scan the full library for locally-available assets — owns its own universe,
-        // independent of any shuffle or filter state.
+        // If shuffle was active, reset it cleanly — shuffle and offline are mutually exclusive.
+        isShuffleModeActive = false
+        preShuffleStack = nil
+        // Scan the full library for locally-available assets — owns its own universe.
         Task {
             photoStack = []
             isLoading = true
@@ -785,7 +783,6 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     func deactivateOfflineMode() {
         isOfflineMode = false
-        UserDefaults.standard.set(false, forKey: "isOfflineModeEnabled")
         PhotoLibraryService.shared.isOfflineMode = false
 
         // Restore pre-offline snapshot, dropping items swiped during the offline session.
@@ -897,30 +894,64 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// Scans the full PHFetchResult for locally-available assets, streaming results
     /// to photoStack as they are found. Used exclusively when isOfflineMode == true.
     ///
-    /// The availability check (PHAssetResource) runs in a Task.detached block at
-    /// .userInitiated priority — off the main thread, no UI stalls.
-    /// Results are published back to the @MainActor photoStack immediately per batch.
-    private func scanLocalUniverse(targetCount: Int = 15, batchSize: Int = 150) async {
-        guard let fetchResult = photoService.fetchResult else { return }
+    /// wrapAround: when true (shuffle) — if the scan reaches the end of the library
+    /// without finding enough local photos, it wraps to index 0 and continues up to
+    /// the original start position. Prevents the empty-screen bug when a random
+    /// shuffle start lands near the end of a mostly-iCloud library.
+    private func scanLocalUniverse(
+        targetCount: Int = 15,
+        batchSize: Int = 150,
+        wrapAround: Bool = false
+    ) async {
+        guard let fetchResult = photoService.fetchResult else { isLoading = false; return }
         let service = PhotoLibraryService.shared
         let diskCache = OfflineCacheService.shared
         let total = fetchResult.count
+        guard total > 0 else { isLoading = false; return }
 
-        while photoStack.count < targetCount && offlineFetchCursor < total {
+        let initialCursor = offlineFetchCursor
+        var hasWrapped = false
+
+        // Absolute stop: counts every library index visited across all iterations.
+        // When totalScanned == total we've seen every asset exactly once —
+        // no local photos exist in the library, exit unconditionally.
+        var totalScanned = 0
+
+        // Deduplication set built once and grown incrementally.
+        // Avoids recomputing Set(photoStack.map{$0.id}) inside every iteration
+        // and stays correct across the wrap-around boundary.
+        var seenIDs: Set<String> = Set(photoStack.map { $0.id })
+
+        while photoStack.count < targetCount {
             guard isOfflineMode else { break }
 
-            let start = offlineFetchCursor
-            let end = min(start + batchSize, total)
-            let processed = processedAssetIDs
-            let existingIDs = Set(photoStack.map { $0.id })
+            // Absolute termination guard — full library scanned, nothing local found
+            guard totalScanned < total else { break }
 
-            // Push PHAssetResource checks off the main thread
+            if offlineFetchCursor >= total {
+                if wrapAround && !hasWrapped && initialCursor > 0 {
+                    hasWrapped = true
+                    offlineFetchCursor = 0
+                } else {
+                    break
+                }
+            }
+
+            // Wrap-around stop: back to original start position
+            if hasWrapped && offlineFetchCursor >= initialCursor { break }
+
+            let start = offlineFetchCursor
+            let upperBound = hasWrapped ? initialCursor : total
+            let end = min(start + batchSize, upperBound)
+            let processed = processedAssetIDs
+            let snapshot = seenIDs  // value-copy for the detached task
+
             let batch = await Task.detached(priority: .userInitiated) {
                 var result: [PhotoItem] = []
                 for i in start..<end {
                     let asset = fetchResult.object(at: i)
                     guard !processed.contains(asset.localIdentifier),
-                          !existingIDs.contains(asset.localIdentifier) else { continue }
+                          !snapshot.contains(asset.localIdentifier) else { continue }
                     let isLocal = service.isLocallyAvailable(asset) ||
                                   diskCache.retrieve(for: asset.localIdentifier) != nil
                     if isLocal { result.append(PhotoItem(asset: asset)) }
@@ -928,8 +959,11 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 return result
             }.value
 
+            totalScanned += end - start
             offlineFetchCursor = end
+
             if !batch.isEmpty {
+                for item in batch { seenIDs.insert(item.id) }
                 photoStack.append(contentsOf: batch)
                 if isLoading { isLoading = false }
                 precacheNextImages()
