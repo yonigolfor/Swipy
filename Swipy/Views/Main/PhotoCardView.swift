@@ -372,21 +372,23 @@ VStack {
 
     private func loadVideoPlayer() {
         Task { @MainActor in
-            if let pooledPlayer = VideoPlayerPool.shared.player(for: item.asset) {
-                pooledPlayer.isMuted = PhotoCardView.globalMute
-                self.player = pooledPlayer
-                self.isLoading = false
-                if self.isTopCard {
-                    await pooledPlayer.seek(to: .zero)
-                    pooledPlayer.play()
-                }
-                markVideoReady()
+            // 1. Pool hit — instant, no I/O.
+            if let pooled = VideoPlayerPool.shared.player(for: item.asset) {
+                await activatePlayer(pooled)
                 return
             }
 
-            // Slow path: pool miss — load directly.
+            // 2. In-flight — pool is already loading this asset; wait rather than
+            //    firing a competing PHImageManager request (the first-video freeze fix).
+            if let pooled = await VideoPlayerPool.shared.awaitPlayer(for: item.asset, timeout: 0.5) {
+                await activatePlayer(pooled)
+                return
+            }
+
+            // 3. True miss — asset is outside the pool's warm-up window (e.g. fast
+            //    swiper who outruns the pool). Load directly as a safety net.
             let options = PHVideoRequestOptions()
-            options.deliveryMode = .automatic
+            options.deliveryMode = .fastFormat
             options.isNetworkAccessAllowed = !PhotoLibraryService.shared.isOfflineMode
 
             PHImageManager.default().requestPlayerItem(forVideo: item.asset, options: options) { playerItem, _ in
@@ -413,6 +415,19 @@ VStack {
                 }
             }
         }
+    }
+
+    /// Configures a pooled AVPlayer as the active player for this card.
+    @MainActor
+    private func activatePlayer(_ avPlayer: AVPlayer) async {
+        avPlayer.isMuted = PhotoCardView.globalMute
+        self.player = avPlayer
+        self.isLoading = false
+        if self.isTopCard {
+            await avPlayer.seek(to: .zero)
+            avPlayer.play()
+        }
+        markVideoReady()
     }
 }
 

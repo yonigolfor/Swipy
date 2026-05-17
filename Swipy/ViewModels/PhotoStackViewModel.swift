@@ -453,6 +453,16 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             print("📸 initial page: \(rawItems.count) items, cursor: \(self.fetchCursor)/\(self.photoService.totalAssetCount)")
 
             await MainActor.run {
+                // Kick off pool warm-up BEFORE publishing photoStack so the pool
+                // gets a head start over PhotoCardView.onAppear — eliminates the
+                // first-video freeze on initial load.
+                let firstVideoAssets = rawItems.prefix(3)
+                    .filter { $0.isVideo }
+                    .map { $0.asset }
+                if !firstVideoAssets.isEmpty {
+                    VideoPlayerPool.shared.warmUp(for: firstVideoAssets)
+                }
+
                 self.photoStack = rawItems
                 self.isLoading = false
                 if !rawItems.isEmpty { self.precacheNextImages() }
@@ -813,6 +823,8 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 // Wrapped in Task so isLoading true→false crosses a run-loop boundary,
                 // allowing onChange(of: isLoading) in SwipeStackView to fire.
                 fetchCursor = preOfflineFetchCursor
+                let firstVideoAssets = snapshot.prefix(3).filter { $0.isVideo }.map { $0.asset }
+                if !firstVideoAssets.isEmpty { VideoPlayerPool.shared.warmUp(for: firstVideoAssets) }
                 photoStack = snapshot
                 isLoading = false
                 precacheNextImages()
@@ -830,6 +842,8 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                     excluding: processedAssetIDs
                 )
                 fetchCursor = nextIdx ?? photoService.totalAssetCount
+                let firstVideoAssets = rawItems.prefix(3).filter { $0.isVideo }.map { $0.asset }
+                if !firstVideoAssets.isEmpty { VideoPlayerPool.shared.warmUp(for: firstVideoAssets) }
                 photoStack = rawItems
                 isLoading = false
                 if !rawItems.isEmpty { precacheNextImages() }

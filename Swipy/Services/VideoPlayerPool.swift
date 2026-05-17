@@ -10,7 +10,8 @@
 //  Design:
 //  - Holds up to `maxPoolSize` (3) prepared AVPlayer instances keyed by asset localIdentifier.
 //  - PhotoStackViewModel calls `warmUp(for:)` whenever the stack changes.
-//  - PhotoCardView calls `player(for:)` instead of requesting a new AVPlayerItem itself.
+//  - PhotoCardView calls `awaitPlayer(for:)` which waits for an in-flight load rather
+//    than firing a competing PHImageManager request — eliminates the first-video race.
 //  - When a card is swiped away, PhotoCardView calls `release(for:)` so the pool
 //    can evict that player and reclaim memory.
 //  - All PHImageManager calls happen on a background queue; only the final
@@ -44,14 +45,53 @@ final class VideoPlayerPool {
     /// to prevent duplicate PHImageManager requests for the same asset.
     private var inFlight: Set<String> = []
 
+    /// Continuations waiting for a specific asset to finish loading.
+    /// Keyed by asset ID → (waiter UUID → continuation) so each waiter
+    /// can be individually timed out and removed without affecting others.
+    private var pendingContinuations: [String: [UUID: CheckedContinuation<AVPlayer?, Never>]] = [:]
+
     // MARK: - Public API
 
     /// Returns an already-prepared AVPlayer for `asset` if one exists in the pool,
-    /// or nil if it is still loading (the caller should show a placeholder).
-    ///
-    /// Always call `warmUp(for:)` first so the pool has time to prepare.
+    /// or nil if it is not in the pool (may still be in-flight — use awaitPlayer instead).
     func player(for asset: PHAsset) -> AVPlayer? {
         pool[asset.localIdentifier]
+    }
+
+    /// Returns a prepared AVPlayer for `asset`, waiting up to `timeout` seconds
+    /// if the asset is currently being loaded by the pool (in-flight).
+    ///
+    /// - Returns: the pooled player when ready, or nil if not in-flight or timeout expires.
+    ///
+    /// Prefer this over `player(for:)` + slow-path fallback in callers that run
+    /// concurrently with `warmUp` — it eliminates the duplicate PHImageManager request
+    /// that causes the first-video freeze.
+    func awaitPlayer(for asset: PHAsset, timeout: TimeInterval = 0.5) async -> AVPlayer? {
+        let id = asset.localIdentifier
+
+        // Already ready — instant return.
+        if let existing = pool[id] { return existing }
+
+        // Not in the pool and not being loaded — caller must use its own slow path.
+        guard inFlight.contains(id) else { return nil }
+
+        // Suspend until the in-flight load completes or the timeout fires.
+        let waiterID = UUID()
+        return await withCheckedContinuation { continuation in
+            pendingContinuations[id, default: [:]][waiterID] = continuation
+
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                // If our continuation is still registered after the timeout, resume with nil.
+                if pendingContinuations[id]?[waiterID] != nil {
+                    pendingContinuations[id]?.removeValue(forKey: waiterID)
+                    if pendingContinuations[id]?.isEmpty == true {
+                        pendingContinuations.removeValue(forKey: id)
+                    }
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
     }
 
     /// Pre-loads AVPlayerItems for the given assets in priority order.
@@ -91,25 +131,31 @@ final class VideoPlayerPool {
     }
 
     /// Pauses all players in the pool.
-        /// Call this when the user navigates away from the Swipe tab.
-        func pauseAll() {
-            pool.values.forEach { $0.pause() }
-        }
+    /// Call this when the user navigates away from the Swipe tab.
+    func pauseAll() {
+        pool.values.forEach { $0.pause() }
+    }
 
-        /// Clears the entire pool and releases all AVPlayer instances.
-        /// MUST be called before permanently deleting assets from the photo library,
-        /// otherwise AVPlayerItems holding references to deleted assets will cause
-        /// EXC_BAD_ACCESS crashes.
-        func drainAll() {
-            let ids = Array(pool.keys)
-            ids.forEach { evict(id: $0) }
-            inFlight.removeAll()
+    /// Clears the entire pool and releases all AVPlayer instances.
+    /// MUST be called before permanently deleting assets from the photo library,
+    /// otherwise AVPlayerItems holding references to deleted assets will cause
+    /// EXC_BAD_ACCESS crashes.
+    func drainAll() {
+        let ids = Array(pool.keys)
+        ids.forEach { evict(id: $0) }
+        inFlight.removeAll()
+        // Resume all pending waiters with nil so they fall back to their own load path.
+        for (_, waiters) in pendingContinuations {
+            for cont in waiters.values { cont.resume(returning: nil) }
         }
+        pendingContinuations.removeAll()
+    }
 
     // MARK: - Private Helpers
 
     /// Loads an AVPlayerItem for `asset` on a background queue and stores
-    /// the resulting AVPlayer in the pool on the main actor.
+    /// the resulting AVPlayer in the pool on the main actor, then wakes
+    /// any callers suspended in `awaitPlayer`.
     private func load(asset: PHAsset) {
         let id = asset.localIdentifier
         inFlight.insert(id)
@@ -130,6 +176,7 @@ final class VideoPlayerPool {
                     guard let playerItem else {
                         Task { @MainActor in
                             self.inFlight.remove(id)
+                            self.wakeWaiters(for: id, player: nil)
                         }
                         continuation.resume()
                         return
@@ -152,16 +199,24 @@ final class VideoPlayerPool {
                     }
 
                     Task { @MainActor in
-                        // Only store if pool is not already full with other assets.
                         if self.pool.count < self.maxPoolSize {
                             self.pool[id] = player
                         }
                         self.inFlight.remove(id)
+                        // Wake waiters with the player (pool[id]) or directly with
+                        // `player` when the pool was full — either way they get playback.
+                        self.wakeWaiters(for: id, player: self.pool[id] ?? player)
                     }
                     continuation.resume()
                 }
             }
         }
+    }
+
+    /// Resumes all continuations waiting for `id` and clears the waiter list.
+    private func wakeWaiters(for id: String, player: AVPlayer?) {
+        guard let waiters = pendingContinuations.removeValue(forKey: id) else { return }
+        for cont in waiters.values { cont.resume(returning: player) }
     }
 
     /// Removes a player from the pool and cleans up its resources.
