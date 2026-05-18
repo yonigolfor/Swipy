@@ -120,6 +120,10 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// True while a background page-fetch is in flight — prevents concurrent fetches.
     private var isFetchingNextPage = false
 
+    /// True while scanLocalUniverse is executing — prevents a second concurrent scan
+    /// from corrupting offlineFetchCursor at the await Task.yield() suspension points.
+    private var isScanning = false
+
     /// The index in the PHFetchResult where the next offline-mode local scan resumes.
     /// Separate from fetchCursor — the two universes (full library vs. local-only) are
     /// tracked independently so switching between modes never corrupts either cursor.
@@ -960,6 +964,9 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         batchSize: Int = 150,
         wrapAround: Bool = false
     ) async {
+        guard !isScanning else { return }
+        isScanning = true
+        defer { isScanning = false }
         guard let fetchResult = photoService.fetchResult else { isLoading = false; return }
         let service = PhotoLibraryService.shared
         let diskCache = OfflineCacheService.shared
@@ -1213,9 +1220,18 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         // Index-0 immunity: never evict the card currently on screen,
         // even if called unexpectedly while a drag is in progress.
         if let topID = photoStack.first?.id { keepIDs.insert(topID) }
+        var evictedItems: [PhotoItem] = []
         for id in activeCacheIDs where !keepIDs.contains(id) && id != lastAction?.item.id {
             imageCache.removeObject(forKey: id as NSString)
             loadedImageIDs.remove(id)
+            // Collect the PhotoItem so we can tell PHCachingImageManager to stop
+            // pre-fetching assets that have left the visible window (Bug #3 fix).
+            if let item = photoStack.first(where: { $0.id == id }) {
+                evictedItems.append(item)
+            }
+        }
+        if !evictedItems.isEmpty {
+            photoService.stopCaching(for: evictedItems)
         }
         activeCacheIDs = keepIDs
         if let lastID = lastAction?.item.id { activeCacheIDs.insert(lastID) }

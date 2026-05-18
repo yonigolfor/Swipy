@@ -46,6 +46,16 @@ final class OfflineCacheService {
         return UIImage(data: data)
     }
 
+    /// Async variant — runs the file read on ioQueue so the caller's actor
+    /// (typically @MainActor) is never blocked by disk I/O.
+    func retrieveAsync(for assetID: String) async -> UIImage? {
+        await withCheckedContinuation { continuation in
+            ioQueue.async { [self] in
+                continuation.resume(returning: retrieve(for: assetID))
+            }
+        }
+    }
+
     func evict(for assetID: String) {
         ioQueue.async { [weak self] in
             guard let self else { return }

@@ -243,8 +243,16 @@ VStack {
                 loadVideoThumbnail()
                 loadVideoPlayer()
             } else if image == nil {
-                // Cache hit at init already set image — skip the async round-trip.
-                loadImage()
+                Task { @MainActor in
+                    // Disk cache check runs on OfflineCacheService.ioQueue (Bug #5 fix:
+                    // keeps file I/O off the main thread). Resumes here with the result.
+                    if let diskCached = await OfflineCacheService.shared.retrieveAsync(for: item.id) {
+                        image = diskCached
+                        isLoading = false
+                    } else {
+                        loadImage()
+                    }
+                }
             }
         }
         .onDisappear {
@@ -313,13 +321,6 @@ VStack {
     // MARK: - Image Loading
 
     private func loadImage() {
-        // Disk cache hit — asset was pre-fetched while on WiFi. Serve instantly.
-        if let diskCached = OfflineCacheService.shared.retrieve(for: item.id) {
-            self.image = diskCached
-            self.isLoading = false
-            return
-        }
-
         // Pass 1 — instant local thumbnail, never touches iCloud.
         PhotoLibraryService.shared.loadThumbnail(
             for: item.asset,
@@ -336,7 +337,12 @@ VStack {
             for: item.asset,
             targetSize: CGSize(width: 600, height: 800)
         ) { fullRes in
-            guard let fullRes else { return }
+            guard let fullRes else {
+                // Asset missing or corrupt — stop the spinner so the card
+                // shows the error placeholder instead of loading forever (Bug #1 fix).
+                self.isLoading = false
+                return
+            }
             if self.thumbnailImage != nil {
                 withAnimation(.easeIn(duration: 0.18)) { self.image = fullRes }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {

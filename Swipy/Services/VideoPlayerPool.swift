@@ -50,12 +50,23 @@ final class VideoPlayerPool {
     /// can be individually timed out and removed without affecting others.
     private var pendingContinuations: [String: [UUID: CheckedContinuation<AVPlayer?, Never>]] = [:]
 
+    /// Tasks driving each in-flight PHImageManager load, keyed by asset localIdentifier.
+    /// Cancelled in evict() so stale loads don't corrupt the pool after the asset
+    /// leaves the visible window on fast swipes or mode switches.
+    private var inFlightTasks: [String: Task<Void, Never>] = [:]
+
     // MARK: - Public API
 
     /// Returns an already-prepared AVPlayer for `asset` if one exists in the pool,
     /// or nil if it is not in the pool (may still be in-flight — use awaitPlayer instead).
     func player(for asset: PHAsset) -> AVPlayer? {
         pool[asset.localIdentifier]
+    }
+
+    /// Returns true if the pool is currently loading a player for `assetID`.
+    /// Useful for displaying loading indicators before awaitPlayer is called.
+    func isLoading(for assetID: String) -> Bool {
+        inFlight.contains(assetID)
     }
 
     /// Returns a prepared AVPlayer for `asset`, waiting up to `timeout` seconds
@@ -115,11 +126,14 @@ final class VideoPlayerPool {
             load(asset: asset)
         }
 
-        // Evict players for assets that are no longer in the upcoming window,
-        // but never touch the protected (currently displayed) player.
+        // Evict pool entries AND cancel in-flight loads for assets that are no longer
+        // in the upcoming window — prevents pool pollution on fast swipes where
+        // stale loads would otherwise complete and occupy a slot the new assets need.
+        // The protected ID (currently displayed player) is never touched.
         let upcomingIDs = Set(assets.map { $0.localIdentifier })
-        let staleIDs = pool.keys.filter { !upcomingIDs.contains($0) && $0 != protectedID }
-        for id in staleIDs {
+        let stalePoolIDs = pool.keys.filter { !upcomingIDs.contains($0) && $0 != protectedID }
+        let staleInFlightIDs = inFlight.filter { !upcomingIDs.contains($0) && $0 != protectedID }
+        for id in Set(stalePoolIDs).union(staleInFlightIDs) {
             evict(id: id)
         }
     }
@@ -141,6 +155,10 @@ final class VideoPlayerPool {
     /// otherwise AVPlayerItems holding references to deleted assets will cause
     /// EXC_BAD_ACCESS crashes.
     func drainAll() {
+        // Cancel in-flight tasks before evicting pool entries so their completions
+        // see the cleared inFlight set and discard players they were about to store.
+        inFlightTasks.values.forEach { $0.cancel() }
+        inFlightTasks.removeAll()
         let ids = Array(pool.keys)
         ids.forEach { evict(id: $0) }
         inFlight.removeAll()
@@ -167,7 +185,7 @@ final class VideoPlayerPool {
 
         // PHImageManager must be called from a background thread to avoid
         // blocking the main thread during the network/disk fetch.
-        Task.detached(priority: .userInitiated) {
+        let task = Task.detached(priority: .userInitiated) {
             await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
                 PHImageManager.default().requestPlayerItem(
                     forVideo: asset,
@@ -176,6 +194,7 @@ final class VideoPlayerPool {
                     guard let playerItem else {
                         Task { @MainActor in
                             self.inFlight.remove(id)
+                            self.inFlightTasks.removeValue(forKey: id)
                             self.wakeWaiters(for: id, player: nil)
                         }
                         continuation.resume()
@@ -199,6 +218,15 @@ final class VideoPlayerPool {
                     }
 
                     Task { @MainActor in
+                        self.inFlightTasks.removeValue(forKey: id)
+                        // Guard: evict() clears inFlight when an asset leaves the visible
+                        // window. If that happened while this request was in-flight,
+                        // discard the freshly-built player — it is no longer needed.
+                        guard self.inFlight.contains(id) else {
+                            player.pause()
+                            player.replaceCurrentItem(with: nil)
+                            return
+                        }
                         if self.pool.count < self.maxPoolSize {
                             self.pool[id] = player
                         }
@@ -211,6 +239,7 @@ final class VideoPlayerPool {
                 }
             }
         }
+        inFlightTasks[id] = task
     }
 
     /// Resumes all continuations waiting for `id` and clears the waiter list.
@@ -221,6 +250,14 @@ final class VideoPlayerPool {
 
     /// Removes a player from the pool and cleans up its resources.
     private func evict(id: String) {
+        // Cancel the loading task and clear the "wanted" signal so that the
+        // PHImageManager callback discards its result if it fires after eviction.
+        inFlightTasks[id]?.cancel()
+        inFlightTasks.removeValue(forKey: id)
+        inFlight.remove(id)
+        // Wake any callers suspended in awaitPlayer so they fall back to their
+        // own slow path instead of waiting indefinitely for a cancelled load.
+        wakeWaiters(for: id, player: nil)
         guard let player = pool.removeValue(forKey: id) else { return }
         player.pause()
         player.replaceCurrentItem(with: nil)
