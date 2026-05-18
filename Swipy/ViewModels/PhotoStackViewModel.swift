@@ -98,9 +98,19 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         height: UIScreen.main.bounds.height * 0.65
     )
 
+    // MARK: - Snooze Queue
+
+    private struct SnoozedPhoto {
+        let item: PhotoItem
+        var swipesRemaining: Int
+        let snoozeCount: Int
+    }
+
+    private var snoozeQueue: [SnoozedPhoto] = []
+
     // MARK: - Private State
 
-    /// IDs of every asset the user has already acted on (keep / delete / star).
+    /// IDs of every asset the user has already acted on (keep / delete / snooze).
     /// Persists across tab switches and filter changes within one app session.
     /// Cleared only when emptyTrash() is called for permanently-deleted items
     /// (their IDs can never come back anyway), or when the user explicitly
@@ -179,11 +189,13 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     override init() {
         super.init()
         persistence.resetIfOld()
-        self.processedAssetIDs = persistence.keptPhotoIDs
+        // Include snoozed IDs so pagination never surfaces them behind our backs
+        self.processedAssetIDs = persistence.keptPhotoIDs.union(Set(persistence.snoozedPhotos.keys))
         // Offline mode is intentionally NOT restored across launches.
         // It's a session-level "I'm boarding a flight now" action, not a persistent setting.
-        loadPhotos()
         restoreBinFromDisk()
+        restoreSnoozedItems()
+        loadPhotos()
         PHPhotoLibrary.shared().register(self)
         loadCachedLargeVideoCount()
         startNetworkObserver()
@@ -392,6 +404,21 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         items.forEach { processedAssetIDs.insert($0.id) }
     }
 
+    /// Reconstructs the snooze queue from persisted [localIdentifier: snoozeCount].
+    /// Called once at init — items are injected to the front of photoStack by
+    /// flushSnoozedToFront() inside resetAndLoad after the initial page loads.
+    private func restoreSnoozedItems() {
+        let snoozedDict = persistence.snoozedPhotos
+        guard !snoozedDict.isEmpty else { return }
+        let assetMap = photoService.fetchAssets(forIDs: Array(snoozedDict.keys))
+        let items: [SnoozedPhoto] = snoozedDict.compactMap { id, count in
+            guard let asset = assetMap[id] else { return nil }
+            // swipesRemaining=0 so flushSnoozedToFront() injects them immediately
+            return SnoozedPhoto(item: PhotoItem(asset: asset), swipesRemaining: 0, snoozeCount: count)
+        }
+        self.snoozeQueue = items
+    }
+
     // MARK: - Data Loading
 
     /// Loads photos for the given filter, always excluding already-processed assets.
@@ -422,6 +449,11 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             if isOfflineMode {
                 photoStack = []
                 await scanLocalUniverse(targetCount: initialPageSize, batchSize: 150)
+                let flushed = flushSnoozedToFront()
+                if !flushed.isEmpty {
+                    photoStack.insert(contentsOf: flushed, at: 0)
+                    precacheNextImages()
+                }
                 isLoading = false
                 if categoryCounts.isEmpty { refreshCategoryCounts() }
                 return
@@ -449,7 +481,14 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                     self.isLoading = true
                 }
                 await scanUntilFull(filter: filter, targetCount: 15, batchSize: 300)
-                await MainActor.run { self.isLoading = false }
+                await MainActor.run {
+                    let flushed = self.flushSnoozedToFront()
+                    if !flushed.isEmpty {
+                        self.photoStack.insert(contentsOf: flushed, at: 0)
+                        self.precacheNextImages()
+                    }
+                    self.isLoading = false
+                }
                 if self.categoryCounts.isEmpty { self.refreshCategoryCounts() }
                 return
             }
@@ -467,9 +506,10 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                     VideoPlayerPool.shared.warmUp(for: firstVideoAssets)
                 }
 
-                self.photoStack = rawItems
+                let flushed = self.flushSnoozedToFront()
+                self.photoStack = flushed + rawItems
                 self.isLoading = false
-                if !rawItems.isEmpty { self.precacheNextImages() }
+                if !self.photoStack.isEmpty { self.precacheNextImages() }
                 if self.categoryCounts.isEmpty { self.refreshCategoryCounts() }
             }
         }
@@ -498,6 +538,8 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 offlineFetchCursor = randomStart
                 photoStack = []
                 await scanLocalUniverse(targetCount: initialPageSize, batchSize: 200, wrapAround: true)
+                let flushed = flushSnoozedToFront()
+                if !flushed.isEmpty { photoStack.insert(contentsOf: flushed, at: 0) }
                 isLoading = false
                 shuffleBatchID = UUID()
                 if !photoStack.isEmpty { precacheNextImages() }
@@ -510,10 +552,11 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 )
                 await MainActor.run {
                     self.fetchCursor = nextIdx ?? self.photoService.totalAssetCount
-                    self.photoStack = items
+                    let flushed = self.flushSnoozedToFront()
+                    self.photoStack = flushed + items
                     self.isLoading = false
                     self.shuffleBatchID = UUID()
-                    if !items.isEmpty { self.precacheNextImages() }
+                    if !self.photoStack.isEmpty { self.precacheNextImages() }
                 }
             }
         }
@@ -525,7 +568,8 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         isFetchingNextPage = false
 
         let restored = restoreLinearStack()
-        photoStack = restored
+        let flushed = flushSnoozedToFront()
+        photoStack = flushed + restored
         preShuffleStack = nil
         shuffleBatchID = UUID()
 
@@ -535,13 +579,13 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             // Keep preOfflineModeStack in sync: it now points to the current
             // (post-shuffle-deactivation) stack, so deactivating offline later
             // restores to this correct chronological position, not a stale shuffle batch.
-            preOfflineModeStack = restored
-            if !restored.isEmpty { precacheNextImages() }
+            preOfflineModeStack = photoStack
+            if !photoStack.isEmpty { precacheNextImages() }
             // Refill from the restored offline cursor if the snapshot was depleted.
             Task { await scanLocalUniverse() }
         } else {
             fetchCursor = savedLinearCursor
-            if !restored.isEmpty { precacheNextImages() }
+            if !photoStack.isEmpty { precacheNextImages() }
         }
     }
 
@@ -561,17 +605,18 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         isFetchingNextPage = false
 
         let restored = restoreLinearStack()
-        photoStack = restored
+        let flushed = flushSnoozedToFront()
+        photoStack = flushed + restored
         preShuffleStack = nil
 
         if isOfflineMode {
             offlineFetchCursor = savedLinearCursor
-            preOfflineModeStack = restored
+            preOfflineModeStack = photoStack
         } else {
             fetchCursor = savedLinearCursor
         }
 
-        if !restored.isEmpty { precacheNextImages() }
+        if !photoStack.isEmpty { precacheNextImages() }
     }
 
     /// Appends the next page of assets to `photoStack` when the stack is running low.
@@ -654,11 +699,13 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         lastSwipedImage = imageCache.object(forKey: topCard.id as NSString)
         processedAssetIDs.insert(topCard.id)
         persistence.saveKeptID(topCard.id)
+        persistence.clearSnoozedID(topCard.id)
         self.lastAction = (topCard, .keep)
         photoStack.removeFirst()
         OfflineCacheService.shared.evict(for: topCard.id)
         DailyLimitService.shared.recordSwipe()
         hapticService.keep()
+        decrementSnoozeCounts()
         precacheNextImages()
         loadNextPageIfNeeded()
     }
@@ -668,6 +715,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         guard let topCard = photoStack.first else { return }
         lastSwipedImage = imageCache.object(forKey: topCard.id as NSString)
         processedAssetIDs.insert(topCard.id)
+        persistence.clearSnoozedID(topCard.id)
         self.lastAction = (topCard, .delete)
         photoStack.removeFirst()
         reviewBin.append(topCard)
@@ -675,29 +723,38 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         OfflineCacheService.shared.evict(for: topCard.id)
         DailyLimitService.shared.recordSwipe()
         hapticService.delete()
+        decrementSnoozeCounts()
         precacheNextImages()
         saveBinToDisk()
         loadNextPageIfNeeded()
     }
 
-    /// Swipe Up — Star Keeper
-    func starPhoto() {
-        guard var topCard = photoStack.first else { return }
+    /// Swipe Up — Snooze (re-inserts into stack after N swipes via exponential backoff)
+    func snoozePhoto() {
+        guard let topCard = photoStack.first else { return }
         lastSwipedImage = imageCache.object(forKey: topCard.id as NSString)
+        // Add to processedAssetIDs so pagination never surfaces this item while it's snoozed.
+        // Removed again by decrementSnoozeCounts() when re-injected, or by undoLastAction().
         processedAssetIDs.insert(topCard.id)
-        self.lastAction = (topCard, .starKeeper)
+        self.lastAction = (topCard, .snooze)
         photoStack.removeFirst()
         OfflineCacheService.shared.evict(for: topCard.id)
-        topCard.isStarred = true
-        hapticService.starKeeper()
+
+        let currentCount = persistence.snoozedPhotos[topCard.id] ?? 0
+        let newCount = currentCount + 1
+        let offset: Int
+        switch newCount {
+        case 1:  offset = 50
+        case 2:  offset = 150
+        default: offset = 500
+        }
+
+        persistence.snoozedPhotos[topCard.id] = newCount
+        snoozeQueue.append(SnoozedPhoto(item: topCard, swipesRemaining: offset, snoozeCount: newCount))
+
+        hapticService.snooze()
         precacheNextImages()
         loadNextPageIfNeeded()
-        Task {
-            try? await PHPhotoLibrary.shared().performChanges {
-                let request = PHAssetChangeRequest(for: topCard.asset)
-                request.isFavorite = true
-            }
-        }
     }
 
     /// Undo — restores the last deleted photo back to the top of the stack
@@ -724,6 +781,16 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             reviewBin.removeAll { $0.id == item.id }
             totalSpaceSaved -= item.fileSize
             saveBinToDisk()
+        }
+
+        if last.action == .snooze {
+            snoozeQueue.removeAll { $0.item.id == item.id }
+            var snoozeData = persistence.snoozedPhotos
+            if let count = snoozeData[item.id] {
+                if count <= 1 { snoozeData.removeValue(forKey: item.id) }
+                else { snoozeData[item.id] = count - 1 }
+            }
+            persistence.snoozedPhotos = snoozeData
         }
 
         hapticService.undo()
@@ -774,10 +841,10 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     func performAction(_ action: SwipeAction) {
         switch action {
-        case .keep:       keepPhoto()
-        case .delete:     deletePhoto()
-        case .starKeeper: starPhoto()
-        case .undo:       undoLastAction()
+        case .keep:   keepPhoto()
+        case .delete: deletePhoto()
+        case .snooze: snoozePhoto()
+        case .undo:   undoLastAction()
         }
     }
 
@@ -798,6 +865,11 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             photoStack = []
             isLoading = true
             await scanLocalUniverse(targetCount: initialPageSize, batchSize: 150)
+            let flushed = flushSnoozedToFront()
+            if !flushed.isEmpty {
+                photoStack.insert(contentsOf: flushed, at: 0)
+                precacheNextImages()
+            }
             isLoading = false
             // Landing animation is triggered in SwipeStackView by onChange(of: isLoading)
         }
@@ -829,7 +901,8 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 fetchCursor = preOfflineFetchCursor
                 let firstVideoAssets = snapshot.prefix(3).filter { $0.isVideo }.map { $0.asset }
                 if !firstVideoAssets.isEmpty { VideoPlayerPool.shared.warmUp(for: firstVideoAssets) }
-                photoStack = snapshot
+                let flushed = flushSnoozedToFront()
+                photoStack = flushed + snapshot
                 isLoading = false
                 precacheNextImages()
                 startBackgroundPrefetch()
@@ -848,9 +921,10 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 fetchCursor = nextIdx ?? photoService.totalAssetCount
                 let firstVideoAssets = rawItems.prefix(3).filter { $0.isVideo }.map { $0.asset }
                 if !firstVideoAssets.isEmpty { VideoPlayerPool.shared.warmUp(for: firstVideoAssets) }
-                photoStack = rawItems
+                let flushed = flushSnoozedToFront()
+                photoStack = flushed + rawItems
                 isLoading = false
-                if !rawItems.isEmpty { precacheNextImages() }
+                if !photoStack.isEmpty { precacheNextImages() }
                 if categoryCounts.isEmpty { refreshCategoryCounts() }
                 startBackgroundPrefetch()
             }
@@ -1154,6 +1228,37 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     private func saveBinToDisk() {
         persistence.reviewBinIDs = reviewBin.map { $0.id }
         persistence.reviewBinSpaceSaved = totalSpaceSaved
+    }
+
+    // MARK: - Snooze Helpers
+
+    /// Removes all items from snoozeQueue, removes their IDs from processedAssetIDs,
+    /// and returns them for the caller to prepend to photoStack.
+    /// Called on cold start (via resetAndLoad) and on every mode transition so snoozed
+    /// items are never lost when the stack context changes.
+    @discardableResult
+    private func flushSnoozedToFront() -> [PhotoItem] {
+        guard !snoozeQueue.isEmpty else { return [] }
+        let items = snoozeQueue.map { $0.item }
+        snoozeQueue = []
+        items.forEach { processedAssetIDs.remove($0.id) }
+        return items
+    }
+
+    /// Called after every keep or delete swipe. Decrements swipesRemaining for each
+    /// snoozed item and injects any that hit zero directly to the front of photoStack.
+    private func decrementSnoozeCounts() {
+        guard !snoozeQueue.isEmpty else { return }
+        var readyIndices: [Int] = []
+        for i in snoozeQueue.indices {
+            snoozeQueue[i].swipesRemaining -= 1
+            if snoozeQueue[i].swipesRemaining <= 0 { readyIndices.append(i) }
+        }
+        guard !readyIndices.isEmpty else { return }
+        let toInject = readyIndices.map { snoozeQueue[$0].item }
+        for i in readyIndices.reversed() { snoozeQueue.remove(at: i) }
+        toInject.forEach { processedAssetIDs.remove($0.id) }
+        photoStack.insert(contentsOf: toInject, at: 0)
     }
 
     /// Early warm-up called at the 80 pt drag threshold in SwipeStackView.

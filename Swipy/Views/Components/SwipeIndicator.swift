@@ -38,10 +38,18 @@ struct SwipeIndicator: View {
             }
         }
         .opacity(opacity)
-.scaleEffect(scale)
-.frame(maxWidth: .infinity, alignment: direction == .right ? .trailing : direction == .left ? .leading : .center)
-.padding(.horizontal, 40)
-.animation(nil, value: scale)
+        .scaleEffect(scale)
+        .frame(
+            maxWidth: .infinity,
+            maxHeight: direction == .up ? .infinity : nil,
+            alignment: direction == .right ? .trailing
+                     : direction == .left  ? .leading
+                     : direction == .up    ? .top
+                     : .center
+        )
+        .padding(.horizontal, 40)
+        .padding(.top, direction == .up ? 60 : 0)
+        .animation(nil, value: scale)
     }
     
     // MARK: - Indicators
@@ -82,7 +90,7 @@ struct SwipeIndicator: View {
     
     private var starIndicator: some View {
         HStack(spacing: 8) {
-            Image(systemName: "star.fill")
+            Text("🤷‍♂️")
                 .font(.title)
             Text(String(localized: "swipe.later"))
                 .font(.headline)
@@ -92,9 +100,9 @@ struct SwipeIndicator: View {
         .padding(.vertical, 12)
         .background(
             Capsule()
-                .fill(Color.swipeYellow.gradient)
+                .fill(Color.swipeBlue.gradient)
         )
-        .shadow(color: .swipeYellow.opacity(0.5), radius: 10)
+        .shadow(color: .swipeBlue.opacity(0.5), radius: 10)
     }
 }
 

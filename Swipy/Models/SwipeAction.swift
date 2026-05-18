@@ -11,7 +11,7 @@ import Foundation
 enum SwipeAction {
     case keep        // החזק (swipe right)
     case delete      // מחק (swipe left)
-    case starKeeper  // כוכב שומר (swipe up בקבוצה)
+    case snooze      // השהה לאחר כך (swipe up) — מוחזרת לסטאק אחרי N החלקות
     case undo        // ביטול (shake)
 }
 
@@ -44,7 +44,7 @@ enum SwipeDirection {
         switch self {
         case .left: return .delete
         case .right: return .keep
-        case .up: return .starKeeper
+        case .up: return .snooze
         case .none: return nil
         }
     }

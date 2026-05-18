@@ -713,7 +713,7 @@ struct SwipeStackView: View {
     private var instructionsView: some View {
         HStack(spacing: 30) {
             instructionItem(icon: "arrow.left", text: "Delete", color: .swipeRed)
-            instructionItem(icon: "arrow.up", text: "Star", color: .swipeYellow)
+            instructionItem(icon: "arrow.up", text: "Later", color: .swipeBlue)
             instructionItem(icon: "arrow.right", text: "Keep", color: .swipeGreen)
         }
         .padding(.horizontal)

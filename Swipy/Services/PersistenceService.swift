@@ -8,6 +8,7 @@ class PersistenceService {
     @AppStorage("totalSpaceSavedLifetime") private var _totalSpaceSavedLifetime: Double = 0
     @AppStorage("reviewBinIDs") private var reviewBinIDsData: Data = Data()
     @AppStorage("reviewBinSpaceSaved") private var _reviewBinSpaceSaved: Double = 0
+    @AppStorage("snoozedPhotos") private var snoozedPhotosData: Data = Data()
 
     var reviewBinSpaceSaved: Int64 {
         get { Int64(_reviewBinSpaceSaved) }
@@ -28,8 +29,26 @@ class PersistenceService {
         set { _totalSpaceSavedLifetime = Double(newValue) }
     }
     
+    /// [localIdentifier: snoozeCount] — persisted so snoozed items survive force-quit
+    var snoozedPhotos: [String: Int] {
+        get {
+            (try? JSONDecoder().decode([String: Int].self, from: snoozedPhotosData)) ?? [:]
+        }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                snoozedPhotosData = data
+            }
+        }
+    }
+
+    func clearSnoozedID(_ id: String) {
+        var current = snoozedPhotos
+        current.removeValue(forKey: id)
+        snoozedPhotos = current
+    }
+
     private init() {}
-    
+
     var keptPhotoIDs: Set<String> {
         get {
             guard let ids = try? JSONDecoder().decode(Set<String>.self, from: keptIDsData) else {

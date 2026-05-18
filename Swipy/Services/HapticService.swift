@@ -38,13 +38,10 @@ class HapticService {
         heavyGenerator.prepare()
     }
     
-    /// Swipe Up (Star Keeper) - double pulse
-    func starKeeper() {
-        mediumGenerator.impactOccurred()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-            self?.mediumGenerator.impactOccurred()
-            self?.mediumGenerator.prepare()
-        }
+    /// Swipe Up (Snooze) - single soft pulse, lighter than keep/delete
+    func snooze() {
+        lightGenerator.impactOccurred(intensity: 0.6)
+        lightGenerator.prepare()
     }
     
     /// Undo (Shake) - רטט הצלחה

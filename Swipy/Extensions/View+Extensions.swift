@@ -73,6 +73,7 @@ extension Color {
     static let swipeGreen = Color(red: 0.2, green: 0.8, blue: 0.4)
     static let swipeRed = Color(red: 0.95, green: 0.3, blue: 0.3)
     static let swipeYellow = Color(red: 1.0, green: 0.8, blue: 0.2)
+    static let swipeBlue = Color(red: 0.25, green: 0.55, blue: 0.95)
     static let cardBackground = Color(UIColor.systemBackground)
     static let dimmedBackground = Color.black.opacity(0.3)
 }
