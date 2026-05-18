@@ -240,8 +240,12 @@ struct SwipeStackView: View {
                 cardStackOpacity = 1
                 cardStackScale = 1
             }
-            if let date = viewModel.photoStack.first?.asset.creationDate {
-                triggerTimeIndicator(for: date)
+            if viewModel.isShuffleModeActive {
+                if let date = viewModel.photoStack.first?.asset.creationDate {
+                    triggerTimeIndicator(for: date)
+                }
+            } else {
+                triggerReturnHomeIndicator()
             }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                 HapticService.shared.shuffleLand()
@@ -584,6 +588,15 @@ struct SwipeStackView: View {
     private func triggerTimeIndicator(for date: Date) {
         timeIndicatorHeader = String(localized: "shuffle.time_traveled")
         timeIndicatorText = formatShuffleDate(date)
+        withAnimation(.easeIn(duration: 0.2)) { showTimeIndicator = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
+            withAnimation(.easeOut(duration: 0.35)) { showTimeIndicator = false }
+        }
+    }
+
+    private func triggerReturnHomeIndicator() {
+        timeIndicatorHeader = String(localized: "shuffle.return_home_header")
+        timeIndicatorText = String(localized: "shuffle.return_home")
         withAnimation(.easeIn(duration: 0.2)) { showTimeIndicator = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
             withAnimation(.easeOut(duration: 0.35)) { showTimeIndicator = false }
