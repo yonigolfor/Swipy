@@ -75,14 +75,24 @@ struct PhotoCardView: View {
                                         .scaleEffect(1.1)
                                         .clipped()
                                 }
-                                VideoPlayerView(player: player, gravity: isPortrait ? .resizeAspectFill : .resizeAspect)
-                                    .frame(width: geo.size.width, height: geo.size.height)
-                                    .clipped()
-                                    .onTapGesture {
-                                        isMuted.toggle()
-                                        PhotoCardView.globalMute = isMuted
-                                        player.isMuted = isMuted
+                                VideoPlayerView(
+                                    player: player,
+                                    gravity: isPortrait ? .resizeAspectFill : .resizeAspect,
+                                    onReadyForDisplay: {
+                                        withAnimation(.easeIn(duration: 0.2)) { isVideoPlayerReady = true }
+                                        Task { @MainActor in
+                                            try? await Task.sleep(nanoseconds: 300_000_000)
+                                            thumbnailImage = nil
+                                        }
                                     }
+                                )
+                                .frame(width: geo.size.width, height: geo.size.height)
+                                .clipped()
+                                .onTapGesture {
+                                    isMuted.toggle()
+                                    PhotoCardView.globalMute = isMuted
+                                    player.isMuted = isMuted
+                                }
                                 VStack {
                                     HStack {
                                         Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
@@ -357,22 +367,14 @@ VStack {
 
     // MARK: - Video Loading
 
-    /// Loads a fast local thumbnail to show immediately while the AVPlayer warms up.
+    /// Loads a sharp full-card thumbnail to show immediately while the AVPlayer warms up.
     private func loadVideoThumbnail() {
-        PhotoLibraryService.shared.loadThumbnail(for: item.asset) { thumb in
+        PhotoLibraryService.shared.loadThumbnail(
+            for: item.asset,
+            targetSize: CGSize(width: 600, height: 800)
+        ) { thumb in
             guard self.thumbnailImage == nil else { return }
             self.thumbnailImage = thumb
-        }
-    }
-
-    /// Flips `isVideoPlayerReady` after a 50 ms delay (allows AVLayer to render
-    /// its first frame), then releases the thumbnail once the fade completes.
-    private func markVideoReady() {
-        Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 50_000_000)
-            withAnimation(.easeIn(duration: 0.2)) { isVideoPlayerReady = true }
-            try? await Task.sleep(nanoseconds: 250_000_000)
-            thumbnailImage = nil
         }
     }
 
@@ -417,7 +419,7 @@ VStack {
                     self.player = avPlayer
                     self.isLoading = false
                     if self.isTopCard { avPlayer.play() }
-                    self.markVideoReady()
+                    // isVideoPlayerReady is set by AVPlayerLayer.isReadyForDisplay KVO in PlayerUIView
                 }
             }
         }
@@ -433,7 +435,7 @@ VStack {
             await avPlayer.seek(to: .zero)
             avPlayer.play()
         }
-        markVideoReady()
+        // isVideoPlayerReady is set by AVPlayerLayer.isReadyForDisplay KVO in PlayerUIView
     }
 }
 
@@ -442,13 +444,17 @@ VStack {
 struct VideoPlayerView: UIViewRepresentable {
     let player: AVPlayer
     var gravity: AVLayerVideoGravity = .resizeAspect
+    var onReadyForDisplay: (() -> Void)? = nil
 
     func makeUIView(context: Context) -> PlayerUIView {
-        PlayerUIView(player: player, gravity: gravity)
+        let view = PlayerUIView(player: player, gravity: gravity)
+        view.onReadyForDisplay = onReadyForDisplay
+        return view
     }
 
     func updateUIView(_ uiView: PlayerUIView, context: Context) {
         uiView.player = player
+        uiView.onReadyForDisplay = onReadyForDisplay
     }
 }
 
@@ -456,10 +462,11 @@ class PlayerUIView: UIView {
     var player: AVPlayer? {
         didSet { playerLayer.player = player }
     }
+    var onReadyForDisplay: (() -> Void)?
 
-    private var playerLayer: AVPlayerLayer {
-        layer as! AVPlayerLayer
-    }
+    private var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+    private var readyObservation: NSKeyValueObservation?
+    private var hasCalledReadyCallback = false
 
     override class var layerClass: AnyClass { AVPlayerLayer.self }
 
@@ -467,6 +474,13 @@ class PlayerUIView: UIView {
         super.init(frame: .zero)
         playerLayer.player = player
         playerLayer.videoGravity = gravity
+        // Fire once when AVPlayerLayer has its first decoded frame ready to display.
+        // .initial fires immediately if the layer is already ready (pre-warmed pool hit).
+        readyObservation = playerLayer.observe(\.isReadyForDisplay, options: [.initial, .new]) { [weak self] _, change in
+            guard change.newValue == true, let self, !self.hasCalledReadyCallback else { return }
+            self.hasCalledReadyCallback = true
+            DispatchQueue.main.async { self.onReadyForDisplay?() }
+        }
     }
 
     required init?(coder: NSCoder) { fatalError() }
