@@ -433,22 +433,39 @@ struct SwipeStackView: View {
     // MARK: - Offline Prompt Banner
 
     private var offlinePromptBanner: some View {
-        VStack {
+        let reason = viewModel.offlinePromptReason
+        let icon: String = reason == .offline ? "wifi.slash" : "wifi.exclamationmark"
+        let title: String = {
+            switch reason {
+            case .offline:      return "You're offline"
+            case .constrained:  return "Low Data Mode is on"
+            case .slowNetwork:  return "Connection seems slow"
+            }
+        }()
+        let subtitle: String = {
+            switch reason {
+            case .offline:      return "Switch to swipe only locally stored photos"
+            case .constrained:  return "Switch to Offline Mode to avoid using data"
+            case .slowNetwork:  return "Switch to Offline Mode for a smoother experience ⚡️"
+            }
+        }()
+
+        return VStack {
             HStack(spacing: 12) {
                 ZStack {
                     Circle()
                         .fill(Color.white.opacity(0.15))
                         .frame(width: 34, height: 34)
-                    Image(systemName: "wifi.slash")
+                    Image(systemName: icon)
                         .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(.white)
                 }
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("You're offline")
+                    Text(title)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundColor(.white)
-                    Text("Tap to swipe only locally stored photos")
+                    Text(subtitle)
                         .font(.system(size: 11))
                         .foregroundColor(.white.opacity(0.78))
                 }

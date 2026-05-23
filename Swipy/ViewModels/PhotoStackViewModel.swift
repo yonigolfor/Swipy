@@ -29,15 +29,28 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     // MARK: - Offline Mode State
 
+    enum OfflinePromptReason { case offline, constrained, slowNetwork }
+
     /// True when the stack is filtered to locally-available assets only.
     @Published var isOfflineMode: Bool = false
     /// Shown once per session when connectivity drops while offline mode is inactive.
     @Published var showOfflinePrompt: Bool = false
+    /// Tells the banner which copy to render.
+    @Published var offlinePromptReason: OfflinePromptReason = .offline
+
     private var hasPromptedOfflineThisSession = false
+    private var hasPromptedSlowNetworkThisSession = false
+
+    // Lie-fi detection: count iCloud timeouts; trigger prompt at 2 within 60 s.
+    private var networkFailureCount = 0
+    private var lastNetworkFailureDate: Date? = nil
+
     /// Background pre-fetch task. Cancelled on drag start, restarted on drag end.
     private var prefetchTask: Task<Void, Never>?
-    /// Long-lived task that observes NetworkMonitorService.
+    /// Long-lived task that observes NetworkMonitorService.$isOnline.
     private var networkObserverTask: Task<Void, Never>?
+    /// Long-lived task that observes NetworkMonitorService.$isConstrained.
+    private var networkConstrainedObserverTask: Task<Void, Never>?
     /// Snapshot of photoStack taken the moment offline mode is activated.
     /// Restored on deactivation so the user returns to exact chronological position.
     private var preOfflineModeStack: [PhotoItem]? = nil
@@ -851,6 +864,8 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     // MARK: - Offline Mode
 
     func activateOfflineMode() {
+        networkFailureCount = 0
+        lastNetworkFailureDate = nil
         preOfflineModeStack = photoStack   // snapshot for instant restoration on exit
         preOfflineFetchCursor = fetchCursor
         isOfflineMode = true
@@ -876,6 +891,8 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     }
 
     func deactivateOfflineMode() {
+        networkFailureCount = 0
+        lastNetworkFailureDate = nil
         isOfflineMode = false
         PhotoLibraryService.shared.isOfflineMode = false
 
@@ -993,32 +1010,73 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     /// Observes connectivity and auto-prompts once per session when going offline.
     private func startNetworkObserver() {
+        // ── isOnline observer ────────────────────────────────────────────────
         networkObserverTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            // Skip the first value (current state at subscription time)
             var isFirst = true
             for await isOnline in NetworkMonitorService.shared.$isOnline.values {
                 if isFirst { isFirst = false; continue }
                 if !isOnline {
                     cancelPrefetch()
                     if !isOfflineMode && !hasPromptedOfflineThisSession {
+                        offlinePromptReason = .offline
                         withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
                             showOfflinePrompt = true
                         }
                         hasPromptedOfflineThisSession = true
-                        // Auto-dismiss after 8 seconds if user ignores it
                         Task { @MainActor [weak self] in
                             try? await Task.sleep(nanoseconds: 8_000_000_000)
-                            withAnimation(.easeOut(duration: 0.3)) {
-                                self?.showOfflinePrompt = false
-                            }
+                            withAnimation(.easeOut(duration: 0.3)) { self?.showOfflinePrompt = false }
                         }
                     }
                 } else if !isOfflineMode {
-                    // Back online — kick off pre-fetch silently
                     startBackgroundPrefetch()
                 }
             }
+        }
+
+        // ── isConstrained observer (Low Data Mode) ───────────────────────────
+        networkConstrainedObserverTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            var isFirst = true
+            for await isConstrained in NetworkMonitorService.shared.$isConstrained.values {
+                if isFirst { isFirst = false; continue }
+                guard isConstrained && !isOfflineMode && !hasPromptedOfflineThisSession else { continue }
+                offlinePromptReason = .constrained
+                withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
+                    showOfflinePrompt = true
+                }
+                hasPromptedOfflineThisSession = true
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(nanoseconds: 8_000_000_000)
+                    withAnimation(.easeOut(duration: 0.3)) { self?.showOfflinePrompt = false }
+                }
+            }
+        }
+    }
+
+    /// Called each time an iCloud image request times out (Lie-fi detection).
+    /// Triggers the slow-network prompt after 2 failures within a 60-second window.
+    func recordNetworkFailure() {
+        let now = Date()
+        if let last = lastNetworkFailureDate, now.timeIntervalSince(last) > 60 {
+            networkFailureCount = 0
+        }
+        lastNetworkFailureDate = now
+        networkFailureCount += 1
+
+        guard networkFailureCount >= 2,
+              !isOfflineMode,
+              !hasPromptedSlowNetworkThisSession else { return }
+
+        hasPromptedSlowNetworkThisSession = true
+        offlinePromptReason = .slowNetwork
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.75)) {
+            showOfflinePrompt = true
+        }
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            withAnimation(.easeOut(duration: 0.3)) { self?.showOfflinePrompt = false }
         }
     }
 
@@ -1285,10 +1343,21 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 loadedImageIDs.insert(item.id)
                 continue
             }
-            PhotoLibraryService.shared.loadImage(for: item.asset, targetSize: targetSize) { [weak self] img in
+            PhotoLibraryService.shared.loadImage(
+                for: item.asset, targetSize: targetSize,
+                onSlowNetwork: { [weak self] in
+                    Task { @MainActor [weak self] in self?.recordNetworkFailure() }
+                }
+            ) { [weak self] img in
                 guard let self, let img else { return }
                 self.imageCache.setObject(img, forKey: key, cost: Int(targetSize.width * targetSize.height * 4))
-                Task { @MainActor [weak self] in self?.loadedImageIDs.insert(item.id) }
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    // Remove then insert: if a quality upgrade just landed (second call),
+                    // the toggle forces SwiftUI to re-render and pick up the better image.
+                    self.loadedImageIDs.remove(item.id)
+                    self.loadedImageIDs.insert(item.id)
+                }
             }
         }
     }
@@ -1310,10 +1379,19 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 loadedImageIDs.insert(item.id)
                 continue
             }
-            PhotoLibraryService.shared.loadImage(for: item.asset, targetSize: targetSize) { [weak self] img in
+            PhotoLibraryService.shared.loadImage(
+                for: item.asset, targetSize: targetSize,
+                onSlowNetwork: { [weak self] in
+                    Task { @MainActor [weak self] in self?.recordNetworkFailure() }
+                }
+            ) { [weak self] img in
                 guard let self, let img else { return }
                 self.imageCache.setObject(img, forKey: key, cost: Int(targetSize.width * targetSize.height * 4))
-                Task { @MainActor [weak self] in self?.loadedImageIDs.insert(item.id) }
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    self.loadedImageIDs.remove(item.id)
+                    self.loadedImageIDs.insert(item.id)
+                }
             }
         }
 

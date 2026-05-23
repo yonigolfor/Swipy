@@ -294,10 +294,14 @@ class PhotoLibraryService: ObservableObject {
 
     /// Loads an image for a given asset asynchronously.
     /// Pass forceNetworkAccess:true to bypass offline mode (e.g. background pre-fetch).
+    /// Pass onSlowNetwork to enable a 2-second iCloud timeout: if the asset hasn't
+    /// arrived in time, onSlowNetwork fires and a local fallback is delivered instead.
+    /// Not applied when forceNetworkAccess:true (background prefetch) or in offline mode.
     func loadImage(
         for asset: PHAsset,
         targetSize: CGSize,
         forceNetworkAccess: Bool = false,
+        onSlowNetwork: (() -> Void)? = nil,
         completion: @escaping (UIImage?) -> Void
     ) {
         let allowsNetwork = forceNetworkAccess || !isOfflineMode
@@ -306,14 +310,64 @@ class PhotoLibraryService: ObservableObject {
         options.isNetworkAccessAllowed = allowsNetwork
         options.isSynchronous = false
 
+        // Timeout only applies to foreground iCloud fetches, not prefetch or offline mode.
+        guard allowsNetwork && !forceNetworkAccess, let onSlowNetwork else {
+            imageManager.requestImage(
+                for: asset, targetSize: targetSize,
+                contentMode: .aspectFill, options: options
+            ) { image, _ in completion(image) }
+            return
+        }
+
+        // didQualityDeliver: true once the iCloud high-quality image has arrived.
+        // The lock guards cross-thread access between the timeout and the iCloud callback.
+        var didQualityDeliver = false
+        let lock = NSLock()
+
+        let timeoutWork = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            lock.lock()
+            let alreadyDone = didQualityDeliver
+            lock.unlock()
+            guard !alreadyDone else { return }
+
+            // Signal slow network — do NOT cancel the original request.
+            // It stays alive and will call completion again when full quality arrives,
+            // giving the card an automatic in-place quality upgrade.
+            onSlowNetwork()
+
+            // Deliver a local fast-format frame immediately so the card isn't blank.
+            let fallback = PHImageRequestOptions()
+            fallback.deliveryMode = .fastFormat
+            fallback.isNetworkAccessAllowed = false
+            fallback.isSynchronous = false
+            self.imageManager.requestImage(
+                for: asset, targetSize: targetSize,
+                contentMode: .aspectFill, options: fallback
+            ) { [lock] image, _ in
+                // Skip if full quality already beat the fallback.
+                lock.lock()
+                let beaten = didQualityDeliver
+                lock.unlock()
+                if !beaten { completion(image) }
+            }
+        }
+
+        // The original iCloud request — always completes eventually, even after the
+        // fallback has fired. completion may be called twice: once with the degraded
+        // fallback, once here with full quality (the caller handles the upgrade).
         imageManager.requestImage(
-            for: asset,
-            targetSize: targetSize,
-            contentMode: .aspectFill,
-            options: options
+            for: asset, targetSize: targetSize,
+            contentMode: .aspectFill, options: options
         ) { image, _ in
+            lock.lock()
+            didQualityDeliver = true
+            lock.unlock()
+            timeoutWork.cancel()
             completion(image)
         }
+
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 2.0, execute: timeoutWork)
     }
 
     /// Loads a fast local thumbnail — never touches iCloud.
