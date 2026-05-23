@@ -534,9 +534,12 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// In offline mode, jumps to a random position within the local-only universe.
     func activateShuffle() {
         guard photoService.totalAssetCount > 0 else { return }
-        // Save the appropriate cursor for whichever universe is active.
-        savedLinearCursor = isOfflineMode ? offlineFetchCursor : fetchCursor
-        preShuffleStack = photoStack
+        // Save cursor and snapshot only on first activation — re-shuffling must not
+        // overwrite the original linear position the user will return to on reset.
+        if !isShuffleModeActive {
+            savedLinearCursor = isOfflineMode ? offlineFetchCursor : fetchCursor
+            preShuffleStack = photoStack
+        }
         isShuffleModeActive = true
         isLoading = true
         isFetchingNextPage = false

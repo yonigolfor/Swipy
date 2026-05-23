@@ -175,6 +175,17 @@ struct SwipeStackView: View {
                 HStack {
                     if !viewModel.isOfflineMode {
                         shuffleFAB
+                            .overlay(alignment: .top) {
+                                if viewModel.isShuffleModeActive {
+                                    resetToTodayButton
+                                        .offset(y: -(48 + 10))
+                                        .transition(.asymmetric(
+                                            insertion: .move(edge: .bottom).combined(with: .opacity),
+                                            removal:   .move(edge: .bottom).combined(with: .opacity)
+                                        ))
+                                }
+                            }
+                            .animation(.spring(response: 0.4, dampingFraction: 0.75), value: viewModel.isShuffleModeActive)
                             .transition(.opacity.combined(with: .scale))
                     }
                     Spacer()
@@ -270,15 +281,34 @@ struct SwipeStackView: View {
 
     // MARK: - Shuffle FAB
 
+    private var resetToTodayButton: some View {
+        Button {
+            performShuffleTransition { viewModel.deactivateShuffle() }
+        } label: {
+            ZStack {
+                Circle()
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        Circle().fill(
+                            LinearGradient(
+                                colors: [Color.white.opacity(0.25), Color.white.opacity(0.08)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing)
+                        )
+                    )
+                    .frame(width: 48, height: 48)
+                    .shadow(color: .black.opacity(0.2), radius: 10, y: 4)
+
+                Image(systemName: "arrow.uturn.backward")
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.white)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
     private var shuffleFAB: some View {
         Button {
-            performShuffleTransition {
-                if viewModel.isShuffleModeActive {
-                    viewModel.deactivateShuffle()
-                } else {
-                    viewModel.activateShuffle()
-                }
-            }
+            performShuffleTransition { viewModel.activateShuffle() }
         } label: {
             ZStack {
                 Circle()
