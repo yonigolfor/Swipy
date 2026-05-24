@@ -6,7 +6,7 @@ class PremiumManager: ObservableObject {
     static let shared = PremiumManager()
 
     // Set this product ID in App Store Connect as a Non-Consumable or Auto-Renewable Subscription.
-    static let productID = "com.swipy.premium.unlimited"
+    static let productID = "com.yonigolfor.Swipy.monthlySubscription"
 
     @Published private(set) var isPremium: Bool = false
     @Published private(set) var product: Product? = nil
