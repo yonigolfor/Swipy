@@ -706,6 +706,40 @@
         }
       }
     },
+    "offline.scanning_subtitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Looking for photos stored locally on your device..."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "מחפש תמונות שמורות מקומית במכשיר..."
+          }
+        }
+      }
+    },
+    "offline.scanning_title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Searching Your Device"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "מחפש במכשיר שלך"
+          }
+        }
+      }
+    },
     "onboarding.demo.cta" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1495,9 +1529,6 @@
         }
       }
     },
-    "Tap to swipe only locally stored photos" : {
-
-    },
     "Total Storage Freed" : {
       "localizations" : {
         "he" : {
@@ -1638,9 +1669,6 @@
           }
         }
       }
-    },
-    "You're offline" : {
-
     }
   },
   "version" : "1.0"

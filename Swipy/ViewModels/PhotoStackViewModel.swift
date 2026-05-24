@@ -145,7 +145,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     /// True while scanLocalUniverse is executing — prevents a second concurrent scan
     /// from corrupting offlineFetchCursor at the await Task.yield() suspension points.
-    private var isScanning = false
+    @Published private(set) var isScanning = false
 
     /// The index in the PHFetchResult where the next offline-mode local scan resumes.
     /// Separate from fetchCursor — the two universes (full library vs. local-only) are
@@ -1099,7 +1099,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         batchSize: Int = 150,
         wrapAround: Bool = false
     ) async {
-        guard !isScanning else { return }
+        guard !isScanning else { isLoading = false; return }
         isScanning = true
         defer { isScanning = false }
         guard let fetchResult = photoService.fetchResult else { isLoading = false; return }

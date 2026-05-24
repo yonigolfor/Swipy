@@ -65,7 +65,9 @@ struct SwipeStackView: View {
                     ZStack {
                         let _ = print("🔄 ZStack rerender, stack count: \(viewModel.photoStack.count)")
 
-                        if viewModel.isLoading {
+                        if viewModel.isOfflineMode && viewModel.isScanning && viewModel.photoStack.isEmpty {
+                            offlineScanningView
+                        } else if viewModel.isLoading {
                             VStack(spacing: 16) {
                                 ProgressView()
                                     .scaleEffect(1.5)
@@ -119,7 +121,8 @@ struct SwipeStackView: View {
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    // Shuffle transition modifiers — applied to the whole card area
+                    .animation(.easeInOut(duration: 0.35), value: viewModel.isScanning)
+                    // Shuffle / offline transition modifiers — applied to the whole card area
                     .offset(y: cardStackOffset)
                     .scaleEffect(cardStackScale)
                     .opacity(cardStackOpacity)
@@ -267,11 +270,7 @@ struct SwipeStackView: View {
         .onChange(of: viewModel.isLoading) { isNowLoading in
             guard !isNowLoading, awaitingOfflineLanding else { return }
             awaitingOfflineLanding = false
-            withAnimation(.spring(response: 0.55, dampingFraction: 0.72)) {
-                cardStackOffset = 0
-                cardStackOpacity = 1
-                cardStackScale = 1
-            }
+            // Card area is already at its final position (sprang back at transition start).
             triggerOfflineIndicator(entering: viewModel.isOfflineMode)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                 HapticService.shared.shuffleLand()
@@ -460,6 +459,50 @@ struct SwipeStackView: View {
         .shadow(color: .black.opacity(0.25), radius: 10, y: 3)
     }
 
+    // MARK: - Offline Scanning State
+
+    private var offlineScanningView: some View {
+        VStack(spacing: 24) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(
+                        colors: [Color(red: 0.1, green: 0.35, blue: 0.9).opacity(0.18),
+                                 Color(red: 0.3, green: 0.1, blue: 0.75).opacity(0.10)],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    ))
+                    .frame(width: 140, height: 140)
+                Image(systemName: "airplane.circle.fill")
+                    .font(.system(size: 70))
+                    .foregroundColor(Color(red: 0.1, green: 0.35, blue: 0.9))
+                    .shadow(color: Color(red: 0.1, green: 0.35, blue: 0.9).opacity(0.3), radius: 10, x: 0, y: 5)
+            }
+            .padding(.top, 40)
+
+            VStack(spacing: 12) {
+                Text(String(localized: "offline.scanning_title"))
+                    .font(.largeTitle)
+                    .fontWeight(.bold)
+                    .minimumScaleFactor(0.8)
+                    .lineLimit(1)
+                Text(String(localized: "offline.scanning_subtitle"))
+                    .font(.body)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal)
+            }
+
+            ProgressView()
+                .scaleEffect(1.2)
+                .tint(Color(red: 0.1, green: 0.35, blue: 0.9))
+
+            Spacer()
+        }
+        .padding()
+        .transition(.opacity)
+    }
+
     // MARK: - Offline Prompt Banner
 
     private var offlinePromptBanner: some View {
@@ -622,11 +665,15 @@ struct SwipeStackView: View {
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.27) {
-            cardStackOffset = 55
-            cardStackScale = 0.85
-            cardStackOpacity = 0
             awaitingOfflineLanding = true
             action()
+            // Spring the card area back immediately — "Searching your device..."
+            // is now visible during the scan instead of a blank screen.
+            withAnimation(.spring(response: 0.55, dampingFraction: 0.72)) {
+                cardStackOffset = 0
+                cardStackOpacity = 1
+                cardStackScale = 1
+            }
         }
     }
 
