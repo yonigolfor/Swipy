@@ -170,6 +170,75 @@ All three are `@Published` and observed via async `for await` streams on `@MainA
 
 ---
 
+## Scan Engine — `scanLocalUniverse()`
+
+All photo loading in offline mode goes through `scanLocalUniverse()` in `PhotoStackViewModel`. It never fetches from iCloud — it only reads `PHAsset` metadata and the `OfflineCacheService` disk index.
+
+### How it decides "locally available"
+
+```swift
+let isLocal = service.isLocallyAvailable(asset)          // PHAssetResource metadata — no I/O
+           || diskCache.retrieve(for: asset.localIdentifier) != nil  // prefetched to disk
+```
+
+### Iteration
+
+Scans `PHFetchResult` in batches of 150, starting from `offlineFetchCursor`. Each batch runs in a `Task.detached` (off main thread); results are streamed back to `photoStack` on MainActor. The function owns the `isScanning` flag via `defer { isScanning = false }` — only one scan can run at a time.
+
+```
+offlineFetchCursor = 0
+while photoStack.count < targetCount:
+    batch = Task.detached { check assets [cursor..<cursor+150] }
+    if batch not empty → photoStack.append, isLoading = false (first batch only)
+    cursor += 150
+    if cursor >= total → break  ← full library scanned, nothing left
+```
+
+### Termination guards
+
+| Condition | Effect |
+|---|---|
+| `!isOfflineMode` | User exited offline mid-scan → break immediately |
+| `totalScanned >= total` | Full library visited, no more assets → break |
+| `offlineFetchCursor >= total` (no wrap) | Cursor past end → break |
+| `guard !isScanning` at entry | Concurrent call blocked → `isLoading = false` and return |
+
+---
+
+## UX States in Offline Mode
+
+`SwipeStackView` renders one of three states depending on `isOfflineMode`, `isScanning`, `isLoading`, and `photoStack`:
+
+| Condition | What the user sees |
+|---|---|
+| `isOfflineMode && isScanning && photoStack.isEmpty` | **Scanning state** — airplane icon + "Searching Your Device" + ProgressView |
+| `isLoading` (generic) | Standard spinner + "loading.scanning" label |
+| `!isLoading && photoStack.isEmpty` | **VictoryView (offline variant)** — airplane icon + `victory.title_offline` |
+| `photoStack.count > 0` | Card stack |
+
+### Transition animation
+
+`performOfflineTransition` flies the current cards out, then springs the card area back **immediately** (not waiting for the scan to finish). The user sees the scanning state as soon as the fly-out completes. When `isScanning` transitions to `false`, `.animation(.easeInOut(duration: 0.35), value: viewModel.isScanning)` on the ZStack animates the switch to VictoryView or cards.
+
+---
+
+## Pagination in Offline Mode
+
+Pagination is **proactive** — it fires before the stack is empty.
+
+- **Watermark:** `lowWatermark = 12`. Every swipe calls `loadNextPageIfNeeded()`. When `photoStack.count <= 12`, a new `scanLocalUniverse(targetCount: photoStack.count + 30)` starts in the background.
+- **Guard:** pagination does not fire when `photoStack.isEmpty` (the scan was already triggered at count = 1).
+- **Result:** if the scan finds more local photos before the user swipes the last card, the stack refills silently. If the user swipes everything before the scan completes, the scanning state appears briefly, then either cards or VictoryView.
+
+```
+photoStack.count drops to 12
+    └─ scanLocalUniverse(targetCount: 42) starts in background
+        ├─ finds photos → photoStack grows, no visible interruption
+        └─ finds nothing → when user hits 0: scanning state → VictoryView
+```
+
+---
+
 ## Key Files
 
 | File | Role |
