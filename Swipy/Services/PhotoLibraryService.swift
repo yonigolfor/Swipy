@@ -165,6 +165,7 @@ class PhotoLibraryService: ObservableObject {
 
         switch category {
         case .all:
+            // fetchResult contains the full library; processedIDs are a strict subset of it.
             return max(0, fetchResult.count - processedIDs.count)
 
         case .screenshots:
@@ -173,8 +174,7 @@ class PhotoLibraryService: ObservableObject {
                 format: "mediaSubtype & %d != 0",
                 PHAssetMediaSubtype.photoScreenshot.rawValue
             )
-            let result = PHAsset.fetchAssets(with: options)
-            return max(0, result.count - processedIDs.count)
+            return countExcluding(PHAsset.fetchAssets(with: options), processedIDs: processedIDs)
 
         case .screenRecordings:
             let options = PHFetchOptions()
@@ -182,8 +182,7 @@ class PhotoLibraryService: ObservableObject {
                 format: "mediaType == %d AND (pixelWidth == 1170 OR pixelWidth == 1284 OR pixelWidth == 2532)",
                 PHAssetMediaType.video.rawValue
             )
-            let result = PHAsset.fetchAssets(with: options)
-            return max(0, result.count - processedIDs.count)
+            return countExcluding(PHAsset.fetchAssets(with: options), processedIDs: processedIDs)
 
         case .largeVideos:
             // Duration-based estimate: videos > 10 s are very likely to exceed 50 MB.
@@ -193,8 +192,7 @@ class PhotoLibraryService: ObservableObject {
                 format: "mediaType == %d AND duration > 10",
                 PHAssetMediaType.video.rawValue
             )
-            let result = PHAsset.fetchAssets(with: options)
-            return max(0, result.count - processedIDs.count)
+            return countExcluding(PHAsset.fetchAssets(with: options), processedIDs: processedIDs)
 
         case .burstPhotos:
             // Match the same logic as fetchPageOfAssets which returns ALL assets
@@ -202,8 +200,7 @@ class PhotoLibraryService: ObservableObject {
             // We show total image count as upper bound.
             let options = PHFetchOptions()
             options.predicate = NSPredicate(format: "mediaType == %d", PHAssetMediaType.image.rawValue)
-            let result = PHAsset.fetchAssets(with: options)
-            return max(0, result.count - processedIDs.count)
+            return countExcluding(PHAsset.fetchAssets(with: options), processedIDs: processedIDs)
 
         case .blurryPhotos:
             // Match fetchPageOfAssets which filters: image type AND not screenshot
@@ -213,9 +210,19 @@ class PhotoLibraryService: ObservableObject {
                 PHAssetMediaType.image.rawValue,
                 PHAssetMediaSubtype.photoScreenshot.rawValue
             )
-            let result = PHAsset.fetchAssets(with: options)
-            return max(0, result.count - processedIDs.count)
+            return countExcluding(PHAsset.fetchAssets(with: options), processedIDs: processedIDs)
         }
+    }
+
+    /// Counts assets in a PHFetchResult that are not already in processedIDs.
+    /// O(n) enumeration with O(1) Set lookup — safe for background Task.detached calls.
+    private func countExcluding(_ result: PHFetchResult<PHAsset>, processedIDs: Set<String>) -> Int {
+        guard !processedIDs.isEmpty else { return result.count }
+        var count = 0
+        result.enumerateObjects { asset, _, _ in
+            if !processedIDs.contains(asset.localIdentifier) { count += 1 }
+        }
+        return count
     }
 
     /// Approximate count of assets for a category, excluding processed IDs.
