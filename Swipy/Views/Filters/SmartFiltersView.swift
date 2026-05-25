@@ -12,6 +12,8 @@ struct SmartFiltersView: View {
     @Binding var selectedTab: Int
     #if DEBUG
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = true
+    @AppStorage("shakeHintSwipeCount") private var shakeHintSwipeCount = 0
+    @AppStorage("hasSeenShakeHint") private var hasSeenShakeHint = false
     #endif
 
     var body: some View {
@@ -36,13 +38,14 @@ struct SmartFiltersView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
                         hasCompletedOnboarding = false
+                        shakeHintSwipeCount = 0
+                        hasSeenShakeHint = false
                     } label: {
                         Image(systemName: "arrow.counterclockwise")
                             .foregroundColor(.orange)
                     }
                 }
             }
-            .onShake { hasCompletedOnboarding = false }
             #endif
             .task {
                 // .task is lifecycle-aware: it cancels automatically if the

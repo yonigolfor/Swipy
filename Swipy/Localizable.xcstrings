@@ -1132,6 +1132,40 @@
         }
       }
     },
+    "onboarding.shake_hint.subtitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shake to Undo"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "נער את המכשיר לביטול"
+          }
+        }
+      }
+    },
+    "onboarding.shake_hint.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Made a mistake?"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "טעית?"
+          }
+        }
+      }
+    },
     "paywall.benefit.features" : {
       "comment" : "MARK: - Paywall",
       "extractionState" : "manual",

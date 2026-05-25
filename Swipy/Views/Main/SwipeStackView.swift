@@ -42,6 +42,11 @@ struct SwipeStackView: View {
     /// True between drag start and drag end — used to cancel/resume pre-fetch.
     @State private var isDragging = false
 
+    // Shake hint toast — shown once after the user's 3rd swipe (first session only).
+    @AppStorage("shakeHintSwipeCount") private var shakeHintSwipeCount = 0
+    @AppStorage("hasSeenShakeHint") private var hasSeenShakeHint = false
+    @State private var showShakeHintToast = false
+
     private let cardStackSize = 3 // כמה קלפים מציגים מאחור
 
     var body: some View {
@@ -169,6 +174,13 @@ struct SwipeStackView: View {
                 timeIndicatorView
                     .zIndex(150)
                     .transition(.opacity)
+            }
+
+            // 5c. Shake Hint Toast — appears once after 3rd swipe, first session only
+            if showShakeHintToast {
+                shakeHintToastView
+                    .zIndex(160)
+                    .transition(.move(edge: .top).combined(with: .opacity))
             }
 
             // 6. FAB row — shuffle (left, hidden in offline mode) + offline mode (right)
@@ -628,6 +640,66 @@ struct SwipeStackView: View {
             }
     }
 
+    // MARK: - Shake Hint Toast
+
+    private var shakeHintToastView: some View {
+        VStack(spacing: 8) {
+            Text(String(localized: "onboarding.shake_hint.title"))
+                .font(.system(size: 26, weight: .bold, design: .rounded))
+                .foregroundColor(Color(red: 1.0, green: 0.353, blue: 0.373))
+
+            HStack(spacing: 6) {
+                Image(systemName: "iphone.radiowaves.left.and.right")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.7))
+                Text(String(localized: "onboarding.shake_hint.subtitle"))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.white.opacity(0.7))
+                    .textCase(.uppercase)
+                    .kerning(1.2)
+            }
+
+            Button {
+                withAnimation(.easeOut(duration: 0.25)) { showShakeHintToast = false }
+            } label: {
+                Text(String(localized: "onboarding.demo.cta"))
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 7)
+                    .background(Capsule().fill(Color.white.opacity(0.2)))
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 4)
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 18)
+        .background(
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 18, style: .continuous)
+                        .fill(Color.black.opacity(0.35))
+                )
+        )
+        .shadow(color: .black.opacity(0.4), radius: 20, y: 6)
+        .frame(maxWidth: 360)
+        .padding(.horizontal, 12)
+        .padding(.top, 100)
+    }
+
+    private func triggerShakeHintToast() {
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.72)) {
+            showShakeHintToast = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 7.0) {
+            guard showShakeHintToast else { return }
+            withAnimation(.easeOut(duration: 0.35)) {
+                showShakeHintToast = false
+            }
+        }
+    }
+
     // MARK: - Shuffle Transition
 
     /// Executes a shuffle action with a fly-out / land-in animation.
@@ -787,6 +859,15 @@ struct SwipeStackView: View {
                         viewModel.performAction(action)
                         dragOffset = .zero
                         dragRotation = 0
+
+                        // Show shake hint toast on 3rd swipe (first session only)
+                        if !hasSeenShakeHint {
+                            shakeHintSwipeCount += 1
+                            if shakeHintSwipeCount >= 3 {
+                                hasSeenShakeHint = true
+                                triggerShakeHintToast()
+                            }
+                        }
 
                         // Trigger particle explosion if this was a delete of a large file
                         if action == .delete,
