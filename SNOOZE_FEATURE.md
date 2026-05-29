@@ -2,100 +2,104 @@
 
 ## מה זה
 
-"Snooze" הוא פעולת ה-swipe-up בסוויפי. המשמעות: "אני לא רוצה להחליט עכשיו — תחזיר לי את התמונה הזאת אחרי כמה החלקות." התמונה עוברת לתור פנימי (`snoozeQueue`) ומוחזרת לראש הסטאק אחרי N החלקות של keep/delete.
+"Snooze" הוא פעולת ה-swipe-up בסוויפי. המשמעות: "אני לא רוצה להחליט עכשיו — תחזיר לי את התמונה הזאת אחרי כמה החלקות." התמונה עוברת לתור פנימי (`snoozeQueue`) ומוחזרת לראש הסטאק כאשר `globalActionCounter` מגיע ל-`targetMilestone` שלה.
 
 ---
 
-## זרימה מלאה — שלב אחר שלב
+## Absolute Milestone — הלוגיקה המרכזית
 
-### 1. זיהוי המחווה (`SwipeAction.swift`)
+במקום ספירה יחסית לאחור (`swipesRemaining--`), המערכת עובדת עם **milestone מוחלט**:
 
-```swift
-if offset.height < -80 && abs(offset.width) < 80 → .up → .snooze
+```
+targetMilestone = globalActionCounter + backoffValue
 ```
 
-סף: 80pt למעלה, עם פחות מ-80pt אופקי. האנכי נבדק **לפני** האופקי — סווייפ אלכסוני ימינה/שמאלה מנצח.
+- `globalActionCounter` — מונה מונוטוני שגדל ב-1 על כל keep או delete. שמור ב-UserDefaults, לעולם לא יורד.
+- `targetMilestone` — הערך של `globalActionCounter` שבו הפריט צריך לצוץ מחדש.
+- פריט בשל כאשר: `globalActionCounter >= targetMilestone`
 
-### 2. אנימציית הכרטיס (`SwipeStackView.swift`)
-
-הכרטיס עף למעלה: `dragOffset = CGSize(width: translation.width, height: -500)`. אחרי 0.3s `viewModel.performAction(.snooze)` מופעל.
-
-### 3. אינדיקטור ויזואלי (`SwipeIndicator.swift`)
-
-- אמוג'י `🤷‍♂️` + טקסט מתורגם `"swipe.later"`
-- רקע: `Color.swipeBlue.gradient` (כחול)
-- גודל ושקיפות גדלים לינארית עם המרחק, מקסימום ב-100pt
-- מיושר לראש הכרטיס
-
-### 4. הלוגיקה הראשית — `snoozePhoto()` (`PhotoStackViewModel.swift:749`)
-
-```swift
-func snoozePhoto() {
-    guard let topCard = photoStack.first else { return }
-    lastSwipedImage = imageCache.object(forKey: topCard.id as NSString)
-    processedAssetIDs.insert(topCard.id)   // מסתיר מ-pagination
-    self.lastAction = (topCard, .snooze)
-    photoStack.removeFirst()
-    OfflineCacheService.shared.evict(for: topCard.id)
-
-    let currentCount = persistence.snoozedPhotos[topCard.id] ?? 0
-    let newCount = currentCount + 1
-    let offset: Int
-    switch newCount {
-    case 1:  offset = 50
-    case 2:  offset = 150
-    default: offset = 500
-    }
-
-    persistence.snoozedPhotos[topCard.id] = newCount
-    snoozeQueue.append(SnoozedPhoto(item: topCard, swipesRemaining: offset, snoozeCount: newCount))
-
-    hapticService.snooze()
-    precacheNextImages()
-    loadNextPageIfNeeded()
-}
-```
+**למה זה נכון:** שני הערכים persisted → הloגיקה שורדת force-quit, app updates וכל שינוי state.
 
 ---
 
-## Exponential Backoff — כמה swipes עד שהתמונה חוזרת
+## Exponential Backoff
 
-| מספר ה-snooze לתמונה | swipes עד חזרה |
-|----------------------|----------------|
-| 1 (ראשון)            | 50             |
-| 2 (שני)              | 150            |
-| 3+ (שלישי ומעלה)     | 500            |
+| מספר הsnooze לפריט | backoffValue | swipes עד חזרה |
+|--------------------|-------------|----------------|
+| 1 (ראשון)           | 50          | ~50 keep/delete |
+| 2 (שני)             | 150         | ~150 keep/delete |
+| 3+ (שלישי ומעלה)    | 500         | ~500 keep/delete |
 
-**חשוב:** הספירה מצטברת ונשמרת ב-UserDefaults. גם אחרי force-quit ופתיחה מחדש — אם התמונה כבר סנוזה 2 פעמים בעבר, הפעם הבאה תהיה 500 swipes.
+הספירה מצטברת ב-`SnoozedPhotoRecord.snoozeCount` ב-UserDefaults.
 
 ---
 
-## מבנה הנתונים בזיכרון
+## מבנה הנתונים
+
+### In-memory (PhotoStackViewModel)
 
 ```swift
 private struct SnoozedPhoto {
     let item: PhotoItem
-    var swipesRemaining: Int   // ספירה לאחור
-    let snoozeCount: Int       // האיטרציה של snooze זה
+    let targetMilestone: Int  // absolute counter value when this item resurfaces
+    let snoozeCount: Int
 }
 
 private var snoozeQueue: [SnoozedPhoto] = []
 ```
 
----
-
-## מנגנון החזרה — `decrementSnoozeCounts()` (שורה 1311)
-
-מופעל אחרי **כל keep או delete** (לא אחרי snooze):
+### Persisted (PersistenceService)
 
 ```swift
-private func decrementSnoozeCounts() {
+struct SnoozedPhotoRecord: Codable {
+    let snoozeCount: Int
+    let targetMilestone: Int
+}
+
+// [localIdentifier: SnoozedPhotoRecord] — key: "snoozedPhotosV2"
+var snoozedPhotos: [String: SnoozedPhotoRecord]
+
+// מונה מונוטוני — key: "globalActionCounter"
+var globalActionCounter: Int
+```
+
+---
+
+## זרימה — שלב אחר שלב
+
+### Snooze (`snoozePhoto()`)
+
+```
+1. processedAssetIDs.insert(topCard.id)   // חסום pagination
+2. photoStack.removeFirst()
+3. OfflineCacheService.evict(for: id)
+4. newCount = (existingRecord?.snoozeCount ?? 0) + 1
+5. backoff = 50 / 150 / 500
+6. milestone = persistence.globalActionCounter + backoff
+7. persistence.snoozedPhotos[id] = SnoozedPhotoRecord(snoozeCount: newCount, targetMilestone: milestone)
+8. snoozeQueue.append(SnoozedPhoto(item, targetMilestone: milestone, snoozeCount: newCount))
+9. haptic snooze
+```
+
+### Keep / Delete (קריטי — סדר הפעולות)
+
+```
+1. processedAssetIDs.insert(topCard.id)
+2. photoStack.removeFirst()
+3. ... (bin / kept logic) ...
+4. persistence.globalActionCounter += 1    ← קודם
+5. checkSnoozeMilestones()                 ← אחר כך
+```
+
+הסדר הכרחי: אם הפוך — פריט שה-milestone שלו הוא בדיוק counter+1 מחמיץ swipe אחד.
+
+### checkSnoozeMilestones() — מנגנון החזרה
+
+```swift
+private func checkSnoozeMilestones() {
     guard !snoozeQueue.isEmpty else { return }
-    var readyIndices: [Int] = []
-    for i in snoozeQueue.indices {
-        snoozeQueue[i].swipesRemaining -= 1
-        if snoozeQueue[i].swipesRemaining <= 0 { readyIndices.append(i) }
-    }
+    let counter = persistence.globalActionCounter
+    let readyIndices = snoozeQueue.indices.filter { counter >= snoozeQueue[$0].targetMilestone }
     guard !readyIndices.isEmpty else { return }
     let toInject = readyIndices.map { snoozeQueue[$0].item }
     for i in readyIndices.reversed() { snoozeQueue.remove(at: i) }
@@ -104,60 +108,90 @@ private func decrementSnoozeCounts() {
 }
 ```
 
-- כל snooze-swipe של המשתמש **לא** מונה — רק keep ו-delete
-- כשפריט מגיע ל-0, הוא מוזרק ל-`photoStack[0]` (ראש הסטאק)
-- ה-ID שלו מוסר מ-`processedAssetIDs` כדי שה-pagination לא יסנן אותו שוב
+נקרא **רק** אחרי keep/delete — snooze swipes לא מקדמים את המונה.
 
 ---
 
-## Persistence (`PersistenceService.swift`)
+## Persistence — מה שורד force-quit
+
+| ערך | מפתח UserDefaults | נמחק מתי |
+|-----|-------------------|----------|
+| `globalActionCounter` | `"globalActionCounter"` | לעולם לא |
+| `snoozedPhotos` | `"snoozedPhotosV2"` | כשהמשתמש עושה keep/delete/undo על הפריט |
+
+### אתחול לאחר force-quit (init)
 
 ```swift
-@AppStorage("snoozedPhotos") private var snoozedPhotosData: Data = Data()
+// 1. Migration מפורמט ישן (חד-פעמי)
+persistence.migrateSnoozeDataIfNeeded()
 
-var snoozedPhotos: [String: Int] {
-    // [localIdentifier: snoozeCount]
-    // מקודד כ-JSON ב-UserDefaults
-}
+// 2. חסום רק IDs עם snooze פעיל
+let counter = persistence.globalActionCounter
+let activeSnoozeIDs = Set(persistence.snoozedPhotos
+    .filter { counter < $0.value.targetMilestone }.keys)
+self.processedAssetIDs = persistence.keptPhotoIDs.union(activeSnoozeIDs)
+
+// 3. בנה snoozeQueue מהpersistence
+restoreSnoozedItems()
 ```
 
-- שורד force-quit
-- על `init()` של ה-ViewModel: `restoreSnoozedItems()` בונה מחדש את `snoozeQueue` עם `swipesRemaining=0`
-- כלומר: **אחרי force-quit כל הפריטים הסנוזים מופיעים מיד** בראש הסטאק בפתיחה הבאה
-- `clearSnoozedID()` נקרא כשהמשתמש עושה keep או delete על תמונה שהייתה סנוזה
+### restoreSnoozedItems() — חלוקה נכונה
+
+- **פריטים בשלים** (`counter >= targetMilestone`): `clearSnoozedID` → יצוצו דרך pagination רגיל
+- **פריטים פעילים** (`counter < targetMilestone`): נכנסים ל-`snoozeQueue`
+- **assets שנמחקו מהספרייה**: `clearSnoozedID` + `processedAssetIDs.remove`
 
 ---
 
-## Flush מיידי — מתי snooze מתעלם מהספירה
+## injectReadySnoozedItems() — שינוי state
 
-בכל אחד מהמצבים הבאים **כל** הפריטים בתור נזרקים מיידית לראש הסטאק ללא המתנה:
-
-| מצב | קוד |
-|-----|-----|
-| Cold start / filter change | `flushSnoozedToFront()` ב-`resetAndLoad()` |
-| Shuffle mode הפעלה/כיבוי | `flushSnoozedToFront()` ב-`activateShuffle()` / `deactivateShuffle()` |
-| Offline mode הפעלה/כיבוי | `flushSnoozedToFront()` ב-`activateOfflineMode()` / `deactivateOfflineMode()` |
+נקרא בתחילת כל `resetAndLoad` (החלפת filter, shuffle, offline toggle):
 
 ```swift
-private func flushSnoozedToFront() -> [PhotoItem] {
+@discardableResult
+private func injectReadySnoozedItems() -> [PhotoItem] {
     guard !snoozeQueue.isEmpty else { return [] }
-    let items = snoozeQueue.map { $0.item }
-    snoozeQueue = []
+    let counter = persistence.globalActionCounter
+    let ready = snoozeQueue.filter { counter >= $0.targetMilestone }
+    guard !ready.isEmpty else { return [] }
+    let items = ready.map { $0.item }
+    snoozeQueue.removeAll { counter >= $0.targetMilestone }
     items.forEach { processedAssetIDs.remove($0.id) }
     return items
 }
 ```
 
+**ההבדל מהישן (`flushSnoozedToFront`):** רק פריטים שהגיעו ל-milestone שלהם מוזרקים לחזית. פריטים שעדיין בbackoff window נשארים חסומים — החלפת filter/shuffle אינה עוקפת את כוונת המשתמש.
+
 ---
 
 ## Undo (Shake)
 
-רק הפעולה **האחרונה** ניתנת לביטול (shake). אם הפעולה האחרונה הייתה snooze:
+```swift
+if last.action == .snooze {
+    snoozeQueue.removeAll { $0.item.id == item.id }
+    persistence.clearSnoozedID(item.id)  // מחיקה מוחלטת — לא decrement
+}
+```
 
-1. הפריט מוסר מ-`snoozeQueue`
-2. `persistence.snoozedPhotos[id]` מוקטן ב-1, או מוסר אם הגיע ל-0
-3. הפריט חוזר ל-`photoStack[0]`
-4. התמונה השמורה ב-`lastSwipedImage` מוחזרת ל-NSCache — אין flash
+**חשוב:** `globalActionCounter` **לא יורד** ב-undo. המונה רק עולה.  
+**חשוב:** `clearSnoozedID` מלא (לא decrement של snoozeCount) — record עם future targetMilestone היה חוסם את הפריט שוב בעלייה הבאה.
+
+---
+
+## Migration V1 → V2
+
+פורמט ישן: `[String: Int]` (key: `"snoozedPhotos"`)  
+פורמט חדש: `[String: SnoozedPhotoRecord]` (key: `"snoozedPhotosV2"`)
+
+```swift
+func migrateSnoozeDataIfNeeded() {
+    // קורא legacy key, ממיר לV2 עם targetMilestone = globalActionCounter (מיידי)
+    // מנקה legacy key כדי שהmigration לא יחזור על עצמו
+}
+```
+
+פריטים ישנים מקבלים `targetMilestone = globalActionCounter` → צצים מיד בהשקה הראשונה לאחר העדכון.
 
 ---
 
@@ -166,8 +200,8 @@ private func flushSnoozedToFront() -> [PhotoItem] {
 - **אין** הוספה ל-Review Bin
 - **אין** מחיקה
 - **אין** רישום ב-`keptPhotoIDs`
-- **אין** עדכון ל-`DailyLimitService` (לא נספר כ-swipe לצורך המכסה היומית)
-- **אין** התראה / notification שהתמונה חזרה
+- **אין** עדכון ב-`DailyLimitService` (לא נספר כ-swipe לצורך המכסה היומית)
+- **אין** התראה כשהפריט חוזר
 - **אין** גבול מקסימלי למספר פעמים שניתן לסנוז את אותה תמונה
 
 ---
@@ -179,38 +213,23 @@ Swipe Up
     │
     ▼
 snoozePhoto()
-    ├─ הסר מ-photoStack
-    ├─ הוסף ל-processedAssetIDs (מסתיר מ-pagination)
-    ├─ שמור snoozeCount ב-UserDefaults (count++)
-    ├─ הוסף ל-snoozeQueue עם offset (50 / 150 / 500)
-    └─ haptic snooze
+    ├─ processedAssetIDs.insert(id)
+    ├─ milestone = globalActionCounter + backoff(50/150/500)
+    ├─ persist: SnoozedPhotoRecord(snoozeCount, targetMilestone)
+    └─ snoozeQueue.append(...)
 
-user swipes Keep or Delete (×N)
+User swipes Keep or Delete
     │
     ▼
-decrementSnoozeCounts()
-    ├─ swipesRemaining-- לכל פריט בתור
-    └─ אם swipesRemaining ≤ 0:
-           ├─ הסר מ-snoozeQueue
-           ├─ הסר מ-processedAssetIDs
-           └─ inject ל-photoStack[0]
+persistence.globalActionCounter += 1
+checkSnoozeMilestones()
+    └─ אם globalActionCounter >= item.targetMilestone:
+           ├─ snoozeQueue.remove(item)
+           ├─ processedAssetIDs.remove(item.id)
+           └─ photoStack.insert(item, at: 0)
 
 הפריט מופיע שוב בראש הסטאק
-    ├─ swipe Up שוב → offset = 150 (אם זה הפעם השנייה)
-    ├─ swipe Right → keep (+ clearSnoozedID)
-    └─ swipe Left  → delete (+ clearSnoozedID)
+    ├─ Swipe Up שוב → backoff = 150/500
+    ├─ Swipe Right → keep (+ clearSnoozedID)
+    └─ Swipe Left  → delete (+ clearSnoozedID)
 ```
-
----
-
-## נקודות עיצוב שכדאי לדעת
-
-1. **Offline Cache נמחק בסנוז** — `OfflineCacheService.shared.evict(for: topCard.id)` נקרא ב-`snoozePhoto()`. הכרטיס ייטען מחדש כשיחזור.
-
-2. **מספר סנוזים במקביל** — מותר. כמה תמונות יכולות להיות ב-`snoozeQueue` בו-זמנית, כל אחת עם `swipesRemaining` משלה.
-
-3. **שני פריטים שמגיעים ל-0 באותו swipe** — שניהם מוזרקים ל-`photoStack[0]` באותה קריאה. הסדר ביניהם הוא סדר האינדקסים ב-`snoozeQueue` (FIFO).
-
-4. **Snooze בתוך Shuffle Mode** — עובד. אבל כש-Shuffle מסתיים, `flushSnoozedToFront()` מבטל את הספירה ומחזיר את הכל מיד.
-
-5. **Daily Limit** — `snoozePhoto()` לא קורא ל-`DailyLimitService.shared.recordSwipe()`. משתמשי freemium יכולים לסנוז ללא הגבלה גם כשהגיעו למכסה היומית — רק keep ו-delete חסומים.
