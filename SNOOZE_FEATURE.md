@@ -2,33 +2,35 @@
 
 ## מה זה
 
-"Snooze" הוא פעולת ה-swipe-up בסוויפי. המשמעות: "אני לא רוצה להחליט עכשיו — תחזיר לי את התמונה הזאת אחרי כמה החלקות." התמונה עוברת לתור פנימי (`snoozeQueue`) ומוחזרת לראש הסטאק כאשר `globalActionCounter` מגיע ל-`targetMilestone` שלה.
+"Snooze" הוא פעולת ה-swipe-up בסוויפי. המשמעות: "אני לא רוצה להחליט עכשיו — תחזיר לי את התמונה הזאת אחרי כמה החלקות." התמונה עוברת לתור פנימי (`snoozeQueue`) ומוחדרת ב-index 2 בתחתית הסטאק הנראה כאשר `globalActionCounter` מגיע ל-`stagingMilestone` שלה. משם היא צפה טבעית לראש הסטאק עם כל swipe — ללא pop וללא טלפורט.
 
 ---
 
-## Absolute Milestone — הלוגיקה המרכזית
+## Absolute Milestones — הלוגיקה המרכזית
 
-במקום ספירה יחסית לאחור (`swipesRemaining--`), המערכת עובדת עם **milestone מוחלט**:
+המערכת עובדת עם **שני milestones מוחלטים** לכל פריט:
 
 ```
-targetMilestone = globalActionCounter + backoffValue
+stagingMilestone = globalActionCounter + backoffValue - snoozeStageDepth
+targetMilestone  = globalActionCounter + backoffValue
 ```
 
 - `globalActionCounter` — מונה מונוטוני שגדל ב-1 על כל keep או delete. שמור ב-UserDefaults, לעולם לא יורד.
-- `targetMilestone` — הערך של `globalActionCounter` שבו הפריט צריך לצוץ מחדש.
-- פריט בשל כאשר: `globalActionCounter >= targetMilestone`
+- `stagingMilestone` — הערך שבו הפריט מוחדר ב-index 2 (תחתית הסטאק הנראה).
+- `targetMilestone` — הערך שבו הפריט היה אמור לצוץ בראש הסטאק (נשמר לצורך reference בלבד — בפועל הפריט כבר נמצא בסטאק).
+- `snoozeStageDepth = 2` — equals `cardStackSize - 1 = 3 - 1 = 2`.
 
-**למה זה נכון:** שני הערכים persisted → הloגיקה שורדת force-quit, app updates וכל שינוי state.
+**למה זה נכון:** שלושת הערכים persisted → הלוגיקה שורדת force-quit, app updates וכל שינוי state.
 
 ---
 
 ## Exponential Backoff
 
-| מספר הsnooze לפריט | backoffValue | swipes עד חזרה |
-|--------------------|-------------|----------------|
-| 1 (ראשון)           | 50          | ~50 keep/delete |
-| 2 (שני)             | 150         | ~150 keep/delete |
-| 3+ (שלישי ומעלה)    | 500         | ~500 keep/delete |
+| מספר הsnooze לפריט | backoffValue | swipes עד הגעה לראש |
+|--------------------|-------------|---------------------|
+| 1 (ראשון)           | 50          | ~50 keep/delete     |
+| 2 (שני)             | 150         | ~150 keep/delete    |
+| 3+ (שלישי ומעלה)    | 500         | ~500 keep/delete    |
 
 הספירה מצטברת ב-`SnoozedPhotoRecord.snoozeCount` ב-UserDefaults.
 
@@ -41,9 +43,15 @@ targetMilestone = globalActionCounter + backoffValue
 ```swift
 private struct SnoozedPhoto {
     let item: PhotoItem
-    let targetMilestone: Int  // absolute counter value when this item resurfaces
+    let targetMilestone: Int   // reference only
+    let stagingMilestone: Int  // counter value at which item enters photoStack at index 2
     let snoozeCount: Int
 }
+
+/// Insertion depth — SwipeStackView.cardStackSize - 1.
+/// Item enters at the bottom of the visible ZStack and reaches index 0
+/// after snoozeStageDepth more swipes.
+private let snoozeStageDepth = 2
 
 private var snoozeQueue: [SnoozedPhoto] = []
 ```
@@ -53,7 +61,11 @@ private var snoozeQueue: [SnoozedPhoto] = []
 ```swift
 struct SnoozedPhotoRecord: Codable {
     let snoozeCount: Int
-    let targetMilestone: Int
+    let targetMilestone: Int   // reference only
+    let stagingMilestone: Int  // absolute counter at which item is inserted at index 2
+
+    // Backward compat: V2 records without stagingMilestone default to targetMilestone - 2
+    init(from decoder: Decoder) throws { ... }
 }
 
 // [localIdentifier: SnoozedPhotoRecord] — key: "snoozedPhotosV2"
@@ -75,10 +87,11 @@ var globalActionCounter: Int
 3. OfflineCacheService.evict(for: id)
 4. newCount = (existingRecord?.snoozeCount ?? 0) + 1
 5. backoff = 50 / 150 / 500
-6. milestone = persistence.globalActionCounter + backoff
-7. persistence.snoozedPhotos[id] = SnoozedPhotoRecord(snoozeCount: newCount, targetMilestone: milestone)
-8. snoozeQueue.append(SnoozedPhoto(item, targetMilestone: milestone, snoozeCount: newCount))
-9. haptic snooze
+6. milestone = globalActionCounter + backoff
+7. staging  = milestone - snoozeStageDepth        ← חדש
+8. persist: SnoozedPhotoRecord(snoozeCount, targetMilestone: milestone, stagingMilestone: staging)
+9. snoozeQueue.append(SnoozedPhoto(item, targetMilestone, stagingMilestone, snoozeCount))
+10. haptic snooze
 ```
 
 ### Keep / Delete (קריטי — סדר הפעולות)
@@ -88,27 +101,33 @@ var globalActionCounter: Int
 2. photoStack.removeFirst()
 3. ... (bin / kept logic) ...
 4. persistence.globalActionCounter += 1    ← קודם
-5. checkSnoozeMilestones()                 ← אחר כך
+5. stageSnoozedItemsIfReady()              ← אחר כך
 ```
 
-הסדר הכרחי: אם הפוך — פריט שה-milestone שלו הוא בדיוק counter+1 מחמיץ swipe אחד.
+הסדר הכרחי: אם הפוך — פריט שה-stagingMilestone שלו הוא בדיוק counter+1 מחמיץ swipe אחד.
 
-### checkSnoozeMilestones() — מנגנון החזרה
+### `stageSnoozedItemsIfReady()` — מנגנון הhחזרה
 
 ```swift
-private func checkSnoozeMilestones() {
+private func stageSnoozedItemsIfReady() {
     guard !snoozeQueue.isEmpty else { return }
     let counter = persistence.globalActionCounter
-    let readyIndices = snoozeQueue.indices.filter { counter >= snoozeQueue[$0].targetMilestone }
+    let readyIndices = snoozeQueue.indices.filter { counter >= snoozeQueue[$0].stagingMilestone }
     guard !readyIndices.isEmpty else { return }
-    let toInject = readyIndices.map { snoozeQueue[$0].item }
+    let toStage = readyIndices.map { snoozeQueue[$0].item }
     for i in readyIndices.reversed() { snoozeQueue.remove(at: i) }
-    toInject.forEach { processedAssetIDs.remove($0.id) }
-    photoStack.insert(contentsOf: toInject, at: 0)
+    for item in toStage {
+        processedAssetIDs.remove(item.id)
+        persistence.clearSnoozedID(item.id)
+        photoStack.insert(item, at: min(snoozeStageDepth, photoStack.count))
+    }
 }
 ```
 
-נקרא **רק** אחרי keep/delete — snooze swipes לא מקדמים את המונה.
+נקרא **רק** אחרי keep/delete ואחרי כל בנייה מחדש של photoStack.  
+snooze swipes לא מקדמים את המונה ולא מפעילים את הפונקציה.
+
+**ניקוי מוקדם:** persistence ו-processedAssetIDs מתנקים **בזמן staging** — לא כשהפריט מגיע לראש. זה מונע מ-pagination לשלוף את הפריט שוב כ-duplicate.
 
 ---
 
@@ -117,7 +136,7 @@ private func checkSnoozeMilestones() {
 | ערך | מפתח UserDefaults | נמחק מתי |
 |-----|-------------------|----------|
 | `globalActionCounter` | `"globalActionCounter"` | לעולם לא |
-| `snoozedPhotos` | `"snoozedPhotosV2"` | כשהמשתמש עושה keep/delete/undo על הפריט |
+| `snoozedPhotos` | `"snoozedPhotosV2"` | בזמן staging (לא כשמגיע לראש) |
 
 ### אתחול לאחר force-quit (init)
 
@@ -125,7 +144,7 @@ private func checkSnoozeMilestones() {
 // 1. Migration מפורמט ישן (חד-פעמי)
 persistence.migrateSnoozeDataIfNeeded()
 
-// 2. חסום רק IDs עם snooze פעיל
+// 2. חסום רק IDs עם snooze פעיל (targetMilestone עדיין לא הגיע)
 let counter = persistence.globalActionCounter
 let activeSnoozeIDs = Set(persistence.snoozedPhotos
     .filter { counter < $0.value.targetMilestone }.keys)
@@ -135,33 +154,12 @@ self.processedAssetIDs = persistence.keptPhotoIDs.union(activeSnoozeIDs)
 restoreSnoozedItems()
 ```
 
-### restoreSnoozedItems() — חלוקה נכונה
+### `restoreSnoozedItems()` — חלוקה לאחר אתחול
 
-- **פריטים בשלים** (`counter >= targetMilestone`): `clearSnoozedID` → יצוצו דרך pagination רגיל
-- **פריטים פעילים** (`counter < targetMilestone`): נכנסים ל-`snoozeQueue`
+- **פריטים בשלים** (`counter >= targetMilestone`): `clearSnoozedID` → יצוצו דרך pagination רגיל (ID לא נחסם)
+- **פריטים שstagingMilestone שלהם עבר** (`counter >= stagingMilestone` אך `< targetMilestone`): נכנסים ל-`snoozeQueue` כרגיל; `stageSnoozedItemsIfReady()` יזרוק אותם לindex 2 מיד כשphotoStack יהיה מוכן
+- **פריטים פעילים** (`counter < stagingMilestone`): נכנסים ל-`snoozeQueue`, ID נשאר חסום
 - **assets שנמחקו מהספרייה**: `clearSnoozedID` + `processedAssetIDs.remove`
-
----
-
-## injectReadySnoozedItems() — שינוי state
-
-נקרא בתחילת כל `resetAndLoad` (החלפת filter, shuffle, offline toggle):
-
-```swift
-@discardableResult
-private func injectReadySnoozedItems() -> [PhotoItem] {
-    guard !snoozeQueue.isEmpty else { return [] }
-    let counter = persistence.globalActionCounter
-    let ready = snoozeQueue.filter { counter >= $0.targetMilestone }
-    guard !ready.isEmpty else { return [] }
-    let items = ready.map { $0.item }
-    snoozeQueue.removeAll { counter >= $0.targetMilestone }
-    items.forEach { processedAssetIDs.remove($0.id) }
-    return items
-}
-```
-
-**ההבדל מהישן (`flushSnoozedToFront`):** רק פריטים שהגיעו ל-milestone שלהם מוזרקים לחזית. פריטים שעדיין בbackoff window נשארים חסומים — החלפת filter/shuffle אינה עוקפת את כוונת המשתמש.
 
 ---
 
@@ -175,23 +173,21 @@ if last.action == .snooze {
 ```
 
 **חשוב:** `globalActionCounter` **לא יורד** ב-undo. המונה רק עולה.  
-**חשוב:** `clearSnoozedID` מלא (לא decrement של snoozeCount) — record עם future targetMilestone היה חוסם את הפריט שוב בעלייה הבאה.
+**חשוב:** undo של snooze אפשרי רק לפני הswipe הבא — `lastAction` מוחלף בכל keepPhoto/deletePhoto. לכן הפריט לעולם לא יהיה בphotoStack (staged) בזמן undo.  
+**חשוב:** `clearSnoozedID` מלא (לא decrement של snoozeCount) — record עם future stagingMilestone היה חוסם את הפריט שוב בעלייה הבאה.
 
 ---
 
-## Migration V1 → V2
+## Migration V1 → V2 → V3 (stagingMilestone)
 
-פורמט ישן: `[String: Int]` (key: `"snoozedPhotos"`)  
-פורמט חדש: `[String: SnoozedPhotoRecord]` (key: `"snoozedPhotosV2"`)
+| גרסה | פורמט | מפתח |
+|------|--------|------|
+| V1 | `[String: Int]` (snoozeCount בלבד) | `"snoozedPhotos"` |
+| V2 | `SnoozedPhotoRecord(snoozeCount, targetMilestone)` | `"snoozedPhotosV2"` |
+| V3 | `SnoozedPhotoRecord(snoozeCount, targetMilestone, stagingMilestone)` | `"snoozedPhotosV2"` |
 
-```swift
-func migrateSnoozeDataIfNeeded() {
-    // קורא legacy key, ממיר לV2 עם targetMilestone = globalActionCounter (מיידי)
-    // מנקה legacy key כדי שהmigration לא יחזור על עצמו
-}
-```
-
-פריטים ישנים מקבלים `targetMilestone = globalActionCounter` → צצים מיד בהשקה הראשונה לאחר העדכון.
+**V1→V2:** `targetMilestone = globalActionCounter` → פריטים צצים מיד בהשקה הראשונה לאחר העדכון.  
+**V2→V3:** `stagingMilestone` לא קיים בrecords ישנים → `decodeIfPresent` מחזיר `targetMilestone - 2` כdefault → התנהגות זהה לפריטים חדשים.
 
 ---
 
@@ -214,22 +210,31 @@ Swipe Up
     ▼
 snoozePhoto()
     ├─ processedAssetIDs.insert(id)
-    ├─ milestone = globalActionCounter + backoff(50/150/500)
-    ├─ persist: SnoozedPhotoRecord(snoozeCount, targetMilestone)
+    ├─ staging  = globalActionCounter + backoff - 2
+    ├─ milestone = globalActionCounter + backoff
+    ├─ persist: SnoozedPhotoRecord(snoozeCount, targetMilestone, stagingMilestone)
     └─ snoozeQueue.append(...)
 
-User swipes Keep or Delete
+User swipes Keep or Delete (×N until globalActionCounter >= stagingMilestone)
     │
     ▼
 persistence.globalActionCounter += 1
-checkSnoozeMilestones()
-    └─ אם globalActionCounter >= item.targetMilestone:
+stageSnoozedItemsIfReady()
+    └─ אם globalActionCounter >= item.stagingMilestone:
            ├─ snoozeQueue.remove(item)
            ├─ processedAssetIDs.remove(item.id)
-           └─ photoStack.insert(item, at: 0)
+           ├─ persistence.clearSnoozedID(item.id)   ← ניקוי מוקדם
+           └─ photoStack.insert(item, at: min(2, photoStack.count))
+                          ↑ index 2 = תחתית הZStack הנראה
 
-הפריט מופיע שוב בראש הסטאק
+הפריט כבר נמצא בסטאק ב-index 2
+    │
+    ├─ swipe אחד  → עולה ל-index 1
+    ├─ שני swipes → עולה ל-index 0 (ראש הסטאק) — ללא pop
+    │
+    ▼
+הפריט בראש הסטאק
     ├─ Swipe Up שוב → backoff = 150/500
-    ├─ Swipe Right → keep (+ clearSnoozedID)
-    └─ Swipe Left  → delete (+ clearSnoozedID)
+    ├─ Swipe Right  → keep
+    └─ Swipe Left   → delete
 ```

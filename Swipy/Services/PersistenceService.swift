@@ -5,11 +5,28 @@ class PersistenceService {
 
     // MARK: - Snooze Record
 
-    /// Persisted per-item snooze state. Uses an absolute milestone instead of a
-    /// relative countdown so the correct delay survives force-quit and relaunches.
+    /// Persisted per-item snooze state. Uses absolute milestones so the correct
+    /// delay survives force-quit and relaunches.
     struct SnoozedPhotoRecord: Codable {
-        let snoozeCount: Int      // how many times this item has been snoozed (drives backoff)
-        let targetMilestone: Int  // globalActionCounter value at which this item should resurface
+        let snoozeCount: Int       // how many times this item has been snoozed (drives backoff)
+        let targetMilestone: Int   // globalActionCounter value at which item would have popped to front (kept for reference)
+        let stagingMilestone: Int  // globalActionCounter value at which item is inserted at index 2 (bottom of visible stack)
+
+        init(snoozeCount: Int, targetMilestone: Int, stagingMilestone: Int) {
+            self.snoozeCount = snoozeCount
+            self.targetMilestone = targetMilestone
+            self.stagingMilestone = stagingMilestone
+        }
+
+        // Backward compat: V2 records written before stagingMilestone existed
+        // default to targetMilestone - 2 so they behave like freshly-snoozed items.
+        init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            snoozeCount = try c.decode(Int.self, forKey: .snoozeCount)
+            targetMilestone = try c.decode(Int.self, forKey: .targetMilestone)
+            stagingMilestone = try c.decodeIfPresent(Int.self, forKey: .stagingMilestone)
+                ?? (targetMilestone - 2)
+        }
     }
 
     // MARK: - AppStorage Backing
@@ -77,7 +94,7 @@ class PersistenceService {
         let counter = globalActionCounter
         var migrated: [String: SnoozedPhotoRecord] = [:]
         for (id, count) in legacy {
-            migrated[id] = SnoozedPhotoRecord(snoozeCount: count, targetMilestone: counter)
+            migrated[id] = SnoozedPhotoRecord(snoozeCount: count, targetMilestone: counter, stagingMilestone: counter)
         }
         snoozedPhotos = migrated
         legacySnoozedPhotosData = Data() // clear V1 key — migration must not re-run
