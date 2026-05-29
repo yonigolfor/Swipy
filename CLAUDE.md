@@ -2,7 +2,7 @@
 
 ## What This App Is
 
-**Swipy** is a native iOS photo/video management app with the tagline *"Declutter your memories."* It presents the user's photo library as a swipe-based card stack (Tinder-style). Swipe right = keep, swipe left = delete (moves to Review Bin), swipe up = star. The app also auto-identifies junk photos (blurry, screenshots, large videos, burst duplicates, screen recordings) and surfaces them via Smart Filters. Items accumulate in a Review Bin before permanent deletion, giving users an undo safety net.
+**Swipy** is a native iOS photo/video management app with the tagline *"Declutter your memories."* It presents the user's photo library as a swipe-based card stack (Tinder-style). Swipe right = keep, swipe left = delete (moves to Review Bin), swipe up = snooze ("Later" — defers the decision, re-injects into the stack after N swipes). The app also auto-identifies junk photos (blurry, screenshots, large videos, burst duplicates, screen recordings) and surfaces them via Smart Filters. Items accumulate in a Review Bin before permanent deletion, giving users an undo safety net.
 
 **App Icon:** Blue gradient background, white "S" letter.
 
@@ -44,7 +44,7 @@ Swipy/
 ├── Models/
 │   ├── PhotoItem.swift         # PHAsset wrapper + metadata cache
 │   ├── FilterCategory.swift    # Enum: all, screenshots, largeVideos, blurryPhotos, burstPhotos, screenRecordings
-│   └── SwipeAction.swift       # Enum: keep, delete, starKeeper, undo
+│   └── SwipeAction.swift       # Enum: keep, delete, snooze, undo
 │
 ├── ViewModels/
 │   ├── PhotoStackViewModel.swift   # ~765 lines — main state container
@@ -98,9 +98,10 @@ All UI colors must come from one of these sources. Do not hardcode other color v
 ### Swipe Action Colors
 ```swift
 // View+Extensions.swift
-static let swipeGreen  = Color(red: 0.2,  green: 0.8, blue: 0.4)   // #33CC66 — keep
-static let swipeRed    = Color(red: 0.95, green: 0.3, blue: 0.3)   // #F24D4D — delete
-static let swipeYellow = Color(red: 1.0,  green: 0.8, blue: 0.2)   // #FFCC33 — star
+static let swipeGreen  = Color(red: 0.2,  green: 0.8,  blue: 0.4)   // #33CC66 — keep
+static let swipeRed    = Color(red: 0.95, green: 0.3,  blue: 0.3)   // #F24D4D — delete
+static let swipeBlue   = Color(red: 0.25, green: 0.55, blue: 0.95)  // #40 8CF2 — snooze (Later)
+static let swipeYellow = Color(red: 1.0,  green: 0.8,  blue: 0.2)   // #FFCC33 — celebration particles only (TrashCelebrationView)
 ```
 
 ### Filter Category Colors
@@ -172,7 +173,7 @@ No `NavigationStack` or `NavigationView` is used at the root level. Tab switchin
 - **Page size**: 30 items per subsequent page
 - **Watermark**: next page loads when ≤ 12 items remain in `photoStack`
 - **PHFetchResult** is treated as a lazy index — never fully enumerate it
-- **NSCache**: `countLimit = 6`, `totalCostLimit = 6MB`; entries keyed by asset `localIdentifier`
+- **NSCache**: `countLimit = 8`, `totalCostLimit = 8MB`; entries keyed by asset `localIdentifier`
 - **Precaching**: After each swipe, top-5 images are loaded into NSCache via `precacheNextImages()`
 - **VideoPlayerPool**: max 3 `AVPlayer` instances; FIFO eviction; always drain before deleting assets
 
@@ -203,9 +204,10 @@ Views show a shimmer/loading indicator while Phase 2 is in progress. Never block
 
 `PersistenceService` wraps `UserDefaults`. Keys to know:
 - `hasCompletedOnboarding` — Bool, gates onboarding
-- Kept asset IDs
-- Bin asset IDs  
-- Space saved (session + lifetime, in bytes)
+- `keptPhotoIDs` — Set of kept asset local identifiers
+- `reviewBinIDs` — array of bin asset local identifiers
+- `reviewBinSpaceSaved` / `totalSpaceSavedLifetime` — space saved in bytes
+- `snoozedPhotos` — `[localIdentifier: snoozeCount]`, drives exponential backoff on re-injection
 
 Notification scheduling caps at **2 notifications/day**. The 4 trigger types are: review bin reminder (24h), photo burst (50+ new photos), milestone (per GB freed), weekly cleanup.
 
@@ -240,7 +242,7 @@ This project uses **zero third-party packages** (no CocoaPods, SPM, Carthage). U
 
 - **Undo**: Shake gesture triggers undo of last swipe. The undo item must always be kept in NSCache — never evict it until a new swipe occurs.
 - **Review Bin**: Items are moved here on delete swipe. No photo is permanently deleted until the user confirms "Empty Trash" in the Review Bin.
-- **Star Keeper**: Swipe up marks an image as a keeper (different from right-swipe keep) — treat as a separate action path.
+- **Snooze ("Later")**: Swipe up defers the decision — the photo is hidden from the stack and re-injected at the front after N keep/delete swipes (50 → 150 → 500, exponential backoff per item). Snoozed items are persisted in `UserDefaults` and survive force-quit; they reappear immediately on the next cold start. Snooze does **not** count against the daily swipe limit. See `SNOOZE_FEATURE.md` for full details.
 - **Video safety**: Never delete a video from PHPhotoLibrary without first draining its AVPlayer from VideoPlayerPool — this prevents crashes.
 - **Notification quota**: Respect the 2/day cap. Check notification cap dates from `@AppStorage` before scheduling.
 
@@ -259,3 +261,4 @@ This project uses **zero third-party packages** (no CocoaPods, SPM, Carthage). U
 
 - `ARCHITECTURE_SWIPE_LOADING.md` — detailed swipe stack loading, cache lifecycle, video pre-warming, pagination strategy
 - `NOTIFICATIONS.md` — notification triggers, background task setup, deep linking, known limitations
+- `SNOOZE_FEATURE.md` — snooze ("Later") algorithm, exponential backoff, persistence, flush scenarios
