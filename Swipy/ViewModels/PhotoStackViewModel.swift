@@ -1339,20 +1339,22 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// of the visible ZStack. The item naturally bubbles to index 0 as the user
     /// swipes, with no pop or teleport.
     ///
-    /// Cleanup is done eagerly at staging time: the persistence record and the
-    /// processedAssetIDs block are both cleared so pagination cannot resurface
-    /// the item as a duplicate. O(n) over snoozeQueue (typically < 10 items).
+    /// processedAssetIDs is cleared at staging so pagination cannot add a duplicate.
+    /// The persistence record is intentionally kept until the user makes a final decision
+    /// (keep/delete/undo) — this preserves snoozeCount for the ×2/×3 badge and for
+    /// correct backoff on subsequent snoozes. O(n) over snoozeQueue (typically < 10 items).
     private func stageSnoozedItemsIfReady() {
         guard !snoozeQueue.isEmpty else { return }
         let counter = persistence.globalActionCounter
         let readyIndices = snoozeQueue.indices.filter { counter >= snoozeQueue[$0].stagingMilestone }
         guard !readyIndices.isEmpty else { return }
-        let toStage = readyIndices.map { snoozeQueue[$0].item }
+        let toStage = readyIndices.map { (snoozeQueue[$0].item, snoozeQueue[$0].snoozeCount) }
         for i in readyIndices.reversed() { snoozeQueue.remove(at: i) }
-        for item in toStage {
+        for (item, count) in toStage {
             processedAssetIDs.remove(item.id)
-            persistence.clearSnoozedID(item.id)
-            photoStack.insert(item, at: min(snoozeStageDepth, photoStack.count))
+            var tagged = item
+            tagged.snoozeCount = count
+            photoStack.insert(tagged, at: min(snoozeStageDepth, photoStack.count))
         }
     }
 

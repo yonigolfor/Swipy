@@ -17,6 +17,9 @@ struct PhotoItem: Identifiable {
     /// True when the asset is stored in iCloud and not fully downloaded locally.
     /// Set by applyOfflineModeFilter() — never touches main thread during check.
     var isCloudOnly: Bool = false
+    /// Number of times this item has been snoozed and successfully staged back into
+    /// the stack. Set by stageSnoozedItemsIfReady() at staging time; 0 by default.
+    var snoozeCount: Int = 0
 
     init(asset: PHAsset) {
         self.id = asset.localIdentifier

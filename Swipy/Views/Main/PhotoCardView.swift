@@ -167,11 +167,28 @@ struct PhotoCardView: View {
                 }
             }
 
-            // ── File size + Favorite badge (top-right) ─────────────────
+            // ── File size + Favorite + Snooze badges (top-right) ──────
 VStack {
     HStack {
         Spacer()
         HStack(spacing: 6) {
+            if item.snoozeCount > 0 {
+                HStack(spacing: 4) {
+                    Image(systemName: "clock.arrow.circlepath")
+                        .font(.caption)
+                    Text(item.snoozeCount == 1 ? "Snoozed" : "Snoozed ×\(item.snoozeCount)")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                }
+                .foregroundColor(.orange)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule()
+                        .fill(.ultraThinMaterial)
+                        .overlay(Capsule().fill(Color.orange.opacity(0.2)))
+                )
+            }
             if item.asset.isFavorite {
                 Image(systemName: "heart.fill")
                     .font(.caption)
