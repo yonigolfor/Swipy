@@ -795,8 +795,8 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         let newCount = (existingRecord?.snoozeCount ?? 0) + 1
         let backoff: Int = switch newCount {
         case 1:  50
-        case 2:  150
-        default: 500
+        case 2:  100
+        default: 150
         }
         let milestone = persistence.globalActionCounter + backoff
         let staging = milestone - snoozeStageDepth

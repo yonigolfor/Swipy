@@ -29,8 +29,8 @@ targetMilestone  = globalActionCounter + backoffValue
 | מספר הsnooze לפריט | backoffValue | swipes עד הגעה לראש |
 |--------------------|-------------|---------------------|
 | 1 (ראשון)           | 50          | ~50 keep/delete     |
-| 2 (שני)             | 150         | ~150 keep/delete    |
-| 3+ (שלישי ומעלה)    | 500         | ~500 keep/delete    |
+| 2 (שני)             | 100         | ~100 keep/delete    |
+| 3+ (שלישי ומעלה)    | 150         | ~150 keep/delete    |
 
 הספירה מצטברת ב-`SnoozedPhotoRecord.snoozeCount` ב-UserDefaults.
 
