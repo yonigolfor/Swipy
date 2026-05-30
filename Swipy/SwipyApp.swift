@@ -17,6 +17,7 @@ struct SwipyApp: App {
             if phase == .active {
                 NotificationScheduler.shared.resetBurstBaseline()
                 NotificationScheduler.shared.evaluateAndScheduleNotifications()
+                NotificationScheduler.shared.rescheduleInactivityReminder()
             }
         }
     }

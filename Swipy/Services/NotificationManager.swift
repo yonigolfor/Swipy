@@ -14,6 +14,7 @@ class NotificationManager {
     static let photoBurstCategory = "PHOTO_BURST"
     static let milestoneCategory  = "MILESTONE"
     static let weeklyCategory     = "WEEKLY_CLEANUP"
+    static let inactivityCategory = "INACTIVITY"
 
     // Action identifiers
     static let cleanNowAction  = "CLEAN_NOW"
@@ -21,10 +22,11 @@ class NotificationManager {
     static let sortNowAction   = "SORT_NOW"
 
     // Notification identifiers
-    static let reviewBinNotif = "com.swipy.reviewBinReminder"
+    static let reviewBinNotif  = "com.swipy.reviewBinReminder"
     static let photoBurstNotif = "com.swipy.photoBurst"
     static let milestoneNotif  = "com.swipy.milestone"
     static let weeklyNotif     = "com.swipy.weeklyCleanup"
+    static let inactivityNotif = "com.swipy.inactivity"
 
     private init() {}
 
@@ -69,6 +71,9 @@ class NotificationManager {
                                    actions: [cleanNow],
                                    intentIdentifiers: []),
             UNNotificationCategory(identifier: Self.weeklyCategory,
+                                   actions: [sortNow],
+                                   intentIdentifiers: []),
+            UNNotificationCategory(identifier: Self.inactivityCategory,
                                    actions: [sortNow],
                                    intentIdentifiers: [])
         ]
@@ -132,14 +137,31 @@ class NotificationManager {
         content.userInfo = ["destination": "swipe"]
 
         var comps = DateComponents()
-        comps.weekday = 7 // Saturday
-        comps.hour = 19
-        comps.minute = 0
+        comps.weekday = 1 // Sunday
+        comps.hour = 21
+        comps.minute = 30
 
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: true)
         let request = UNNotificationRequest(identifier: Self.weeklyNotif, content: content, trigger: trigger)
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [Self.weeklyNotif])
         UNUserNotificationCenter.current().add(request)
+    }
+
+    // MARK: - Inactivity Reminder (72 h since last foreground)
+
+    /// Cancel any pending inactivity notification and reschedule for 72 hours from now.
+    /// Call every time the app enters foreground — effectively resets the clock.
+    func rescheduleInactivityReminder() {
+        let content = UNMutableNotificationContent()
+        content.title = "60 שניות זה המון זמן! ⏱️"
+        content.body = "כנס ותגלה כמה GB של זבל אתה יכול לפנות מהמכשיר שלך ברגע."
+        content.categoryIdentifier = Self.inactivityCategory
+        content.sound = .default
+        content.userInfo = ["destination": "swipe"]
+
+        UNUserNotificationCenter.current()
+            .removePendingNotificationRequests(withIdentifiers: [Self.inactivityNotif])
+        schedule(identifier: Self.inactivityNotif, content: content, delay: 72 * 3600)
     }
 
     // MARK: - Helpers
