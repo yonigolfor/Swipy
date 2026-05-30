@@ -740,6 +740,229 @@
         }
       }
     },
+    "notif.action.cleanNow" : {
+      "comment" : "MARK: - Notification Actions",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clean Now"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "נקה עכשיו"
+          }
+        }
+      }
+    },
+    "notif.action.deleteAll" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete All"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "מחק הכל"
+          }
+        }
+      }
+    },
+    "notif.action.sortNow" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Let's Sort"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "בוא נמיין"
+          }
+        }
+      }
+    },
+    "notif.burst.body" : {
+      "comment" : "MARK: - Notification Content",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You took %lld new photos.\nLet's pick the best and clear the rest."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "צילמת %lld תמונות חדשות.\nבוא נבחר את הטובות וננקה את השאר."
+          }
+        }
+      }
+    },
+    "notif.burst.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What a day! 📸"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "איזה יום פוטוגני! 📸"
+          }
+        }
+      }
+    },
+    "notif.inactivity.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Discover how many GBs of junk you can free from your device in a flash."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "כנס ותגלה כמה GB של זבל אתה יכול לפנות מהמכשיר שלך ברגע."
+          }
+        }
+      }
+    },
+    "notif.inactivity.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "60 seconds is a lot! ⏱️"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "60 שניות זה המון זמן! ⏱️"
+          }
+        }
+      }
+    },
+    "notif.milestone.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep it up — you're cleaning your gallery like a pro."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "המשך כך — אתה מנקה את הגלריה כמו מקצוען."
+          }
+        }
+      }
+    },
+    "notif.milestone.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Amazing! You've saved %lldGB! 🏆"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "מדהים! עברת %lldGB שנחסכו! 🏆"
+          }
+        }
+      }
+    },
+    "notif.reviewBin.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ waiting in your Review Bin.\nOne tap and they're gone forever."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ מחכים ב'סל המחזור'.\nלחיצה אחת והם נעלמים לנצח."
+          }
+        }
+      }
+    },
+    "notif.reviewBin.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Almost done! 🏁"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "העבודה הקשה כמעט הסתיימה! 🏁"
+          }
+        }
+      }
+    },
+    "notif.weekly.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The weekend is the perfect time to declutter your gallery and free up space."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "סוף השבוע — זמן מושלם לנקות את הגלריה ולפנות מקום."
+          }
+        }
+      }
+    },
+    "notif.weekly.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sunday Clean-Up 🧹"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ניקיון יום ראשון 🧹"
+          }
+        }
+      }
+    },
     "onboarding.demo.cta" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -1442,6 +1665,12 @@
           }
         }
       }
+    },
+    "Snoozed" : {
+
+    },
+    "Snoozed ×%lld" : {
+
     },
     "Space Reclaimed! 🚀" : {
       "localizations" : {

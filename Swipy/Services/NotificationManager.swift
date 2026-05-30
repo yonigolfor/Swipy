@@ -46,17 +46,17 @@ class NotificationManager {
     private func registerCategories() {
         let cleanNow = UNNotificationAction(
             identifier: Self.cleanNowAction,
-            title: "נקה עכשיו",
+            title: String(localized: "notif.action.cleanNow"),
             options: [.foreground]
         )
         let deleteAll = UNNotificationAction(
             identifier: Self.deleteAllAction,
-            title: "מחק הכל",
+            title: String(localized: "notif.action.deleteAll"),
             options: [.destructive, .foreground]
         )
         let sortNow = UNNotificationAction(
             identifier: Self.sortNowAction,
-            title: "בוא נמיין",
+            title: String(localized: "notif.action.sortNow"),
             options: [.foreground]
         )
 
@@ -84,8 +84,8 @@ class NotificationManager {
 
     func scheduleReviewBinReminder(itemCount: Int, spaceSavedBytes: Int64) {
         let content = UNMutableNotificationContent()
-        content.title = "העבודה הקשה כמעט הסתיימה! 🏁"
-        content.body = "\(formatBytes(spaceSavedBytes)) מחכים ב'סל המחזור'.\nלחיצה אחת והם נעלמים לנצח."
+        content.title = String(localized: "notif.reviewBin.title")
+        content.body = String(format: String(localized: "notif.reviewBin.body"), formatBytes(spaceSavedBytes))
         content.categoryIdentifier = Self.reviewBinCategory
         content.sound = .default
         content.userInfo = ["destination": "reviewBin", "itemCount": itemCount]
@@ -98,8 +98,8 @@ class NotificationManager {
 
     func schedulePhotoBurstNotification(newPhotoCount: Int, latestAsset: PHAsset?) {
         let content = UNMutableNotificationContent()
-        content.title = "איזה יום פוטוגני! 📸"
-        content.body = "צילמת \(newPhotoCount) תמונות חדשות.\nבוא נבחר את ה-Top 10 וננקה את השאר."
+        content.title = String(localized: "notif.burst.title")
+        content.body = String(format: String(localized: "notif.burst.body"), newPhotoCount)
         content.categoryIdentifier = Self.photoBurstCategory
         content.sound = .default
         content.userInfo = ["destination": "swipe", "photoCount": newPhotoCount]
@@ -116,8 +116,8 @@ class NotificationManager {
 
     func scheduleMilestoneNotification(gbSaved: Int) {
         let content = UNMutableNotificationContent()
-        content.title = "מדהים! עברת \(gbSaved)GB שנחסכו! 🏆"
-        content.body = "המשך כך — אתה מנקה את הגלריה כמו מקצוען."
+        content.title = String(format: String(localized: "notif.milestone.title"), gbSaved)
+        content.body = String(localized: "notif.milestone.body")
         content.categoryIdentifier = Self.milestoneCategory
         content.sound = .default
         content.userInfo = ["destination": "swipe", "gb": gbSaved]
@@ -130,8 +130,8 @@ class NotificationManager {
 
     func scheduleWeeklyCleanup() {
         let content = UNMutableNotificationContent()
-        content.title = "שבת של ניקיון 🧹"
-        content.body = "סוף השבוע — זמן מושלם לנקות את הגלריה ולפנות מקום."
+        content.title = String(localized: "notif.weekly.title")
+        content.body = String(localized: "notif.weekly.body")
         content.categoryIdentifier = Self.weeklyCategory
         content.sound = .default
         content.userInfo = ["destination": "swipe"]
@@ -153,8 +153,8 @@ class NotificationManager {
     /// Call every time the app enters foreground — effectively resets the clock.
     func rescheduleInactivityReminder() {
         let content = UNMutableNotificationContent()
-        content.title = "60 שניות זה המון זמן! ⏱️"
-        content.body = "כנס ותגלה כמה GB של זבל אתה יכול לפנות מהמכשיר שלך ברגע."
+        content.title = String(localized: "notif.inactivity.title")
+        content.body = String(localized: "notif.inactivity.body")
         content.categoryIdentifier = Self.inactivityCategory
         content.sound = .default
         content.userInfo = ["destination": "swipe"]
