@@ -19,6 +19,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     @Published var totalSpaceSaved: Int64 = 0
     @Published var isLoading = false
     @Published var categoryCounts: [FilterCategory: Int] = [:]
+    @Published var hasPendingCountUpdate = false
     /// True while the expensive Phase 2 large video scan is running.
     @Published var isCountingLargeVideos = false
 
@@ -750,6 +751,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         persistence.clearSnoozedID(topCard.id)
         self.lastAction = (topCard, .keep)
         photoStack.removeFirst()
+        hasPendingCountUpdate = true
         OfflineCacheService.shared.evict(for: topCard.id)
         DailyLimitService.shared.recordSwipe()
         hapticService.keep()
@@ -767,6 +769,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         persistence.clearSnoozedID(topCard.id)
         self.lastAction = (topCard, .delete)
         photoStack.removeFirst()
+        hasPendingCountUpdate = true
         reviewBin.append(topCard)
         totalSpaceSaved += topCard.fileSize
         OfflineCacheService.shared.evict(for: topCard.id)
@@ -789,6 +792,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         processedAssetIDs.insert(topCard.id)
         self.lastAction = (topCard, .snooze)
         photoStack.removeFirst()
+        hasPendingCountUpdate = true
         OfflineCacheService.shared.evict(for: topCard.id)
 
         let existingRecord = persistence.snoozedPhotos[topCard.id]
@@ -837,6 +841,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         processedAssetIDs.remove(item.id)
         persistence.removeKeptID(item.id)
         photoStack.insert(item, at: 0)
+        hasPendingCountUpdate = true
 
         if last.action == .delete {
             reviewBin.removeAll { $0.id == item.id }

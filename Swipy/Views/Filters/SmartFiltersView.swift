@@ -55,6 +55,11 @@ struct SmartFiltersView: View {
                     stackViewModel.refreshCategoryCounts()
                 }
             }
+            .onAppear {
+                guard stackViewModel.hasPendingCountUpdate else { return }
+                stackViewModel.hasPendingCountUpdate = false
+                stackViewModel.refreshCategoryCounts()
+            }
             .refreshable {
                 stackViewModel.refreshCategoryCounts()
             }
