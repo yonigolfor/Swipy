@@ -53,7 +53,7 @@ private let cardStackSize = 3
 |--------|-----|
 | Initial page (ברירת מחדל) | 50 items |
 | Initial page (blurry) | 200 items |
-| Initial page (burst) | 500 items |
+| Initial page (burst) | 500 items — נדרש ל-VNFeaturePrint chain analysis |
 | Next page | 30 items |
 | Low watermark (trigger לדף הבא) | 12 items |
 

@@ -210,21 +210,29 @@ VStack {
     Spacer()
 }
 
-            // ── Screenshot / Recording badge (top-left) ────────────────
-            if item.isScreenshot || item.isScreenRecording {
+            // ── Screenshot / Recording / Burst Best badge (top-left) ─────
+            if item.isScreenshot || item.isScreenRecording || item.isBurstBest {
                 VStack {
                     HStack {
                         HStack(spacing: 6) {
-                            Image(systemName: item.isScreenshot ? "camera.viewfinder" : "record.circle")
-                                .font(.caption)
-                            Text(item.isScreenshot ? String(localized: "badge.screenshot") : String(localized: "badge.recording"))
-                                .font(.caption)
-                                .fontWeight(.medium)
+                            if item.isBurstBest {
+                                Text("⭐️")
+                                    .font(.caption)
+                                Text(String(localized: "badge.burst_best"))
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                            } else {
+                                Image(systemName: item.isScreenshot ? "camera.viewfinder" : "record.circle")
+                                    .font(.caption)
+                                Text(item.isScreenshot ? String(localized: "badge.screenshot") : String(localized: "badge.recording"))
+                                    .font(.caption)
+                                    .fontWeight(.medium)
+                            }
                         }
                         .foregroundColor(.white)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
-                        .background(Capsule().fill(Color.blue.opacity(0.8)))
+                        .background(Capsule().fill(item.isBurstBest ? Color.green.opacity(0.85) : Color.blue.opacity(0.8)))
                         .padding()
 
                         Spacer()

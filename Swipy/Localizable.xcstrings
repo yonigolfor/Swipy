@@ -4,6 +4,9 @@
     "%lld" : {
 
     },
+    "⭐️" : {
+
+    },
     "🎉" : {
 
     },
@@ -22,6 +25,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "עבודה טובה! 💪"
+          }
+        }
+      }
+    },
+    "badge.burst_best" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Our Best"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "הטובה ביותר"
           }
         }
       }
@@ -635,111 +655,6 @@
         }
       }
     },
-    "Offline Mode" : {
-
-    },
-    "offline.indicator_header_enter" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Switched to"
-          }
-        },
-        "he" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "עברת ל"
-          }
-        }
-      }
-    },
-    "offline.indicator_header_exit" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Back to"
-          }
-        },
-        "he" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "חזרת ל"
-          }
-        }
-      }
-    },
-    "offline.indicator_text_enter" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "✈ Offline Mode"
-          }
-        },
-        "he" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "✈ מצב Offline"
-          }
-        }
-      }
-    },
-    "offline.indicator_text_exit" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "📶 Normal Mode"
-          }
-        },
-        "he" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "📶 מצב רגיל"
-          }
-        }
-      }
-    },
-    "offline.scanning_subtitle" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Looking for photos stored locally on your device..."
-          }
-        },
-        "he" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "מחפש תמונות שמורות מקומית במכשיר..."
-          }
-        }
-      }
-    },
-    "offline.scanning_title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Searching Your Device"
-          }
-        },
-        "he" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "מחפש במכשיר שלך"
-          }
-        }
-      }
-    },
     "notif.action.cleanNow" : {
       "comment" : "MARK: - Notification Actions",
       "extractionState" : "manual",
@@ -959,6 +874,111 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ניקיון יום ראשון 🧹"
+          }
+        }
+      }
+    },
+    "Offline Mode" : {
+
+    },
+    "offline.indicator_header_enter" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Switched to"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "עברת ל"
+          }
+        }
+      }
+    },
+    "offline.indicator_header_exit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Back to"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "חזרת ל"
+          }
+        }
+      }
+    },
+    "offline.indicator_text_enter" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "✈ Offline Mode"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "✈ מצב Offline"
+          }
+        }
+      }
+    },
+    "offline.indicator_text_exit" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "📶 Normal Mode"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "📶 מצב רגיל"
+          }
+        }
+      }
+    },
+    "offline.scanning_subtitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Looking for photos stored locally on your device..."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "מחפש תמונות שמורות מקומית במכשיר..."
+          }
+        }
+      }
+    },
+    "offline.scanning_title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Searching Your Device"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "מחפש במכשיר שלך"
           }
         }
       }

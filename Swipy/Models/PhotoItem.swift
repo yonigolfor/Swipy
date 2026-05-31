@@ -14,6 +14,8 @@ struct PhotoItem: Identifiable {
     let asset: PHAsset
     var rotation: Double // רוטציה אקראית עבור stack effect
     var isStarred: Bool = false // עבור Burst/Similar mode
+    /// True when this is the best photo in a burst group (iOS autoPick or first in group)
+    var isBurstBest: Bool = false
     /// True when the asset is stored in iCloud and not fully downloaded locally.
     /// Set by applyOfflineModeFilter() — never touches main thread during check.
     var isCloudOnly: Bool = false

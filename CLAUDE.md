@@ -39,7 +39,7 @@ Swipy/
 ├── SwipyApp.swift              # Entry point + AppDelegate
 ├── ContentView.swift           # Root: onboarding gate → 3-tab layout
 ├── BlurDetector.swift          # CILaplacian variance on 200×200 thumb
-├── BurstAnalyzer.swift         # Groups by burstIdentifier or ≤2s delta
+├── BurstAnalyzer.swift         # Groups by burstIdentifier OR (gap ≤30s AND VNFeaturePrint similarity < 0.85); chain comparison; min 5 items
 │
 ├── Models/
 │   ├── PhotoItem.swift         # PHAsset wrapper + metadata cache
@@ -169,7 +169,7 @@ No `NavigationStack` or `NavigationView` is used at the root level. Tab switchin
 
 ## Pagination & Image Loading
 
-- **Initial load**: 50 items (200 for blurry, 500 for burst)
+- **Initial load**: 50 items (200 for blurry, 500 for burst — needed for VNFeaturePrint chain analysis)
 - **Page size**: 30 items per subsequent page
 - **Watermark**: next page loads when ≤ 12 items remain in `photoStack`
 - **PHFetchResult** is treated as a lazy index — never fully enumerate it
