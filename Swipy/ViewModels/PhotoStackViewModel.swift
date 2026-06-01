@@ -1344,22 +1344,48 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// of the visible ZStack. The item naturally bubbles to index 0 as the user
     /// swipes, with no pop or teleport.
     ///
-    /// processedAssetIDs is cleared at staging so pagination cannot add a duplicate.
-    /// The persistence record is intentionally kept until the user makes a final decision
-    /// (keep/delete/undo) — this preserves snoozeCount for the ×2/×3 badge and for
-    /// correct backoff on subsequent snoozes. O(n) over snoozeQueue (typically < 10 items).
+    /// Only items whose milestone is reached AND that belong to the active category
+    /// are staged — others remain in the queue until the user returns to a compatible
+    /// category. processedAssetIDs is cleared at staging so pagination cannot add a
+    /// duplicate. The persistence record is intentionally kept until the user makes a
+    /// final decision (keep/delete/undo) — this preserves snoozeCount for the ×2/×3
+    /// badge and for correct backoff on subsequent snoozes. O(n) over snoozeQueue
+    /// (typically < 10 items).
     private func stageSnoozedItemsIfReady() {
         guard !snoozeQueue.isEmpty else { return }
         let counter = persistence.globalActionCounter
-        let readyIndices = snoozeQueue.indices.filter { counter >= snoozeQueue[$0].stagingMilestone }
-        guard !readyIndices.isEmpty else { return }
-        let toStage = readyIndices.map { (snoozeQueue[$0].item, snoozeQueue[$0].snoozeCount) }
-        for i in readyIndices.reversed() { snoozeQueue.remove(at: i) }
+        var indicesToRemove: [Int] = []
+        var toStage: [(PhotoItem, Int)] = []
+        for i in snoozeQueue.indices {
+            guard counter >= snoozeQueue[i].stagingMilestone else { continue }
+            if matchesCurrentFilter(snoozeQueue[i].item) {
+                indicesToRemove.append(i)
+                toStage.append((snoozeQueue[i].item, snoozeQueue[i].snoozeCount))
+            }
+            // Milestone reached but wrong category — leave in queue until the user
+            // returns to a compatible context.
+        }
+        guard !indicesToRemove.isEmpty else { return }
+        for i in indicesToRemove.reversed() { snoozeQueue.remove(at: i) }
         for (item, count) in toStage {
             processedAssetIDs.remove(item.id)
             var tagged = item
             tagged.snoozeCount = count
             photoStack.insert(tagged, at: min(snoozeStageDepth, photoStack.count))
+        }
+    }
+
+    /// Returns true when `item` is a valid member of the currently active filter category.
+    /// Mirrors the inclusion logic in PhotoLibraryService.fetchPageOfAssets so that snooze
+    /// re-injection honours strict category boundaries.
+    private func matchesCurrentFilter(_ item: PhotoItem) -> Bool {
+        switch currentFilter {
+        case .all:             return true
+        case .screenshots:     return item.isScreenshot
+        case .screenRecordings: return item.isScreenRecording
+        case .largeVideos:     return item.isVideo && item.fileSize > PhotoLibraryService.largeVideoThresholdBytes
+        case .blurryPhotos:    return item.asset.mediaType == .image && !item.isScreenshot
+        case .burstPhotos:     return item.asset.mediaType == .image && !item.isScreenshot && !item.isScreenRecording
         }
     }
 
