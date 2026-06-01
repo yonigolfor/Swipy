@@ -510,6 +510,20 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 return
             }
 
+            // largeVideos: no pre-fetch needed — fetchPageOfAssets already does the
+            // fileSize check inline, so a wasted initial scan would discard real results.
+            // Stream directly from cursor 0 via scanUntilFull.
+            if filter == .largeVideos {
+                await MainActor.run { self.photoStack = []; self.isLoading = true }
+                await scanUntilFull(filter: .largeVideos, targetCount: 15, batchSize: 300)
+                await MainActor.run {
+                    self.stageSnoozedItemsIfReady()
+                    self.isLoading = false
+                }
+                if self.categoryCounts.isEmpty { self.refreshCategoryCounts() }
+                return
+            }
+
             let pageSize: Int
             switch filter {
             case .burstPhotos:  pageSize = 500
@@ -691,7 +705,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
         guard fetchCursor < photoService.totalAssetCount else { return }
 
-        if currentFilter == .blurryPhotos || currentFilter == .burstPhotos {
+        if currentFilter == .blurryPhotos || currentFilter == .burstPhotos || currentFilter == .largeVideos {
             Task { await scanUntilFull(filter: currentFilter) }
             return
         }
@@ -1265,7 +1279,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         targetCount: Int = 15,
         batchSize: Int = 100
     ) async {
-        guard filter == .blurryPhotos || filter == .burstPhotos else { return }
+        guard filter == .blurryPhotos || filter == .burstPhotos || filter == .largeVideos else { return }
 
         while photoStack.count < targetCount,
               fetchCursor < photoService.totalAssetCount {
@@ -1318,6 +1332,18 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                         self.photoStack.append(contentsOf: analyzed)
                         self.photoService.startCaching(
                             for: analyzed,
+                            targetSize: CGSize(width: 400, height: 600)
+                        )
+                        if self.isLoading { self.isLoading = false }
+                    }
+                }
+            } else if filter == .largeVideos {
+                // fetchPageOfAssets already filtered and sorted by size; stream batch directly.
+                if !rawItems.isEmpty {
+                    await MainActor.run {
+                        self.photoStack.append(contentsOf: rawItems)
+                        self.photoService.startCaching(
+                            for: rawItems,
                             targetSize: CGSize(width: 400, height: 600)
                         )
                         if self.isLoading { self.isLoading = false }

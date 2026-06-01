@@ -108,10 +108,12 @@ class PhotoLibraryService: ObservableObject {
                 }
 
             case .largeVideos:
-                // fileSize requires PHAssetResource — create item only to read it.
-                let item = PhotoItem(asset: asset)
-                if item.isVideo && item.fileSize > PhotoLibraryService.largeVideoThresholdBytes {
-                    collected.append(item)
+                // Skip non-videos before allocating PhotoItem — mediaType is free metadata.
+                // fileSize (PHAssetResource) is read once here; the sort reuses cached values.
+                guard asset.mediaType == .video else { continue }
+                let size = asset.fileSize
+                if size > PhotoLibraryService.largeVideoThresholdBytes {
+                    collected.append(PhotoItem(asset: asset))
                 }
 
             case .burstPhotos:
@@ -128,8 +130,10 @@ class PhotoLibraryService: ObservableObject {
         }
 
         // Sort large videos by file size descending (only the current page).
+        // Pre-compute sizes so the sort doesn't trigger O(N log N) PHAssetResource reads.
         if category == .largeVideos {
-            collected.sort { $0.fileSize > $1.fileSize }
+            let sized = collected.map { ($0, $0.fileSize) }
+            collected = sized.sorted { $0.1 > $1.1 }.map { $0.0 }
         }
 
         let nextIndex: Int? = (idx < total) ? idx : nil
