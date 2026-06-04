@@ -34,6 +34,15 @@ struct PhotoCardView: View {
     /// Thumbnail is visible until this flips.
     @State private var isVideoPlayerReady = false
 
+    @State private var showImageSpinner = false
+    @State private var showLoadingSpinner = false
+    @State private var isBufferingStall = false
+    @State private var playerItemFailed = false
+    @State private var timeControlObserver: NSKeyValueObservation?
+    @State private var playerItemStatusObserver: NSKeyValueObservation?
+    @State private var videoSpinnerTask: Task<Void, Never>?
+    @State private var imageSpinnerTask: Task<Void, Never>?
+
     /// Pass a pre-loaded image from the ViewModel cache to display it instantly,
     /// skipping the async load path entirely and preventing any ProgressView flash.
     init(item: PhotoItem, isTopCard: Bool, cachedImage: UIImage? = nil) {
@@ -79,7 +88,10 @@ struct PhotoCardView: View {
                                     player: player,
                                     gravity: isPortrait ? .resizeAspectFill : .resizeAspect,
                                     onReadyForDisplay: {
-                                        withAnimation(.easeIn(duration: 0.2)) { isVideoPlayerReady = true }
+                                        withAnimation(.easeIn(duration: 0.2)) {
+                                            isVideoPlayerReady = true
+                                            showLoadingSpinner = false
+                                        }
                                         Task { @MainActor in
                                             try? await Task.sleep(nanoseconds: 300_000_000)
                                             thumbnailImage = nil
@@ -109,6 +121,17 @@ struct PhotoCardView: View {
                         }
                         .opacity(isVideoPlayerReady ? 1 : 0)
                         .animation(.easeIn(duration: 0.2), value: isVideoPlayerReady)
+                    }
+
+                    loadingSpinnerOverlay(visible: (showLoadingSpinner && !isVideoPlayerReady) || (isBufferingStall && isVideoPlayerReady))
+
+                    // Error indicator — only for unrecoverable AVPlayerItem failures.
+                    if playerItemFailed {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 30, weight: .medium))
+                            .foregroundColor(.white)
+                            .shadow(color: .black.opacity(0.5), radius: 6)
+                            .transition(.opacity)
                     }
                 }
 
@@ -155,15 +178,12 @@ struct PhotoCardView: View {
                         imageContentView(full)
                             .transition(.opacity)
                     }
-                    if image == nil, thumbnailImage == nil {
-                        if isLoading {
-                            ProgressView().scaleEffect(1.5)
-                        } else {
-                            Image(systemName: "photo.fill")
-                                .font(.system(size: 60))
-                                .foregroundColor(.gray)
-                        }
+                    if image == nil, thumbnailImage == nil, !isLoading {
+                        Image(systemName: "photo.fill")
+                            .font(.system(size: 60))
+                            .foregroundColor(.gray)
                     }
+                    loadingSpinnerOverlay(visible: showImageSpinner && image == nil)
                 }
             }
 
@@ -277,6 +297,11 @@ VStack {
                 isMuted = PhotoCardView.globalMute
                 loadVideoThumbnail()
                 loadVideoPlayer()
+                videoSpinnerTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 450_000_000)
+                    guard !Task.isCancelled, !isVideoPlayerReady else { return }
+                    withAnimation(.easeIn(duration: 0.2)) { showLoadingSpinner = true }
+                }
             } else if image == nil {
                 Task { @MainActor in
                     // Disk cache check runs on OfflineCacheService.ioQueue (Bug #5 fix:
@@ -288,25 +313,64 @@ VStack {
                         loadImage()
                     }
                 }
+                imageSpinnerTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    guard !Task.isCancelled, image == nil else { return }
+                    withAnimation(.easeIn(duration: 0.2)) { showImageSpinner = true }
+                }
             }
         }
         .onDisappear {
             stopPlayer()
             isVideoPlayerReady = false
             thumbnailImage = nil
+            videoSpinnerTask?.cancel()
+            imageSpinnerTask?.cancel()
+            videoSpinnerTask = nil
+            imageSpinnerTask = nil
+            showImageSpinner = false
+            showLoadingSpinner = false
+            isBufferingStall = false
+            playerItemFailed = false
+            timeControlObserver = nil
+            playerItemStatusObserver = nil
             if item.isVideo {
                 Task { await VideoPlayerPool.shared.release(for: item.asset) }
             }
         }
         .onChange(of: isTopCard) { _, nowTop in
-    if nowTop {
-        player?.seek(to: .zero)
-        player?.play()
-        NotificationCenter.default.post(name: .resumeVideoObserver, object: nil)
-    } else {
-        stopPlayer()
-    }
-}
+            if nowTop {
+                player?.seek(to: .zero)
+                player?.play()
+                NotificationCenter.default.post(name: .resumeVideoObserver, object: nil)
+            } else {
+                stopPlayer()
+            }
+        }
+        .onChange(of: player) {
+            timeControlObserver = nil
+            playerItemStatusObserver = nil
+            isBufferingStall = false
+            playerItemFailed = false
+            guard let currentPlayer = player else { return }
+
+            timeControlObserver = currentPlayer.observe(\.timeControlStatus, options: [.new]) { p, _ in
+                let stalling = p.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                Task { @MainActor in
+                    guard stalling != isBufferingStall else { return }
+                    withAnimation(.easeInOut(duration: 0.2)) { isBufferingStall = stalling }
+                }
+            }
+
+            if let currentItem = currentPlayer.currentItem {
+                playerItemStatusObserver = currentItem.observe(\.status, options: [.new]) { item, _ in
+                    guard item.status == .failed else { return }
+                    Task { @MainActor in
+                        withAnimation(.easeIn(duration: 0.2)) { playerItemFailed = true }
+                    }
+                }
+            }
+        }
         .onReceive(NotificationCenter.default.publisher(for: .stopCurrentVideo)) { _ in
             stopPlayer()
         }
@@ -461,6 +525,19 @@ VStack {
             avPlayer.play()
         }
         // isVideoPlayerReady is set by AVPlayerLayer.isReadyForDisplay KVO in PlayerUIView
+    }
+
+    // MARK: - Loading Spinner
+
+    @ViewBuilder
+    private func loadingSpinnerOverlay(visible: Bool) -> some View {
+        if visible {
+            Circle()
+                .fill(.black.opacity(0.5))
+                .frame(width: 56, height: 56)
+                .overlay(ProgressView().tint(.white).scaleEffect(1.3))
+                .transition(.opacity)
+        }
     }
 }
 

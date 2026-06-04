@@ -257,6 +257,27 @@ This project uses **zero third-party packages** (no CocoaPods, SPM, Carthage). U
 
 ---
 
+## Building the App
+
+`xcode-select` on this machine points to CommandLineTools, not Xcode — always prefix with `DEVELOPER_DIR`:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+  xcodebuild \
+  -project /Users/user/Desktop/apps/Swipy/Swipy.xcodeproj \
+  -scheme Swipy \
+  -destination "platform=iOS Simulator,name=iPhone 17" \
+  -configuration Debug \
+  build 2>&1 | grep -E "error:|warning:|BUILD SUCCEEDED|BUILD FAILED"
+```
+
+**Known gotchas:**
+- `iPhone 16` simulator doesn't exist on this machine — use `iPhone 17`
+- Never use `id:...` syntax in the destination string — use `name=...`
+- SourceKit errors in the editor (unknown types, missing members) are false positives from lack of project context; trust `xcodebuild` output only
+
+---
+
 ## Architecture Docs
 
 - `ARCHITECTURE_SWIPE_LOADING.md` — detailed swipe stack loading, cache lifecycle, video pre-warming, pagination strategy
