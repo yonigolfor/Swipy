@@ -202,6 +202,21 @@ if last.action == .snooze {
 
 ---
 
+## VictoryView — Escape Hatch לסטאק ריק
+
+כשה-`photoStack` מתרוקן ויש פריטים ב-`snoozeQueue` התואמים לפילטר הפעיל, ה-`VictoryView` מציג CTA ייעודי:
+
+- **כותרת:** "You have X snoozed items" / "יש לך X פריטים שנדחו"
+- **כפתור:** "Review Now" / "עבור אליהם" (כתום)
+
+**`pendingSnoozedCount: @Published private(set) Int`** — מספר הפריטים ב-`snoozeQueue` התואמים את `currentFilter`. מתעדכן אחרי כל מוטציה של `snoozeQueue` ואחרי שינוי פילטר.
+
+**`flushSnoozedItemsNow()`** — נקרא בלחיצה על הכפתור. מזריק את כל הפריטים התואמים לפילטר ישירות לסטאק, עוקף את ה-milestone counter. זהה ל-`stageSnoozedItemsIfReady()` אבל ללא תנאי milestone. רשומות ה-persistence **נשארות** (לצורך snoozeCount badge בswipe הבא).
+
+**למה זה הכרחי:** `globalActionCounter` עולה רק על keep/delete. סטאק ריק = אי-אפשר להחליק = המונה לעולם לא מתקדם = פריט סנוז שהוא האחרון בגלריה תקוע ללא מוצא. ה-CTA פותר את ה-hard deadlock הזה.
+
+---
+
 ## דיאגרמת מצבים
 
 ```
@@ -214,7 +229,11 @@ snoozePhoto()
     ├─ milestone = globalActionCounter + backoff
     ├─ persist: SnoozedPhotoRecord(snoozeCount, targetMilestone, stagingMilestone)
     └─ snoozeQueue.append(...)
+         └─ updatePendingSnoozedCount()
 
+Path A — Normal (יש עוד פריטים בסטאק)
+    │
+    ▼
 User swipes Keep or Delete (×N until globalActionCounter >= stagingMilestone)
     │
     ▼
@@ -223,9 +242,19 @@ stageSnoozedItemsIfReady()
     └─ אם globalActionCounter >= item.stagingMilestone:
            ├─ snoozeQueue.remove(item)
            ├─ processedAssetIDs.remove(item.id)
-           ├─ persistence.clearSnoozedID(item.id)   ← ניקוי מוקדם
            └─ photoStack.insert(item, at: min(2, photoStack.count))
                           ↑ index 2 = תחתית הZStack הנראה
+
+Path B — Escape hatch (הסטאק ריק, VictoryView מוצג)
+    │
+    ▼
+User taps "Review Now"
+    │
+    ▼
+flushSnoozedItemsNow()
+    ├─ snoozeQueue.removeAll { matchesCurrentFilter }
+    ├─ processedAssetIDs.remove(item.id)  ← מבטל חסימת pagination
+    └─ photoStack.insert(item, at: min(2, photoStack.count))
 
 הפריט כבר נמצא בסטאק ב-index 2
     │
