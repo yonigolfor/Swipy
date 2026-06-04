@@ -88,7 +88,9 @@ struct SwipeStackView: View {
                                           UIApplication.shared.canOpenURL(url) else { return }
                                     UIApplication.shared.open(url)
                                 } : nil,
+                                onReviewSnoozed: viewModel.pendingSnoozedCount > 0 ? { viewModel.flushSnoozedItemsNow() } : nil,
                                 reviewBinCount: viewModel.reviewBin.count,
+                                snoozedCount: viewModel.pendingSnoozedCount,
                                 currentFilter: viewModel.currentFilter,
                                 isOfflineMode: viewModel.isOfflineMode
                             )

@@ -1822,6 +1822,40 @@
         }
       }
     },
+    "victory.snoozed_action" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Review Now"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "עבור אליהם"
+          }
+        }
+      }
+    },
+    "victory.snoozed_title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You have %d snoozed items"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "יש לך %d פריטים שנדחו"
+          }
+        }
+      }
+    },
     "victory.empty_bin" : {
       "extractionState" : "manual",
       "localizations" : {

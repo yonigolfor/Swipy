@@ -82,6 +82,9 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     @Published var onboardingLargeVideoCount = 0
     @Published var onboardingScanComplete = false
 
+    /// Count of snoozed items that match the current filter — drives the VictoryView CTA.
+    @Published private(set) var pendingSnoozedCount: Int = 0
+
     /// In-memory cache for the expensive large video count.
     /// Persisted to Documents/largeVideoCount.json between app launches.
     private var cachedLargeVideoCount: Int? = nil
@@ -228,6 +231,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         // It's a session-level "I'm boarding a flight now" action, not a persistent setting.
         restoreBinFromDisk()
         restoreSnoozedItems()
+        updatePendingSnoozedCount()
         loadPhotos()
         PHPhotoLibrary.shared().register(self)
         loadCachedLargeVideoCount()
@@ -487,6 +491,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     private func resetAndLoad(filter: FilterCategory) {
         isLoading = true
         currentFilter = filter
+        updatePendingSnoozedCount()
         fetchCursor = 0
         offlineFetchCursor = 0
         isFetchingNextPage = false
@@ -830,6 +835,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             stagingMilestone: staging,
             snoozeCount: newCount
         ))
+        updatePendingSnoozedCount()
 
         hapticService.snooze()
         precacheNextImages()
@@ -869,6 +875,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             // the next launch. snoozeCount resets to 0 so the next snooze starts fresh.
             snoozeQueue.removeAll { $0.item.id == item.id }
             persistence.clearSnoozedID(item.id)
+            updatePendingSnoozedCount()
         }
 
         hapticService.undo()
@@ -914,6 +921,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         persistence.snoozedPhotos = [:]
         snoozeQueue = []
         processedAssetIDs = []
+        updatePendingSnoozedCount()
         loadPhotos(filter: currentFilter)
     }
 
@@ -1399,6 +1407,28 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             tagged.snoozeCount = count
             photoStack.insert(tagged, at: min(snoozeStageDepth, photoStack.count))
         }
+        updatePendingSnoozedCount()
+    }
+
+    /// Immediately injects all snoozed items matching the current filter back into the stack,
+    /// bypassing the milestone counter. Used when the stack is empty and the user taps "Review Now".
+    func flushSnoozedItemsNow() {
+        let matching = snoozeQueue.filter { matchesCurrentFilter($0.item) }
+        guard !matching.isEmpty else { return }
+        snoozeQueue.removeAll { matchesCurrentFilter($0.item) }
+        for snoozed in matching {
+            processedAssetIDs.remove(snoozed.item.id)
+            var tagged = snoozed.item
+            tagged.snoozeCount = snoozed.snoozeCount
+            photoStack.insert(tagged, at: min(snoozeStageDepth, photoStack.count))
+        }
+        updatePendingSnoozedCount()
+        hapticService.success()
+        precacheNextImages()
+    }
+
+    private func updatePendingSnoozedCount() {
+        pendingSnoozedCount = snoozeQueue.filter { matchesCurrentFilter($0.item) }.count
     }
 
     /// Returns true when `item` is a valid member of the currently active filter category.
