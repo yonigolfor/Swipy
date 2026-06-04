@@ -216,9 +216,18 @@ Pass 2: loadImage()
 - **ללא פשרות באיכות** — Pass 2 עם `.highQualityFormat` מחכה לגרסה המלאה
 - **iCloud slow path** — thumbnail נשאר כל עוד ההורדה לא הסתיימה; אם נכשלת, thumbnail נשאר לצמיתות
 
+**אינדיקטור טעינה לתמונה**: אם Pass 2 לא הסתיים אחרי **1000ms**, מופיע spinner עדין מעל ה-thumbnail. נעלם ברגע שה-full-res מגיע. מיושם עם task handle שמבוטל ב-`onDisappear` — אין race condition אם הכרטיסייה נסגרת לפני סיום ה-debounce.
+
 **וידאו**: `loadVideoThumbnail()` נקרא ב-`onAppear` במקביל ל-`loadVideoPlayer()`.  
 `isVideoPlayerReady` מופעל 50ms אחרי שה-AVPlayer מוקצה (מאפשר ל-AVLayer לרנדר frame ראשון).  
 Thumbnail נעלם עם `animation(.easeIn(0.2))` ו-`thumbnailImage = nil` אחרי 300ms נוספים.
+
+**אינדיקטורי טעינה לוידאו** (שלושה מצבים):
+- **Initial load** — אחרי **450ms** ללא `isVideoPlayerReady`, מופיע spinner מעל ה-thumbnail
+- **Buffering stall** — KVO על `AVPlayer.timeControlStatus == .waitingToPlayAtSpecifiedRate`; spinner מופיע מעל הפריים הקפוא. Change-detection guard מונע רינדור מיותר על כל שינוי status
+- **Error** — KVO על `AVPlayerItem.status == .failed`; אייקון `exclamationmark.triangle.fill` מוצג
+
+כל ה-task handles מבוטלים ב-`onDisappear`; ה-KVO observers מתאפסים ב-`onChange(of: player)`.
 
 ---
 
