@@ -81,7 +81,7 @@ struct VictoryView: View {
                         .foregroundColor(.white)
                         .frame(maxWidth: .infinity)
                         .padding()
-                        .background(Capsule().fill(Color.swipeBlue.gradient))
+                        .background(Capsule().fill(Color.orange.gradient))
                     }
                     .padding(.horizontal)
                 }
