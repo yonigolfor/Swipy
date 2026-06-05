@@ -1412,11 +1412,13 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     /// Immediately injects all snoozed items matching the current filter back into the stack,
     /// bypassing the milestone counter. Used when the stack is empty and the user taps "Review Now".
+    /// In offline mode, iCloud-only items are left in the queue — only locally available items are injected.
     func flushSnoozedItemsNow() {
-        let matching = snoozeQueue.filter { matchesCurrentFilter($0.item) }
-        guard !matching.isEmpty else { return }
-        snoozeQueue.removeAll { matchesCurrentFilter($0.item) }
-        for snoozed in matching {
+        let candidates = flushableSnoozedItems()
+        guard !candidates.isEmpty else { return }
+        let flushIDs = Set(candidates.map { $0.item.id })
+        snoozeQueue.removeAll { flushIDs.contains($0.item.id) }
+        for snoozed in candidates {
             processedAssetIDs.remove(snoozed.item.id)
             var tagged = snoozed.item
             tagged.snoozeCount = snoozed.snoozeCount
@@ -1428,7 +1430,19 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     }
 
     private func updatePendingSnoozedCount() {
-        pendingSnoozedCount = snoozeQueue.filter { matchesCurrentFilter($0.item) }.count
+        pendingSnoozedCount = flushableSnoozedItems().count
+    }
+
+    /// Items eligible for an immediate flush: match the active filter, and in offline mode
+    /// are also locally available (not iCloud-only). snoozeQueue is typically < 10 items so
+    /// the isLocallyAvailable check (Photos DB metadata read, no I/O) is negligible.
+    private func flushableSnoozedItems() -> [SnoozedPhoto] {
+        let matching = snoozeQueue.filter { matchesCurrentFilter($0.item) }
+        guard isOfflineMode else { return matching }
+        return matching.filter {
+            photoService.isLocallyAvailable($0.item.asset) ||
+            OfflineCacheService.shared.retrieve(for: $0.item.id) != nil
+        }
     }
 
     /// Returns true when `item` is a valid member of the currently active filter category.
