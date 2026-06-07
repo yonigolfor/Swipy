@@ -405,12 +405,16 @@ class PhotoLibraryService: ObservableObject {
 
     /// Starts image caching for a set of assets.
     func startCaching(for items: [PhotoItem], targetSize: CGSize) {
-        let assets = items.map { $0.asset }
+        // In offline mode every asset has already passed the isLocallyAvailable check.
+        // Passing nil options lets PHKit default to isNetworkAccessAllowed = true, which
+        // causes iCloud fetches in slow-network mode and hangs in airplane mode.
+        let options = PHImageRequestOptions()
+        options.isNetworkAccessAllowed = !isOfflineMode
         imageManager.startCachingImages(
-            for: assets,
+            for: items.map { $0.asset },
             targetSize: targetSize,
             contentMode: .aspectFill,
-            options: nil
+            options: options
         )
     }
 

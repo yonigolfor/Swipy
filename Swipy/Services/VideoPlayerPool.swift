@@ -181,7 +181,9 @@ final class VideoPlayerPool {
         let options = PHVideoRequestOptions()
         // .fastFormat: prioritises speed over quality for instant playback start.
         options.deliveryMode = .fastFormat
-        options.isNetworkAccessAllowed = true
+        // In offline mode every asset shown has already passed the isLocallyAvailable
+        // check — no iCloud download should ever be attempted.
+        options.isNetworkAccessAllowed = !PhotoLibraryService.shared.isOfflineMode
 
         // PHImageManager must be called from a background thread to avoid
         // blocking the main thread during the network/disk fetch.

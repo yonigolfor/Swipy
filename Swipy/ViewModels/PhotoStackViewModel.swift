@@ -1456,7 +1456,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         guard isOfflineMode else { return matching }
         return matching.filter {
             photoService.isLocallyAvailable($0.item.asset) ||
-            OfflineCacheService.shared.retrieve(for: $0.item.id) != nil
+            OfflineCacheService.shared.isCached(for: $0.item.id)
         }
     }
 

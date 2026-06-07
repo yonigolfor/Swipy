@@ -46,6 +46,12 @@ final class OfflineCacheService {
         return UIImage(data: data)
     }
 
+    /// Checks whether an asset is in the disk cache without reading its data.
+    /// Use this instead of retrieve() when only existence matters (e.g. offline filter checks).
+    func isCached(for assetID: String) -> Bool {
+        FileManager.default.fileExists(atPath: fileURL(for: assetID).path)
+    }
+
     /// Returns a snapshot of all sanitized asset IDs currently on disk.
     /// Reads the cache directory exactly once — O(n) on disk, then O(1) per lookup.
     /// Callers own the returned Set for the duration of their scan; the Service
