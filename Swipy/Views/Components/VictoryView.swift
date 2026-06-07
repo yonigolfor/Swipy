@@ -8,24 +8,41 @@ struct VictoryView: View {
     var snoozedCount: Int = 0
     var currentFilter: FilterCategory = .all
     var isOfflineMode: Bool = false
+    var offlineFoundNoLocalItems: Bool = false
 
     private var iconName: String {
-        isOfflineMode ? "airplane.circle.fill" : "checkmark.seal.fill"
+        if isOfflineMode {
+            return offlineFoundNoLocalItems ? "icloud.slash.fill" : "airplane.circle.fill"
+        }
+        return "checkmark.seal.fill"
     }
 
     private var iconColor: Color {
-        isOfflineMode ? Color(red: 0.1, green: 0.35, blue: 0.9) : .swipeGreen
+        if isOfflineMode {
+            return offlineFoundNoLocalItems
+                ? Color(red: 0.45, green: 0.5, blue: 0.6)
+                : Color(red: 0.1, green: 0.35, blue: 0.9)
+        }
+        return .swipeGreen
     }
 
     private var titleText: String {
-        if isOfflineMode { return String(localized: "victory.title_offline") }
+        if isOfflineMode {
+            return offlineFoundNoLocalItems
+                ? String(localized: "victory.title_offline_empty")
+                : String(localized: "victory.title_offline")
+        }
         return currentFilter == .all
             ? String(localized: "victory.title")
             : "\(currentFilter.displayName) ✓"
     }
 
     private var subtitleText: String {
-        if isOfflineMode { return String(localized: "victory.subtitle_offline") }
+        if isOfflineMode {
+            return offlineFoundNoLocalItems
+                ? String(localized: "victory.subtitle_offline_empty")
+                : String(localized: "victory.subtitle_offline")
+        }
         return currentFilter == .all
             ? String(localized: "victory.subtitle")
             : String(format: String(localized: "victory.subtitle_filter"), currentFilter.displayName)
@@ -66,8 +83,8 @@ struct VictoryView: View {
                     .padding(.horizontal)
             }
             
-            // CTA
-            if snoozedCount > 0, let onReviewSnoozed {
+            // CTA — hide snoozed review when no local photos exist at all
+            if snoozedCount > 0, let onReviewSnoozed, !offlineFoundNoLocalItems {
                 VStack(spacing: 6) {
                     Text(String(format: String(localized: "victory.snoozed_title"), snoozedCount))
                         .font(.subheadline)

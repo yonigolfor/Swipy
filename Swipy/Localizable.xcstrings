@@ -1977,6 +1977,40 @@
         }
       }
     },
+    "victory.title_offline_empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No Offline Photos Found"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "לא נמצאו תמונות במכשיר"
+          }
+        }
+      }
+    },
+    "victory.subtitle_offline_empty" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All your photos are stored in iCloud.\nTurn off Offline Mode to browse them."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "כל התמונות שלך מאוחסנות ב-iCloud.\nכבה את מצב Offline כדי לעיין בהן."
+          }
+        }
+      }
+    },
     "You freed up" : {
       "localizations" : {
         "he" : {

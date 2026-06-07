@@ -18,6 +18,10 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     @Published var currentFilter: FilterCategory = .all
     @Published var totalSpaceSaved: Int64 = 0
     @Published var isLoading = false
+    /// Set to true after scanLocalUniverse completes with an empty photoStack,
+    /// meaning the device has no locally-available photos (all on iCloud).
+    /// Drives the "no offline items" empty state in VictoryView. Reset on deactivation.
+    @Published private(set) var offlineFoundNoLocalItems: Bool = false
     @Published var categoryCounts: [FilterCategory: Int] = [:]
     @Published var hasPendingCountUpdate = false
     /// True while the expensive Phase 2 large video scan is running.
@@ -955,6 +959,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             photoStack = []
             isLoading = true
             await scanLocalUniverse(targetCount: initialPageSize, batchSize: 150)
+            offlineFoundNoLocalItems = photoStack.isEmpty
             stageSnoozedItemsIfReady()
             isLoading = false
             // Landing animation is triggered in SwipeStackView by onChange(of: isLoading)
@@ -968,6 +973,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         PhotoLibraryService.shared.isOfflineMode = false
 
         // Shared reset state.
+        offlineFoundNoLocalItems = false
         currentFilter = .all
         offlineFetchCursor = 0
         isFetchingNextPage = false

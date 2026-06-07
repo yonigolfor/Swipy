@@ -207,18 +207,35 @@ while photoStack.count < targetCount:
 
 ## UX States in Offline Mode
 
-`SwipeStackView` renders one of three states depending on `isOfflineMode`, `isScanning`, `isLoading`, and `photoStack`:
+`SwipeStackView` renders one of four states depending on `isOfflineMode`, `isScanning`, `isLoading`, `photoStack`, and `offlineFoundNoLocalItems`:
 
 | Condition | What the user sees |
 |---|---|
 | `isOfflineMode && isScanning && photoStack.isEmpty` | **Scanning state** — airplane icon + "Searching Your Device" + ProgressView |
 | `isLoading` (generic) | Standard spinner + "loading.scanning" label |
-| `!isLoading && photoStack.isEmpty` | **VictoryView (offline variant)** — airplane icon + `victory.title_offline` |
+| `!isLoading && photoStack.isEmpty && !offlineFoundNoLocalItems` | **VictoryView (offline done)** — airplane icon + `victory.title_offline` — user swiped all local photos |
+| `!isLoading && photoStack.isEmpty && offlineFoundNoLocalItems` | **VictoryView (offline empty)** — `icloud.slash` icon + `victory.title_offline_empty` — no locally-stored photos exist |
 | `photoStack.count > 0` | Card stack |
+
+`offlineFoundNoLocalItems` is set in `activateOfflineMode()` after `scanLocalUniverse` returns:
+```swift
+offlineFoundNoLocalItems = photoStack.isEmpty
+```
+Reset to `false` in `deactivateOfflineMode()`.
 
 ### Transition animation
 
-`performOfflineTransition` flies the current cards out, then springs the card area back **immediately** (not waiting for the scan to finish). The user sees the scanning state as soon as the fly-out completes. When `isScanning` transitions to `false`, `.animation(.easeInOut(duration: 0.35), value: viewModel.isScanning)` on the ZStack animates the switch to VictoryView or cards.
+`performOfflineTransition(deactivating:)` manages the fly-out/land-in animation for both activation and deactivation.
+
+**Activation path (`deactivating: false`, default):**
+- `awaitingOfflineLanding = true` is set **synchronously** at the top of the function (before any async work) — this prevents the race condition where a fast-returning `scanLocalUniverse` (blocked by the `guard !isScanning` check) could flip `isLoading` before the flag was set, causing it to be stuck `true` permanently.
+- Cards fly out, then spring back immediately — the user sees the scanning state during the scan.
+- `onChange(of: viewModel.isLoading)` resets `awaitingOfflineLanding = false` when the scan completes.
+
+**Deactivation path (`deactivating: true`):**
+- If `awaitingOfflineLanding` is already `true` (i.e. an activation scan is in progress), the function **bypasses the guard** — it resets the flag and calls `deactivateOfflineMode()` immediately, without a fly-out animation (the cards are already in position during the scan).
+- `deactivateOfflineMode()` sets `isOfflineMode = false`, which causes `scanLocalUniverse` to exit its loop at `guard isOfflineMode else { break }` — no explicit Task cancellation needed.
+- If `awaitingOfflineLanding` is `false` (normal deactivation), the full fly-out animation runs as usual.
 
 ---
 
@@ -239,12 +256,22 @@ photoStack.count drops to 12
 
 ---
 
+## Key Published Properties (ViewModel)
+
+| Property | Type | Meaning |
+|---|---|---|
+| `isOfflineMode` | `Bool` | Whether offline mode is active |
+| `isScanning` | `Bool` | Whether `scanLocalUniverse` is currently running |
+| `isLoading` | `Bool` | Generic loading flag; drives `onChange` landing animation |
+| `offlineFoundNoLocalItems` | `Bool` | Set after scan completes with zero results — no locally-stored photos exist |
+
 ## Key Files
 
 | File | Role |
 |---|---|
 | `NetworkMonitorService.swift` | `NWPathMonitor` wrapper, publishes `isOnline`, `isExpensive`, `isConstrained` |
-| `PhotoStackViewModel.swift` | Observers, `recordNetworkFailure()`, `activateOfflineMode()`, `deactivateOfflineMode()` |
+| `PhotoStackViewModel.swift` | Observers, `recordNetworkFailure()`, `activateOfflineMode()`, `deactivateOfflineMode()`, `offlineFoundNoLocalItems` |
 | `PhotoLibraryService.swift` | `loadImage()` — iCloud timeout + fallback + quality upgrade callback |
-| `SwipeStackView.swift` | `offlinePromptBanner` — renders copy based on `offlinePromptReason` |
+| `SwipeStackView.swift` | `performOfflineTransition(deactivating:)`, `offlinePromptBanner`, `offlineBadge`, `offlineFAB` |
+| `VictoryView.swift` | Empty state for offline done vs. offline empty (`offlineFoundNoLocalItems`) |
 | `OfflineCacheService.swift` | Disk cache (500 MB, LRU) used by background prefetch for offline availability |

@@ -92,7 +92,8 @@ struct SwipeStackView: View {
                                 reviewBinCount: viewModel.reviewBin.count,
                                 snoozedCount: viewModel.pendingSnoozedCount,
                                 currentFilter: viewModel.currentFilter,
-                                isOfflineMode: viewModel.isOfflineMode
+                                isOfflineMode: viewModel.isOfflineMode,
+                                offlineFoundNoLocalItems: viewModel.offlineFoundNoLocalItems
                             )
                             .id("victory")
                         } else {
@@ -396,7 +397,7 @@ struct SwipeStackView: View {
 
     private var offlineFAB: some View {
         Button {
-            performOfflineTransition {
+            performOfflineTransition(deactivating: viewModel.isOfflineMode) {
                 if viewModel.isOfflineMode {
                     viewModel.deactivateOfflineMode()
                 } else {
@@ -446,7 +447,7 @@ struct SwipeStackView: View {
             Text("Offline Mode")
                 .font(.system(size: 12, weight: .semibold))
             Button {
-                performOfflineTransition { viewModel.deactivateOfflineMode() }
+                performOfflineTransition(deactivating: true) { viewModel.deactivateOfflineMode() }
             } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 14))
@@ -728,8 +729,23 @@ struct SwipeStackView: View {
     // MARK: - Offline Transition
 
     /// Fly-out / land-in animation for offline mode toggle — mirrors performShuffleTransition.
-    private func performOfflineTransition(action: @escaping () -> Void) {
+    /// Pass `deactivating: true` when the intent is to exit offline mode — bypasses the
+    /// awaitingOfflineLanding guard so the user can cancel even during an active scan.
+    private func performOfflineTransition(deactivating: Bool = false, action: @escaping () -> Void) {
+        if deactivating && awaitingOfflineLanding {
+            // Cancel while scan is in progress: cards are already back in position,
+            // no fly-out needed. Setting isOfflineMode = false inside action() causes
+            // scanLocalUniverse to exit via `guard isOfflineMode else { break }`.
+            awaitingOfflineLanding = false
+            HapticService.shared.shuffle()
+            action()
+            return
+        }
         guard !awaitingOfflineLanding else { return }
+        // Set synchronously before any async work so onChange(of: isLoading) always
+        // sees the flag as true when it fires — prevents the race condition where a
+        // fast-returning scanLocalUniverse flips isLoading before the asyncAfter runs.
+        awaitingOfflineLanding = true
         HapticService.shared.shuffle()
 
         withAnimation(.easeIn(duration: 0.22)) {
@@ -739,7 +755,6 @@ struct SwipeStackView: View {
         }
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.27) {
-            awaitingOfflineLanding = true
             action()
             // Spring the card area back immediately — "Searching your device..."
             // is now visible during the scan instead of a blank screen.
