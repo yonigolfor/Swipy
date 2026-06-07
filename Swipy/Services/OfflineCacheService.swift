@@ -46,6 +46,24 @@ final class OfflineCacheService {
         return UIImage(data: data)
     }
 
+    /// Returns a snapshot of all sanitized asset IDs currently on disk.
+    /// Reads the cache directory exactly once — O(n) on disk, then O(1) per lookup.
+    /// Callers own the returned Set for the duration of their scan; the Service
+    /// holds no reference to it, so it is freed as soon as the caller releases it.
+    /// Uses .skipsHiddenFiles to ignore .DS_Store and similar system entries.
+    ///
+    /// The sanitized form matches fileURL(for:) exactly:
+    ///   assetID.replacingOccurrences(of: "/", with: "_") → filename (no extension)
+    /// Callers must apply the same transformation before calling contains(_:).
+    func cachedAssetIDSet() -> Set<String> {
+        guard let urls = try? FileManager.default.contentsOfDirectory(
+            at: cacheDirectory,
+            includingPropertiesForKeys: nil,
+            options: .skipsHiddenFiles
+        ) else { return [] }
+        return Set(urls.map { $0.deletingPathExtension().lastPathComponent })
+    }
+
     /// Async variant — runs the file read on ioQueue so the caller's actor
     /// (typically @MainActor) is never blocked by disk I/O.
     func retrieveAsync(for assetID: String) async -> UIImage? {

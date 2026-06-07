@@ -1195,6 +1195,13 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         // and stays correct across the wrap-around boundary.
         var seenIDs: Set<String> = Set(photoStack.map { $0.id })
 
+        // Disk cache index — built once via a single directory listing.
+        // Replaces the previous per-item diskCache.retrieve() which issued a
+        // Data(contentsOf:) syscall for every non-local asset (~20-40s on 20k items).
+        // The Set is a value type: captured by CoW reference inside Task.detached,
+        // no copies occur as long as we never mutate it. Freed when the scan returns.
+        let cachedIDs = diskCache.cachedAssetIDSet()
+
         while photoStack.count < targetCount {
             guard isOfflineMode else { break }
 
@@ -1225,8 +1232,10 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                     let asset = fetchResult.object(at: i)
                     guard !processed.contains(asset.localIdentifier),
                           !snapshot.contains(asset.localIdentifier) else { continue }
-                    let isLocal = service.isLocallyAvailable(asset) ||
-                                  diskCache.retrieve(for: asset.localIdentifier) != nil
+                    // Sanitization must match fileURL(for:) in OfflineCacheService:
+                    // both replace "/" with "_". No disk I/O — O(1) Set lookup.
+                    let sanitizedID = asset.localIdentifier.replacingOccurrences(of: "/", with: "_")
+                    let isLocal = service.isLocallyAvailable(asset) || cachedIDs.contains(sanitizedID)
                     if isLocal { result.append(PhotoItem(asset: asset)) }
                 }
                 return result
