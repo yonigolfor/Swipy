@@ -77,6 +77,7 @@ Swipy/
 │   ├── PhotoLibraryService.swift   # PHPhotoLibrary access + pagination
 │   ├── PersistenceService.swift    # UserDefaults (kept IDs, bin IDs, space saved)
 │   ├── HapticService.swift         # UIImpactFeedbackGenerator wrapper
+│   ├── AudioSessionManager.swift   # AVAudioSession — muted video mixes with background audio
 │   ├── VideoPlayerPool.swift       # Singleton AVPlayer pool (max 3)
 │   ├── NotificationManager.swift   # UNUserNotificationCenter builder
 │   ├── NotificationScheduler.swift # 4 trigger types + 2/day quota

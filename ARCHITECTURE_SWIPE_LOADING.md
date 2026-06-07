@@ -155,6 +155,24 @@ DragGesture.onChanged (offset > 80pt, פעם אחת per gesture)
 **Slow path**: pool miss → `PHImageManager.requestPlayerItem` → async load  
 **Re-sync**: `resumeTopCardVideo` notification → `PhotoCardView` מחדש play אם player נעצר בטעות בזמן drag שבוטל
 
+## 5a. Audio Session — AudioSessionManager
+
+`AudioSessionManager.shared` מנהל את `AVAudioSession` כך שסרטון מושתק לא יפסיק מוזיקת רקע (Spotify, Podcasts וכד׳).
+
+| מצב | Category | Options | תוצאה |
+|-----|----------|---------|-------|
+| וידאו מושתק | `.playback` | `.mixWithOthers` | מוזיקת רקע ממשיכה |
+| וידאו עם קול | `.playback` | `[]` | מוזיקת רקע נעצרת |
+| כל הוידאו נעצר | deactivate | `.notifyOthersOnDeactivation` | מוזיקת רקע חוזרת |
+
+**`configure(muted:)`** נקרא ב-4 מקומות ב-`PhotoCardView`:
+- `onChange(of: isTopCard)` כשהקלף הופך ל-top
+- `loadVideoPlayer()` — direct load path (pool miss)
+- `activatePlayer()` — pooled path
+- mute toggle
+
+**`deactivate()`** נקרא **רק** ב-`pauseVideoPool()` (מעבר טאב) — לא על כל swipe, כדי למנוע blip שמיעתי בין קלפים עוקבים.
+
 ---
 
 ## 6. Swipe Flow
