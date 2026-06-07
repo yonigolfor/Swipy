@@ -756,6 +756,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     /// Pauses all pooled video players. Call when the user leaves the Swipe tab.
     func pauseVideoPool() {
+        AudioSessionManager.shared.deactivate()
         Task { await VideoPlayerPool.shared.pauseAll() }
     }
 

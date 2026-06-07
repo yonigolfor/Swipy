@@ -104,6 +104,7 @@ struct PhotoCardView: View {
                                     isMuted.toggle()
                                     PhotoCardView.globalMute = isMuted
                                     player.isMuted = isMuted
+                                    AudioSessionManager.shared.configure(muted: isMuted)
                                 }
                                 VStack {
                                     HStack {
@@ -340,6 +341,7 @@ VStack {
         }
         .onChange(of: isTopCard) { _, nowTop in
             if nowTop {
+                AudioSessionManager.shared.configure(muted: PhotoCardView.globalMute)
                 player?.seek(to: .zero)
                 player?.play()
                 NotificationCenter.default.post(name: .resumeVideoObserver, object: nil)
@@ -507,7 +509,10 @@ VStack {
                     avPlayer.isMuted = PhotoCardView.globalMute
                     self.player = avPlayer
                     self.isLoading = false
-                    if self.isTopCard { avPlayer.play() }
+                    if self.isTopCard {
+                        AudioSessionManager.shared.configure(muted: PhotoCardView.globalMute)
+                        avPlayer.play()
+                    }
                     // isVideoPlayerReady is set by AVPlayerLayer.isReadyForDisplay KVO in PlayerUIView
                 }
             }
@@ -521,6 +526,7 @@ VStack {
         self.player = avPlayer
         self.isLoading = false
         if self.isTopCard {
+            AudioSessionManager.shared.configure(muted: PhotoCardView.globalMute)
             await avPlayer.seek(to: .zero)
             avPlayer.play()
         }
