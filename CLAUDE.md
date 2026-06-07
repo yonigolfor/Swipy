@@ -230,6 +230,12 @@ Use `HapticService` for all haptic feedback. Each swipe direction has its own ha
 ### Error Handling
 Use `try?` for `PHPhotoLibrary.performChanges` (silent failure is acceptable — user can retry). Only throw/catch at service boundaries, not in ViewModels.
 
+### Code Quality Standard
+Every code change must be **senior-level**: efficient, sharp, and precise. No over-engineering, no padding, no defensive code for scenarios that can't occur. Each change should do exactly what is needed — no more, no less.
+
+### Documentation Hygiene
+After every code change, check whether any `.md` file needs updating. The architecture docs (`OFFLINE_MODE.md`, `SNOOZE_FEATURE.md`, `ARCHITECTURE_SWIPE_LOADING.md`, `NOTIFICATIONS.md`, `CLAUDE.md`) must stay in sync with the code. If a function signature, behavior, or invariant changes — update the relevant doc in the same commit.
+
 ### Comments
 The codebase is **bilingual — Hebrew + English** comments are both present and acceptable. Match the language of the surrounding code section.
 
