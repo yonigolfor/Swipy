@@ -231,6 +231,9 @@ Use `HapticService` for all haptic feedback. Each swipe direction has its own ha
 ### Error Handling
 Use `try?` for `PHPhotoLibrary.performChanges` (silent failure is acceptable — user can retry). Only throw/catch at service boundaries, not in ViewModels.
 
+### Commit & Push Policy
+**Never commit or push without explicitly asking the user for approval first.** Always show the diff or summarize the changes and wait for a green light. This applies to every commit, regardless of how small or "obvious" the change seems.
+
 ### Code Quality Standard
 Every code change must be **senior-level**: efficient, sharp, and precise. No over-engineering, no padding, no defensive code for scenarios that can't occur. Each change should do exactly what is needed — no more, no less.
 

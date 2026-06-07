@@ -68,8 +68,6 @@ struct SwipeStackView: View {
                 // right = Keep, left = Delete, regardless of device language.
                 GeometryReader { geometry in
                     ZStack {
-                        let _ = print("🔄 ZStack rerender, stack count: \(viewModel.photoStack.count)")
-
                         if viewModel.isOfflineMode && viewModel.isScanning && viewModel.photoStack.isEmpty {
                             offlineScanningView
                         } else if viewModel.isLoading {
