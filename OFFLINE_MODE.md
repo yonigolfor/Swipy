@@ -2,7 +2,7 @@
 
 ## What Offline Mode Does
 
-When active, the stack is filtered to **locally-available assets only** — photos and videos that are physically on-device (not waiting in iCloud). No network traffic is initiated for image loading.
+When active, the stack is filtered to **locally-available assets only** — photos and videos that are physically on-device (not waiting in iCloud). No network traffic is initiated for any media loading operation. This guarantee holds regardless of whether offline mode was triggered by a real network loss or manually by the user on a slow connection.
 
 Activated via:
 - User tapping "Switch" in the offline prompt banner
@@ -141,6 +141,19 @@ The `remove` + `insert` toggle on `@Published var loadedImageIDs` causes SwiftUI
 
 ---
 
+## Network Access Enforcement in Offline Mode
+
+The "no network in offline mode" guarantee is enforced at four independent layers:
+
+| Layer | Mechanism |
+|---|---|
+| **`loadImage()`** | `options.isNetworkAccessAllowed = !isOfflineMode`; `deliveryMode = .opportunistic` (local-only) |
+| **`startCaching()`** | Explicit `PHImageRequestOptions` with `isNetworkAccessAllowed = !isOfflineMode` — replaces previous `options: nil` which defaulted to network allowed |
+| **`VideoPlayerPool.load()`** | `options.isNetworkAccessAllowed = !PhotoLibraryService.shared.isOfflineMode` — prevents iCloud video requests from hanging indefinitely in airplane mode |
+| **Background prefetch** | `startBackgroundPrefetch()` guard: `network.isOnline && !network.isExpensive && !network.isConstrained` — never runs while offline |
+
+The `startCaching()` and `VideoPlayerPool` fixes are what ensure snoozed items flushed via `flushSnoozedItemsNow()` load cleanly: the items have already passed the `isLocallyAvailable` / `isCached` filter, and the media pipeline now confirms it will never reach out to iCloud.
+
 ## Background Prefetch Guards
 
 `startBackgroundPrefetch()` only runs when all three conditions are met:
@@ -172,14 +185,24 @@ All three are `@Published` and observed via async `for await` streams on `@MainA
 
 ## Scan Engine — `scanLocalUniverse()`
 
-All photo loading in offline mode goes through `scanLocalUniverse()` in `PhotoStackViewModel`. It never fetches from iCloud — it only reads `PHAsset` metadata and the `OfflineCacheService` disk index.
+All photo loading in offline mode goes through `scanLocalUniverse()` in `PhotoStackViewModel`. It never fetches from iCloud — it only reads `PHAsset` metadata and an in-memory snapshot of the `OfflineCacheService` disk index.
 
 ### How it decides "locally available"
 
 ```swift
-let isLocal = service.isLocallyAvailable(asset)          // PHAssetResource metadata — no I/O
-           || diskCache.retrieve(for: asset.localIdentifier) != nil  // prefetched to disk
+// Built once before the scan loop — single directory listing, no per-item I/O:
+let cachedIDs = diskCache.cachedAssetIDSet()   // Set<String> of sanitized asset IDs
+
+// Inside Task.detached, per asset — O(1) in-memory lookup:
+let sanitizedID = asset.localIdentifier.replacingOccurrences(of: "/", with: "_")
+let isLocal = service.isLocallyAvailable(asset) || cachedIDs.contains(sanitizedID)
 ```
+
+**Why not `diskCache.retrieve()` per asset:** the previous implementation called `Data(contentsOf:)` for every non-local asset — a failed filesystem syscall for each. On a 20k all-iCloud library this totalled ~40 seconds. The `cachedAssetIDSet()` approach pays one `contentsOfDirectory` call upfront, then every lookup is a hash-set `contains` with no disk I/O.
+
+**Sanitization contract:** `cachedAssetIDSet()` returns filenames stripped of their `.jpg` extension, which is exactly `assetID.replacingOccurrences(of: "/", with: "_")` — the same transform used in `fileURL(for:)`. Both sides must use this form; the comment in `scanLocalUniverse` makes this explicit.
+
+**Memory:** the `Set<String>` lives only for the duration of the scan (`let` local in `scanLocalUniverse`). It is captured by copy-on-write reference inside `Task.detached` closures — no copies are made as long as it is never mutated (it isn't). When `scanLocalUniverse` returns the Set is freed.
 
 ### Iteration
 
@@ -274,4 +297,4 @@ photoStack.count drops to 12
 | `PhotoLibraryService.swift` | `loadImage()` — iCloud timeout + fallback + quality upgrade callback |
 | `SwipeStackView.swift` | `performOfflineTransition(deactivating:)`, `offlinePromptBanner`, `offlineBadge`, `offlineFAB` |
 | `VictoryView.swift` | Empty state for offline done vs. offline empty (`offlineFoundNoLocalItems`) |
-| `OfflineCacheService.swift` | Disk cache (500 MB, LRU) used by background prefetch for offline availability |
+| `OfflineCacheService.swift` | Disk cache (500 MB, LRU) used by background prefetch; `cachedAssetIDSet()` for scan-time lookups; `isCached()` for lightweight existence checks (snooze filter) |

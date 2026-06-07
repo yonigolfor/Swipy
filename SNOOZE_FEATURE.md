@@ -213,7 +213,9 @@ if last.action == .snooze {
 
 **`flushSnoozedItemsNow()`** — נקרא בלחיצה על הכפתור. מזריק את כל הפריטים התואמים לפילטר ישירות לסטאק, עוקף את ה-milestone counter. זהה ל-`stageSnoozedItemsIfReady()` אבל ללא תנאי milestone. רשומות ה-persistence **נשארות** (לצורך snoozeCount badge בswipe הבא).
 
-**מצב Offline:** כאשר `isOfflineMode == true`, ה-flush מוגבל לפריטים **הזמינים מקומית בלבד** (בודק `isLocallyAvailable` ו-`OfflineCacheService`). פריטי iCloud-only נשארים ב-`snoozeQueue` ויופיעו ב-"Review Now" כשהמשתמש יחזור לאונליין. `pendingSnoozedCount` גם הוא מציג רק את הפריטים הנגישים, ולכן הכפתור לעולם לא יטעה את המשתמש לגבי כמות הפריטים שיחזרו.
+**מצב Offline:** כאשר `isOfflineMode == true`, ה-flush מוגבל לפריטים **הזמינים מקומית בלבד**. `flushableSnoozedItems()` בודק `isLocallyAvailable` ואם לא — `OfflineCacheService.isCached()` (בדיקת `fileExists` בלבד, ללא קריאת נתונים). פריטי iCloud-only נשארים ב-`snoozeQueue` ויופיעו ב-"Review Now" כשהמשתמש יחזור לאונליין. `pendingSnoozedCount` גם הוא מציג רק את הפריטים הנגישים, ולכן הכפתור לעולם לא יטעה את המשתמש לגבי כמות הפריטים שיחזרו.
+
+גם לאחר ה-injection, צינור הטעינה מכבד את offline mode: `startCaching()` ו-`VideoPlayerPool` פועלים עם `isNetworkAccessAllowed = false` — אין ניסיון לגשת לiCloud גם אם הפריט היה נראה "זמין" אך לא לגמרי מקומי.
 
 **למה זה הכרחי:** `globalActionCounter` עולה רק על keep/delete. סטאק ריק = אי-אפשר להחליק = המונה לעולם לא מתקדם = פריט סנוז שהוא האחרון בגלריה תקוע ללא מוצא. ה-CTA פותר את ה-hard deadlock הזה.
 
