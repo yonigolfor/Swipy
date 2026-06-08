@@ -52,6 +52,13 @@ private struct LavaWaveShape: Shape {
     var fillFraction: Double  // 0..1
     var wavePhase: Double     // continuously increasing (radians), driven by TimelineView
 
+    // Only fillFraction participates in SwiftUI animations.
+    // wavePhase is driven by TimelineView at display refresh rate — not via withAnimation.
+    var animatableData: Double {
+        get { fillFraction }
+        set { fillFraction = newValue }
+    }
+
     func path(in rect: CGRect) -> Path {
         guard fillFraction > 0.004 else { return Path() }
 
