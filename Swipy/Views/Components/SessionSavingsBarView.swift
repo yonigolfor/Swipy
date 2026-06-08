@@ -95,6 +95,21 @@ private struct LavaWaveShape: Shape {
     }
 }
 
+// MARK: - SessionSavingsConfig
+
+/// Single source of truth for the milestone threshold.
+/// In DEBUG builds the threshold drops to 50 MB so the celebration can be
+/// triggered quickly during development without deleting a full gigabyte.
+private enum SessionSavingsConfig {
+    #if DEBUG
+    static let milestoneThreshold: Double = 50
+    static let milestoneUnit = "50M"
+    #else
+    static let milestoneThreshold: Double = 1000
+    static let milestoneUnit = "GB"
+    #endif
+}
+
 // MARK: - SessionSavingsBarView
 
 /// Compact gamified top bar showing space saved in the current session.
@@ -105,11 +120,12 @@ struct SessionSavingsBarView: View {
     // MARK: Derived values
 
     private var progressFraction: Double {
-        sessionMB.truncatingRemainder(dividingBy: 1000) / 1000
+        let t = SessionSavingsConfig.milestoneThreshold
+        return sessionMB.truncatingRemainder(dividingBy: t) / t
     }
-    private var gbCount: Int { Int(sessionMB / 1000) }
+    private var milestoneCount: Int { Int(sessionMB / SessionSavingsConfig.milestoneThreshold) }
     private var currentMB: Double {
-        sessionMB.truncatingRemainder(dividingBy: 1000)
+        sessionMB.truncatingRemainder(dividingBy: SessionSavingsConfig.milestoneThreshold)
     }
 
     // MARK: Animation state
@@ -130,7 +146,7 @@ struct SessionSavingsBarView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .onChange(of: gbCount) { old, new in
+        .onChange(of: milestoneCount) { old, new in
             guard new > old else { return }
             isGBTransitioning = true
 
@@ -281,13 +297,13 @@ struct SessionSavingsBarView: View {
                     .clipShape(ChubbyStarShape())
                     .frame(width: Self.starSize, height: Self.starSize)
 
-                    // GB count + unit label, centered on star body
-                    if gbCount > 0 {
+                    // Milestone count + unit label, centered on star body
+                    if milestoneCount > 0 {
                         VStack(spacing: 0) {
-                            Text("\(gbCount)")
+                            Text("\(milestoneCount)")
                                 .font(.system(size: 19, weight: .black, design: .rounded))
                                 .foregroundStyle(.black)
-                            Text("GB")
+                            Text(SessionSavingsConfig.milestoneUnit)
                                 .font(.system(size: 10, weight: .heavy, design: .rounded))
                                 .foregroundStyle(.black.opacity(0.8))
                         }
@@ -398,19 +414,20 @@ private enum CelebrationPhase: CaseIterable {
             VStack(spacing: 4) {
                 Text("\(Int(sessionMB)) MB נמחקו בסשן")
                     .font(.title3).bold()
-                Text("GB שנצברו: \(Int(sessionMB / 1000))")
+                Text("\(SessionSavingsConfig.milestoneUnit) שנצברו: \(Int(sessionMB / SessionSavingsConfig.milestoneThreshold))")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
 
+            let step = SessionSavingsConfig.milestoneThreshold
             VStack(spacing: 12) {
                 HStack(spacing: 10) {
-                    Button("+100 MB")  { sessionMB += 100 }  .buttonStyle(.bordered)
-                    Button("+500 MB")  { sessionMB += 500 }  .buttonStyle(.bordered)
-                    Button("+1 GB")    { sessionMB += 1000 } .buttonStyle(.bordered)
+                    Button("+\(Int(step * 0.1)) MB")  { sessionMB += step * 0.1 }  .buttonStyle(.bordered)
+                    Button("+\(Int(step * 0.5)) MB")  { sessionMB += step * 0.5 }  .buttonStyle(.bordered)
+                    Button("+1 \(SessionSavingsConfig.milestoneUnit)") { sessionMB += step } .buttonStyle(.bordered)
                 }
                 HStack(spacing: 10) {
-                    Button("+250 MB")  { sessionMB += 250 }  .buttonStyle(.bordered)
+                    Button("+\(Int(step * 0.25)) MB") { sessionMB += step * 0.25 } .buttonStyle(.bordered)
                     Button("← Reset")  { sessionMB = 0 }
                         .buttonStyle(.borderedProminent)
                         .tint(.red)
