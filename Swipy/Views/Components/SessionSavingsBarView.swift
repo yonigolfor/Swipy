@@ -188,7 +188,7 @@ struct SessionSavingsBarView: View {
     private var progressSection: some View {
         VStack(alignment: .leading, spacing: 5) {
             Text(mbLabel)
-                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .font(.system(size: 16, weight: .bold, design: .rounded))
                 .foregroundStyle(.primary)
                 .contentTransition(.numericText(countsDown: false))
                 .animation(.spring(response: 0.3), value: currentMB)
@@ -214,9 +214,14 @@ struct SessionSavingsBarView: View {
             }
             .frame(height: 12)
 
-            Text(String(localized: "meter.space_saved"))
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(.secondary)
+            HStack(spacing: 3) {
+                Text(String(localized: "meter.space_saved"))
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(.secondary)
+                Image(systemName: "leaf.fill")
+                    .font(.system(size: 12))
+                    .foregroundStyle(.green.opacity(0.85))
+            }
         }
         .frame(maxWidth: .infinity)
     }
