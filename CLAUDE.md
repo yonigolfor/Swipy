@@ -64,7 +64,7 @@ Swipy/
 │   │   └── FullScreenMediaView.swift
 │   └── Components/
 │       ├── GlassmorphicTabBar.swift    # Custom bottom bar (not UITabBar)
-│       ├── DopamineMeter.swift         # Space saved + item count badge
+│       ├── SessionSavingsBarView.swift # Gamified top bar: MB progress + lava-star + GB milestone celebration
 │       ├── LifetimeSavingsView.swift
 │       ├── SwipeIndicator.swift
 │       ├── VictoryView.swift           # Empty state celebration
@@ -228,6 +228,8 @@ Always use `String(localized: "key")` — never raw string literals for user-fac
 ### Haptics
 Use `HapticService` for all haptic feedback. Each swipe direction has its own haptic pattern — do not use `UIImpactFeedbackGenerator` directly in views.
 
+The one exception is self-contained celebration sequences that own their own timing (e.g. `SessionSavingsBarView.triggerHapticBurst()`). See `HAPTICS.md` for the full event map.
+
 ### Error Handling
 Use `try?` for `PHPhotoLibrary.performChanges` (silent failure is acceptable — user can retry). Only throw/catch at service boundaries, not in ViewModels.
 
@@ -293,3 +295,4 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 - `ARCHITECTURE_SWIPE_LOADING.md` — detailed swipe stack loading, cache lifecycle, video pre-warming, pagination strategy
 - `NOTIFICATIONS.md` — notification triggers, background task setup, deep linking, known limitations
 - `SNOOZE_FEATURE.md` — snooze ("Later") algorithm, exponential backoff, persistence, flush scenarios
+- `HAPTICS.md` — full map of every haptic event: generators, intensities, timing, and the GB-milestone burst sequence

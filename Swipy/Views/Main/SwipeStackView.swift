@@ -50,8 +50,8 @@ struct SwipeStackView: View {
     private let cardStackSize = 3 // כמה קלפים מציגים מאחור
 
     var body: some View {
-        // Outer ZStack: background | card column | DopamineMeter floating on top.
-        // DopamineMeter MUST be a direct child of this ZStack (not buried inside
+        // Outer ZStack: background | card column | SessionSavingsBarView floating on top.
+        // SessionSavingsBarView MUST be a direct child of this ZStack (not buried inside
         // the VStack) so that .zIndex(100) has real effect against the cards.
         ZStack(alignment: .top) {
             // 1. Background
@@ -60,9 +60,9 @@ struct SwipeStackView: View {
 
             // 2. Column: spacer gap + cards + instructions
             VStack(spacing: 0) {
-                // Reserve the same vertical space DopamineMeter will occupy
-                // so the cards don't slide underneath it (≈ 90pt incl. padding).
-                Color.clear.frame(height: 90)
+                // Reserve the same vertical space SessionSavingsBarView will occupy
+                // so the cards don't slide underneath it (≈ 100pt incl. padding).
+                Color.clear.frame(height: 100)
 
                 // Card Stack — force LTR so swipe physics are always consistent:
                 // right = Keep, left = Delete, regardless of device language.
@@ -137,15 +137,18 @@ struct SwipeStackView: View {
                 .environment(\.layoutDirection, .leftToRight)
             }
 
-            // 3. DopamineMeter — floats above everything in this ZStack.
+            // 3. SessionSavingsBarView — floats above everything in this ZStack.
             //    .zIndex(100) works here because it is a direct ZStack sibling,
             //    not nested inside the VStack.
-            DopamineMeter(
-                spaceSaved: viewModel.spaceSavedText,
-                itemCount: viewModel.reviewBin.count
-            )
-            .padding(.top, 10)
-            .zIndex(100)
+            SessionSavingsBarView(sessionMB: viewModel.sessionSpaceSavedMB)
+                .background(
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(Color.cardBackground)
+                        .shadow(color: .black.opacity(0.08), radius: 10, y: 3)
+                )
+                .padding(.horizontal)
+                .padding(.top, 10)
+                .zIndex(100)
 
             // 4. Mode Badges — shuffle (hidden in offline mode) and/or offline badge
             VStack(spacing: 8) {

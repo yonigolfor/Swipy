@@ -198,6 +198,12 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         formatBytes(totalSpaceSaved)
     }
 
+    /// Session MB for the gamified top bar. Uses the same 1 MiB = 1_048_576 bytes
+    /// divisor as formatBytes so the displayed value stays consistent with spaceSavedText.
+    var sessionSpaceSavedMB: Double {
+        Double(totalSpaceSaved) / 1_048_576
+    }
+
     var lifetimeSpaceSavedText: String {
         formatBytes(persistence.totalSpaceSavedLifetime)
     }
