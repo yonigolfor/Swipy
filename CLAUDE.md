@@ -306,6 +306,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 - `iPhone 16` simulator doesn't exist on this machine — use `iPhone 17`
 - Never use `id:...` syntax in the destination string — use `name=...`
 - SourceKit errors in the editor (unknown types, missing members) are false positives from lack of project context; trust `xcodebuild` output only
+- **`repeatForever` + `onAppear` inside NavigationStack/TabView**: setting a `repeatForever` animation via `onAppear` fires during the tab-switch `withAnimation` transaction, causing the ambient transaction to bleed into the repeating animation and animate layout position (not just the intended property). Fix: use `.task { try? await Task.sleep(for: .milliseconds(150)); animate = true }` to let layout settle before the animation starts.
 
 ---
 
