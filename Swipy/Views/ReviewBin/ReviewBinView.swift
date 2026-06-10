@@ -17,6 +17,10 @@ struct ReviewBinView: View {
     @State private var celebrationSpace: String? = nil
     @State private var celebrationCount: Int = 0
 
+    // Restore animation — set to the item ID being restored so the matching
+    // cell can run its poof animation before the data is removed.
+    @State private var restoringItemID: String? = nil
+
     // Layout constants — single source of truth for both the grid and pre-caching.
     // GridItem spacing must be explicit so thumbnailPixelSize stays pixel-exact.
     private static let columnSpacing: CGFloat = 8
@@ -72,8 +76,14 @@ struct ReviewBinView: View {
                         item: item,
                         onClose: { viewModel.deselectItem() },
                         onRestore: {
-                            stackViewModel.restoreFromBin(item)
+                            let id = item.id
                             viewModel.deselectItem()
+                            Task { @MainActor in
+                                // Wait for fullScreenCover dismiss (~420ms) before
+                                // triggering the poof on the matching grid cell.
+                                try? await Task.sleep(for: .milliseconds(420))
+                                restoringItemID = id
+                            }
                         }
                     )
                 }
@@ -113,15 +123,16 @@ struct ReviewBinView: View {
 
                 LazyVGrid(columns: columns, spacing: 12) {
                     ForEach(stackViewModel.reviewBin) { item in
-                        ReviewGridItemView(item: item, thumbnailPixelSize: Self.thumbnailPixelSize)
-                            .onTapGesture { viewModel.selectItem(item) }
-                            .contextMenu {
-                                Button {
-                                    stackViewModel.restoreFromBin(item)
-                                } label: {
-                                    Label(String(localized: "bin.restore"), systemImage: "arrow.uturn.backward")
-                                }
-                            }
+                        ReviewGridItemView(
+                            item: item,
+                            thumbnailPixelSize: Self.thumbnailPixelSize,
+                            onRestore: {
+                                restoringItemID = nil
+                                stackViewModel.restoreFromBin(item)
+                            },
+                            isBeingRestored: restoringItemID == item.id
+                        )
+                        .onTapGesture { viewModel.selectItem(item) }
                     }
                 }
                 .padding()

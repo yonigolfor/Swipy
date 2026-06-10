@@ -49,6 +49,18 @@ When `sessionSpaceSavedMB` crosses a 1 GB boundary, `SessionSavingsBarView` fire
 
 ---
 
+## Review Bin — Item Restore (Poof Animation)
+
+Fired in `ReviewGridItemView` at the exact moment the cell transitions from `.popping` → `.poofing` (Phase 2 of the restore animation), via SwiftUI's `.sensoryFeedback` modifier.
+
+| Trigger | API | Feedback type | Intensity |
+|---------|-----|---------------|-----------|
+| Cell poof (restore) | `.sensoryFeedback(.impact(flexibility: .soft, intensity: 0.7), trigger: hapticTrigger)` | soft impact | 0.7 |
+
+**Design intent:** A light, "bubble-pop" sensation matching the visual poof — the opposite of the heavy triple-beat used for permanent deletion. Uses `.sensoryFeedback` (iOS 17+ SwiftUI API) rather than `HapticService`, as it is a single-event visual-sync haptic local to the cell.
+
+---
+
 ## Review Bin — Empty Trash
 
 Fired in `PhotoStackViewModel.emptyTrash()` via `HapticService.emptyTrash()`.
