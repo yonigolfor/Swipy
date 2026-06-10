@@ -34,8 +34,9 @@ struct TrashCelebrationView: View {
 
     var body: some View {
         ZStack {
-            // Dimmed background — tap to dismiss
-            Color.black.opacity(0.6)
+            // Adaptive backdrop — tap to dismiss
+            Rectangle()
+                .fill(.ultraThinMaterial)
                 .ignoresSafeArea()
                 .onTapGesture { dismiss() }
 

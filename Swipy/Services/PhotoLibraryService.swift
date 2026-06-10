@@ -317,7 +317,7 @@ class PhotoLibraryService: ObservableObject {
     ) {
         let allowsNetwork = forceNetworkAccess || !isOfflineMode
         let options = PHImageRequestOptions()
-        options.deliveryMode = allowsNetwork ? .highQualityFormat : .opportunistic
+        options.deliveryMode = .highQualityFormat
         options.isNetworkAccessAllowed = allowsNetwork
         options.isSynchronous = false
 
@@ -326,7 +326,17 @@ class PhotoLibraryService: ObservableObject {
             imageManager.requestImage(
                 for: asset, targetSize: targetSize,
                 contentMode: .aspectFill, options: options
-            ) { image, _ in completion(image) }
+            ) { image, info in
+                if !allowsNetwork {
+                    // In offline mode, reject degraded proxy images (e.g. iCloud thumbnails or
+                    // partially-processed Smart HDR shots). nil → card stays blank rather than
+                    // showing a blurry stand-in the user might mistake for the real photo.
+                    let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                    completion(isDegraded ? nil : image)
+                } else {
+                    completion(image)
+                }
+            }
             return
         }
 
