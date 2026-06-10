@@ -143,8 +143,8 @@ struct SwipeStackView: View {
             SessionSavingsBarView(sessionMB: viewModel.sessionSpaceSavedMB)
                 .background(
                     RoundedRectangle(cornerRadius: 20)
-                        .fill(Color.cardBackground)
-                        .shadow(color: .black.opacity(0.08), radius: 10, y: 3)
+                        .fill(Color(UIColor.secondarySystemBackground))
+                        .shadow(color: .black.opacity(0.18), radius: 12, y: 4)
                 )
                 .padding(.horizontal)
                 .padding(.top, 10)

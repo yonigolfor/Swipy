@@ -117,6 +117,18 @@ private enum SessionSavingsConfig {
 struct SessionSavingsBarView: View {
     let sessionMB: Double
 
+    @Environment(\.colorScheme) private var colorScheme
+
+    // Adaptive color for the star outline and progress track background.
+    // Dark: white at 0.7 opacity so both elements are legible on black.
+    // Light: unchanged from original values.
+    private var starAndTrackColor: Color {
+        colorScheme == .dark ? .white.opacity(0.7) : .primary.opacity(0.13)
+    }
+    private var trackBackgroundColor: Color {
+        colorScheme == .dark ? .white.opacity(0.7) : .primary.opacity(0.08)
+    }
+
     // MARK: Derived values
 
     private var progressFraction: Double {
@@ -212,7 +224,7 @@ struct SessionSavingsBarView: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule()
-                        .fill(Color.primary.opacity(0.08))
+                        .fill(trackBackgroundColor)
 
                     Capsule()
                         .fill(
@@ -276,7 +288,7 @@ struct SessionSavingsBarView: View {
                 ZStack {
                     // Dim background star
                     ChubbyStarShape()
-                        .fill(Color.primary.opacity(0.13))
+                        .fill(starAndTrackColor)
                         .frame(width: Self.starSize, height: Self.starSize)
 
                     // Lava-wave fill — continuous sine wave clipped to star outline
@@ -297,18 +309,16 @@ struct SessionSavingsBarView: View {
                     .clipShape(ChubbyStarShape())
                     .frame(width: Self.starSize, height: Self.starSize)
 
-                    // Milestone count + unit label, centered on star body
-                    if milestoneCount > 0 {
-                        VStack(spacing: 0) {
-                            Text("\(milestoneCount)")
-                                .font(.system(size: 19, weight: .black, design: .rounded))
-                                .foregroundStyle(.black)
-                            Text(SessionSavingsConfig.milestoneUnit)
-                                .font(.system(size: 10, weight: .heavy, design: .rounded))
-                                .foregroundStyle(.black.opacity(0.8))
-                        }
-                        .offset(y: 1)
+                    // Milestone count + unit label — always visible so the star's purpose is clear.
+                    VStack(spacing: 0) {
+                        Text("\(milestoneCount)")
+                            .font(.system(size: 19, weight: .black, design: .rounded))
+                            .foregroundStyle(.black)
+                        Text(SessionSavingsConfig.milestoneUnit)
+                            .font(.system(size: 10, weight: .heavy, design: .rounded))
+                            .foregroundStyle(.black.opacity(0.8))
                     }
+                    .offset(y: 1)
                 }
                 .rotationEffect(.degrees(phase.starRotation))
                 .scaleEffect(phase.starScale)

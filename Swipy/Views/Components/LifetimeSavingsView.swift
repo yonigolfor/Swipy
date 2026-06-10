@@ -55,6 +55,9 @@ struct LifetimeSavingsView: View {
                 .shadow(color: .black.opacity(0.05), radius: 10, x: 0, y: 5)
         )
         .padding(.horizontal)
-        .onAppear { animate = true }
+        .task {
+            try? await Task.sleep(for: .milliseconds(150))
+            animate = true
+        }
     }
 }

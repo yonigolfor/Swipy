@@ -57,7 +57,7 @@ struct DopamineMeter: View {
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(Color.cardBackground)
+                .fill(Color(UIColor.secondarySystemBackground))
                 .shadow(color: .black.opacity(0.1), radius: 8, y: 2)
         )
         .padding(.horizontal)
