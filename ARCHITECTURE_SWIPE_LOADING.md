@@ -152,8 +152,29 @@ DragGesture.onChanged (offset > 80pt, פעם אחת per gesture)
 | eviction | assets שאינם ב-5 הבאים מוסרים — למעט protectedID |
 
 **Fast path**: `VideoPlayerPool.shared.player(for: asset)` → מחזיר `AVPlayer` מוכן  
-**Slow path**: pool miss → `PHImageManager.requestPlayerItem` → async load  
+**Slow path**: pool miss → `isVideoPlayerReady = false` (reset gate) → `PHImageManager.requestPlayerItem` → async load  
 **Re-sync**: `resumeTopCardVideo` notification → `PhotoCardView` מחדש play אם player נעצר בטעות בזמן drag שבוטל
+
+### Pool Lifecycle — מחזור חיים של ה-pool
+
+Pool entries **אינם** מתפנים ב-`onDisappear` של `PhotoCardView`. הpool מנהל את עצמו:
+
+| גורם | מנגנון |
+|------|---------|
+| swipe רגיל | `warmUp()` stale eviction — אוטומטי |
+| `emptyTrash` | `drainAll()` מפורש לפני מחיקה מה-PHPhotoLibrary |
+| מעבר טאב | `pauseAll()` בלבד — players **נשארים בpool** |
+| חזרה לטאב | pool hit מיידי; `rewarmVideoPool()` מכין קלפים עתידיים |
+
+### PlayerUIView — isReadyForDisplay KVO
+
+ה-KVO observer מוגדר על `playerLayer` (תמיד אותו instance, לא על `AVPlayer`). הוא נשאר פעיל לאחר החלפת player.
+
+ב-`player.didSet`:
+1. `hasCalledReadyCallback = false` — מאפשר ל-callback לירות שוב לplayer חדש
+2. `playerLayer.player = player` — מעדכן את הlayer
+3. אם `playerLayer.isReadyForDisplay == true` כבר (pool hit, אותו player) → callback יורה **מיידית** (KVO לא יורה כי הערך לא השתנה)
+4. אם `isReadyForDisplay == false` (player חדש) → KVO יירה כשהlayer יגיע ל-`true` ✓
 
 ## 5a. Audio Session — AudioSessionManager
 
@@ -255,12 +276,47 @@ Thumbnail נעלם עם `animation(.easeIn(0.2))` ו-`thumbnailImage = nil` אח
 // SwipeStackView.onAppear
 if viewModel.photoStack.isEmpty && !viewModel.isLoading {
     viewModel.refreshPhotos()
+} else {
+    viewModel.rewarmVideoPool()  // fast no-op במעבר רגיל; חיוני אחרי emptyTrash
 }
+
+// SwipeStackView.onDisappear
+NotificationCenter.default.post(name: .stopCurrentVideo, object: nil)
+viewModel.pauseVideoPool()  // pause בלבד — pool נשאר חם
 ```
+
+### עקרון: Pool חם בין טאבים
+
+`PhotoCardView.onDisappear` **לא** קורא `release()` ו**לא** מאפס `isVideoPlayerReady`.  
+שני הדברים נשמרים כדי שהוידאו יחזור מיידית ללא טעינה מחדש:
+
+```
+מעבר טאב:
+  onDisappear → stopPlayer() (pause + seek 0) + pauseAll()
+  pool: players נשארים, רק מושהים
+
+חזרה לטאב:
+  onAppear → loadVideoPlayer()
+    → pool hit ✓ (instant, no I/O)
+    → activatePlayer() → play()
+    → isVideoPlayerReady כבר true → וידאו מוצג מיידית
+```
+
+### isVideoPlayerReady — מתי מתאפס
+
+| מצב | isVideoPlayerReady |
+|-----|--------------------|
+| `onDisappear` (tab switch) | **לא מתאפס** — שומר על instant resume |
+| pool hit (fast path) | לא נגע — נשאר true |
+| pool miss / slow path | **מתאפס ל-false** לפני PHImageManager request |
+
+### תרחישים
 
 | תרחיש | טיפול |
 |--------|-------|
-| מעבר טאב חזרה ל-Swipe | stack קיים → לא נוגע בו |
-| בחירת קטגוריה מ-SmartFilters | `loadPhotos(filter:)` נקרא לפני המעבר → onAppear לא מבטל |
-| גלריה השתנתה (limited access וכו') | `PHPhotoLibraryChangeObserver` מטפל |
+| מעבר טאב חזרה ל-Swipe | pool hit → וידאו ממשיך מיידית |
+| חזרה אחרי `emptyTrash` | pool ריק (drainAll) → `rewarmVideoPool()` → pool miss → slow path + reset gate |
+| memory pressure פינה את הpool | pool miss → slow path, `isVideoPlayerReady = false` מציג loading state |
+| בחירת קטגוריה מ-SmartFilters | `loadPhotos(filter:)` נקרא לפני המעבר → `onAppear` מרענן |
+| גלריה השתנתה | `PHPhotoLibraryChangeObserver` מטפל |
 | הפעלה ראשונה / stack ריק | `refreshPhotos()` רץ |

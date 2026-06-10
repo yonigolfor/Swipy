@@ -11,15 +11,13 @@ import UIKit
 extension PHAsset {
     /// גודל הקובץ ב-bytes
     var fileSize: Int64 {
-        guard let resource = PHAssetResource.assetResources(for: self).first else {
-            return 0
-        }
-        
-        if let unsignedInt64 = resource.value(forKey: "fileSize") as? CLong {
-            return Int64(unsignedInt64)
-        }
-        
-        return 0
+        let primaryTypes: [PHAssetResourceType] = mediaType == .video
+            ? [.video, .fullSizeVideo]
+            : [.photo, .fullSizePhoto]
+        let resources = PHAssetResource.assetResources(for: self)
+        let resource = resources.first { primaryTypes.contains($0.type) } ?? resources.first
+        guard let resource else { return 0 }
+        return (resource.value(forKey: "fileSize") as? CLong).map(Int64.init) ?? 0
     }
     
     /// גודל קריא (MB/GB)

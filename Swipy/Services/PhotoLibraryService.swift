@@ -383,17 +383,19 @@ class PhotoLibraryService: ObservableObject {
 
     /// Loads a fast local thumbnail — never touches iCloud.
     /// Used as the immediate placeholder for video cards while the AVPlayer warms up.
+    /// Returns the PHImageRequestID so callers can cancel the request (e.g. on cell disappear).
+    @discardableResult
     func loadThumbnail(
         for asset: PHAsset,
         targetSize: CGSize = CGSize(width: 300, height: 400),
         completion: @escaping (UIImage?) -> Void
-    ) {
+    ) -> PHImageRequestID {
         let options = PHImageRequestOptions()
         options.deliveryMode = .fastFormat
         options.isNetworkAccessAllowed = false
         options.isSynchronous = false
 
-        imageManager.requestImage(
+        return imageManager.requestImage(
             for: asset,
             targetSize: targetSize,
             contentMode: .aspectFill,
@@ -401,6 +403,16 @@ class PhotoLibraryService: ObservableObject {
         ) { image, _ in
             DispatchQueue.main.async { completion(image) }
         }
+    }
+
+    /// Cancels an in-flight PHImageManager request. Safe to call from any thread.
+    func cancelRequest(_ requestID: PHImageRequestID) {
+        imageManager.cancelImageRequest(requestID)
+    }
+
+    /// Stops pre-caching for all assets. Call when a caching context is torn down.
+    func stopCachingAllImages() {
+        imageManager.stopCachingImagesForAllAssets()
     }
 
     /// Starts image caching for a set of assets.

@@ -17,106 +17,130 @@ struct ReviewBinView: View {
     @State private var celebrationSpace: String? = nil
     @State private var celebrationCount: Int = 0
 
+    // Layout constants — single source of truth for both the grid and pre-caching.
+    // GridItem spacing must be explicit so thumbnailPixelSize stays pixel-exact.
+    private static let columnSpacing: CGFloat = 8
+    private static let horizontalPadding: CGFloat = 16
+
+    /// Pixel size used for both startCachingImages and loadThumbnail.
+    /// Identical values guarantee a PHCachingImageManager cache hit on every cell render.
+    static var thumbnailPixelSize: CGSize {
+        let ptW = (UIScreen.main.bounds.width
+                   - 2 * horizontalPadding
+                   - 2 * columnSpacing) / 3
+        let scale = UIScreen.main.scale
+        return CGSize(width: ptW * scale, height: ptW * 0.75 * scale)
+    }
+
     private let columns = [
-        GridItem(.flexible()),
-        GridItem(.flexible()),
-        GridItem(.flexible())
+        GridItem(.flexible(), spacing: columnSpacing),
+        GridItem(.flexible(), spacing: columnSpacing),
+        GridItem(.flexible(), spacing: columnSpacing)
     ]
 
     var body: some View {
-        NavigationView {
-            ZStack {
-                // ── Content ──────────────────────────────────────────────
-                VStack(spacing: 0) {
-                    if stackViewModel.reviewBin.isEmpty {
-    LifetimeSavingsView(text: stackViewModel.lifetimeSpaceSavedText)
-        .padding(.top, 20)
-} else {
-    DopamineMeter(
-        spaceSaved: stackViewModel.spaceSavedText,
-        itemCount: stackViewModel.reviewBin.count
-    )
-    .padding(.top, 8)
-}
-
-                    if stackViewModel.reviewBin.isEmpty {
-                        EmptyStateView.emptyBin
-                    } else {
-                        ScrollView {
-                            LazyVGrid(columns: columns, spacing: 12) {
-                                ForEach(stackViewModel.reviewBin) { item in
-                                    ReviewGridItemView(item: item)
-                                        .onTapGesture {
-                                            viewModel.selectItem(item)
-                                        }
-                                        .contextMenu {
-                                            Button {
-                                                stackViewModel.restoreFromBin(item)
-                                            } label: {
-                                                Label(String(localized: "bin.restore"), systemImage: "arrow.uturn.backward")
-                                            }
-                                        }
-                                }
+        NavigationStack {
+            contentView
+                .toolbar {
+                    if !stackViewModel.reviewBin.isEmpty {
+                        ToolbarItem(placement: .navigationBarTrailing) {
+                            Button { viewModel.showDeleteConfirmation() } label: {
+                                Label(String(localized: "bin.empty_trash"), systemImage: "trash")
+                                    .foregroundColor(.red)
                             }
-                            .padding()
                         }
                     }
                 }
-
-                // ── Celebration overlay ───────────────────────────────────
-                if let spaceSaved = celebrationSpace {
-                    TrashCelebrationView(
-                        spaceSaved: spaceSaved,
-                        itemCount: celebrationCount,
-                        onDismiss: { celebrationSpace = nil }
-                    )
-                    .transition(.opacity)
-                    .zIndex(10)
+                .alert(String(localized: "bin.alert_title"), isPresented: $viewModel.isShowingDeleteConfirmation) {
+                    Button(String(localized: "cancel"), role: .cancel) {}
+                    Button(String(format: String(localized: "bin.delete_button"), stackViewModel.reviewBin.count), role: .destructive) {
+                        let savedText  = stackViewModel.spaceSavedText
+                        let savedCount = stackViewModel.reviewBin.count
+                        Task {
+                            try? await stackViewModel.emptyTrash()
+                            withAnimation {
+                                celebrationCount = savedCount
+                                celebrationSpace = savedText
+                            }
+                        }
+                    }
+                } message: {
+                    Text(String(format: String(localized: "bin.alert_message"), stackViewModel.reviewBin.count))
                 }
+                .fullScreenCover(item: $viewModel.selectedItem) { item in
+                    FullScreenMediaView(
+                        item: item,
+                        onClose: { viewModel.deselectItem() },
+                        onRestore: {
+                            stackViewModel.restoreFromBin(item)
+                            viewModel.deselectItem()
+                        }
+                    )
+                }
+                .overlay {
+                    if let spaceSaved = celebrationSpace {
+                        TrashCelebrationView(
+                            spaceSaved: spaceSaved,
+                            itemCount: celebrationCount,
+                            onDismiss: { celebrationSpace = nil }
+                        )
+                        .transition(.opacity)
+                    }
+                }
+        }
+    }
+
+    // MARK: - Content
+
+    @ViewBuilder
+    private var contentView: some View {
+        if stackViewModel.reviewBin.isEmpty {
+            VStack(spacing: 0) {
+                LifetimeSavingsView(text: stackViewModel.lifetimeSpaceSavedText)
+                    .padding(.top, 20)
+                EmptyStateView.emptyBin
             }
             .navigationTitle(String(localized: "bin.title"))
             .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                if !stackViewModel.reviewBin.isEmpty {
-                    ToolbarItem(placement: .navigationBarTrailing) {
-                        Button {
-                            viewModel.showDeleteConfirmation()
-                        } label: {
-                            Label(String(localized: "bin.empty_trash"), systemImage: "trash")
-                                .foregroundColor(.red)
-                        }
-                    }
-                }
-            }
-            .alert(String(localized: "bin.alert_title"), isPresented: $viewModel.isShowingDeleteConfirmation) {
-                            Button(String(localized: "cancel"), role: .cancel) {}
-                            Button(String(format: String(localized: "bin.delete_button"), stackViewModel.reviewBin.count), role: .destructive) {
-                    // Capture BEFORE emptyTrash zeroes it out
-                    let savedText  = stackViewModel.spaceSavedText
-                    let savedCount = stackViewModel.reviewBin.count
-                    Task {
-                        try? await stackViewModel.emptyTrash()
-                        // Show celebration with the captured values
-                        withAnimation {
-                            celebrationCount = savedCount
-                            celebrationSpace = savedText
-                        }
-                    }
-                }
-            } message: {
-                Text(String(format: String(localized: "bin.alert_message"), stackViewModel.reviewBin.count))
-            }
-            .fullScreenCover(item: $viewModel.selectedItem) { item in
-                FullScreenMediaView(
-                    item: item,
-                    onClose: { viewModel.deselectItem() },
-                    onRestore: {
-                        stackViewModel.restoreFromBin(item)
-                        viewModel.deselectItem()
-                    }
+        } else {
+            ScrollView {
+                DopamineMeter(
+                    spaceSaved: stackViewModel.spaceSavedText,
+                    itemCount: stackViewModel.reviewBin.count
                 )
+                .padding(.horizontal, 16)
+                .padding(.top, 8)
+
+                LazyVGrid(columns: columns, spacing: 12) {
+                    ForEach(stackViewModel.reviewBin) { item in
+                        ReviewGridItemView(item: item, thumbnailPixelSize: Self.thumbnailPixelSize)
+                            .onTapGesture { viewModel.selectItem(item) }
+                            .contextMenu {
+                                Button {
+                                    stackViewModel.restoreFromBin(item)
+                                } label: {
+                                    Label(String(localized: "bin.restore"), systemImage: "arrow.uturn.backward")
+                                }
+                            }
+                    }
+                }
+                .padding()
             }
+            .navigationTitle(String(localized: "bin.title"))
+            .navigationBarTitleDisplayMode(.large)
+            .onAppear { startCachingBin() }
+            .onDisappear { PhotoLibraryService.shared.stopCachingAllImages() }
+            .onChange(of: stackViewModel.reviewBin.count) { startCachingBin() }
         }
+    }
+
+    // MARK: - Pre-caching
+
+    /// Pre-warms PHCachingImageManager for every item in the bin so cells render
+    /// near-instantly as they scroll into view. Idempotent — PHKit skips already-cached assets.
+    private func startCachingBin() {
+        PhotoLibraryService.shared.startCaching(for: stackViewModel.reviewBin,
+                                                targetSize: Self.thumbnailPixelSize)
     }
 
     // MARK: - Lifetime Savings View

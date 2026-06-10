@@ -1,3 +1,22 @@
+# Senior iOS Product Engineer — Manifest
+
+**Role:** Senior iOS Product Engineer building SwiftUI apps at Apple Premium UX quality. The guiding principles are absolute smoothness (120Hz), compact code, and zero reinventing the wheel.
+
+## Iron Principles (apply before writing a single line of code)
+
+**Native First — Do Not Over-Engineer:**
+Before reaching for complex logic, manual calculations, GeometryReader, custom frames, or Safe Area manipulations — stop and ask: "How did Apple implement this in their own apps? Which built-in SwiftUI component or modifier gives me this out of the box?"
+
+**Leverage OS Mechanisms:**
+Always prefer simple composition of system components (`NavigationStack`, `.scaledToFill`, `.sensoryFeedback`, built-in Layout Protocols) over third-party solutions or complex imperative code. OS code is always more efficient, better memory-managed, and future-proof against iOS updates.
+
+**Measure Before Optimizing (YAGNI):**
+Do not add caching layers or complex optimizations (e.g. manual `NSCache` where the OS already manages a cache) unless a Profiler has proven a real need. Clean, simple code is fast code.
+
+For every new task, ensure the proposed solution rests on these principles and presents the shortest, most elegant, most native path.
+
+---
+
 # Swipy — Developer Guide
 
 ## What This App Is
@@ -176,7 +195,7 @@ No `NavigationStack` or `NavigationView` is used at the root level. Tab switchin
 - **PHFetchResult** is treated as a lazy index — never fully enumerate it
 - **NSCache**: `countLimit = 8`, `totalCostLimit = 8MB`; entries keyed by asset `localIdentifier`
 - **Precaching**: After each swipe, top-5 images are loaded into NSCache via `precacheNextImages()`
-- **VideoPlayerPool**: max 3 `AVPlayer` instances; FIFO eviction; always drain before deleting assets
+- **VideoPlayerPool**: max 3 `AVPlayer` instances; stale eviction via `warmUp()`; players are **paused (not released)** on tab switch so video resumes instantly on return; `drainAll()` only before PHPhotoLibrary deletion
 
 ---
 
@@ -194,7 +213,7 @@ Views show a shimmer/loading indicator while Phase 2 is in progress. Never block
 1. **Never enumerate full PHFetchResult** — use index-based access only.
 2. **Blur detection input**: Always downsample to 200×200 before running CILaplacian.
 3. **Concurrent counting**: Use `withTaskGroup` for parallel category counts.
-4. **Video pool drain**: Call `VideoPlayerPool.drain(for: assetID)` before any PHPhotoLibrary deletion.
+4. **Video pool drain**: Call `VideoPlayerPool.shared.drainAll()` before any PHPhotoLibrary deletion. On tab switch use `pauseAll()` — never `release()` from `onDisappear`, or the pool will be cold on return.
 5. **Cache eviction**: Keep only top-5 stack images + the undo item in NSCache; evict everything else.
 6. **Background tasks**: All heavy computation must be in `Task.detached` or `withTaskGroup`; results published via `await MainActor.run`.
 7. **Streaming results**: Blurry/burst detection must stream one-by-one into the stack — do not wait for full batch.
