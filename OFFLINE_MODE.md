@@ -147,7 +147,7 @@ The "no network in offline mode" guarantee is enforced at four independent layer
 
 | Layer | Mechanism |
 |---|---|
-| **`loadImage()`** | `options.isNetworkAccessAllowed = !isOfflineMode`; `deliveryMode = .opportunistic` (local-only) |
+| **`loadImage()`** | `options.isNetworkAccessAllowed = !isOfflineMode`; `deliveryMode = .highQualityFormat` always. In offline mode, checks `PHImageResultIsDegradedKey` — returns `nil` for any degraded proxy so blurry stand-ins are never shown. |
 | **`startCaching()`** | Explicit `PHImageRequestOptions` with `isNetworkAccessAllowed = !isOfflineMode` — replaces previous `options: nil` which defaulted to network allowed |
 | **`VideoPlayerPool.load()`** | `options.isNetworkAccessAllowed = !PhotoLibraryService.shared.isOfflineMode` — prevents iCloud video requests from hanging indefinitely in airplane mode |
 | **Background prefetch** | `startBackgroundPrefetch()` guard: `network.isOnline && !network.isExpensive && !network.isConstrained` — never runs while offline |
