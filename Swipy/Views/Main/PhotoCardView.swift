@@ -323,7 +323,11 @@ VStack {
         }
         .onDisappear {
             stopPlayer()
-            isVideoPlayerReady = false
+            // isVideoPlayerReady is intentionally NOT reset here.
+            // On tab switch the pool player stays warm — keeping isVideoPlayerReady=true
+            // means the video resumes instantly on return without a loading gate.
+            // Pool lifecycle is managed by warmUp() stale eviction and rewarmVideoPool(),
+            // not by the View. Only the slow-path in loadVideoPlayer() resets this flag.
             thumbnailImage = nil
             videoSpinnerTask?.cancel()
             imageSpinnerTask?.cancel()
@@ -335,9 +339,6 @@ VStack {
             playerItemFailed = false
             timeControlObserver = nil
             playerItemStatusObserver = nil
-            if item.isVideo {
-                Task { await VideoPlayerPool.shared.release(for: item.asset) }
-            }
         }
         .onChange(of: isTopCard) { _, nowTop in
             if nowTop {
@@ -484,8 +485,10 @@ VStack {
                 return
             }
 
-            // 3. True miss — asset is outside the pool's warm-up window (e.g. fast
-            //    swiper who outruns the pool). Load directly as a safety net.
+            // 3. True miss — asset is outside the pool's warm-up window (e.g. fast swiper
+            //    who outruns the pool, or memory-pressure pool eviction between tab switches).
+            //    Reset the ready gate so the loading state shows while the new player buffers.
+            isVideoPlayerReady = false
             let options = PHVideoRequestOptions()
             options.deliveryMode = .fastFormat
             options.isNetworkAccessAllowed = !PhotoLibraryService.shared.isOfflineMode
@@ -568,7 +571,19 @@ struct VideoPlayerView: UIViewRepresentable {
 
 class PlayerUIView: UIView {
     var player: AVPlayer? {
-        didSet { playerLayer.player = player }
+        didSet {
+            // Reset flag so the callback can fire again for the new player.
+            // The observation is on playerLayer (always the same instance), so it
+            // keeps listening correctly through any player replacement.
+            hasCalledReadyCallback = false
+            playerLayer.player = player
+            // Fast path: same pooled player reassigned after a tab switch — layer is
+            // already displaying, KVO won't fire (value unchanged), so fire immediately.
+            if playerLayer.isReadyForDisplay {
+                hasCalledReadyCallback = true
+                DispatchQueue.main.async { self.onReadyForDisplay?() }
+            }
+        }
     }
     var onReadyForDisplay: (() -> Void)?
 

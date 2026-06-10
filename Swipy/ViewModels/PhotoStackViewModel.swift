@@ -766,6 +766,13 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         Task { await VideoPlayerPool.shared.pauseAll() }
     }
 
+    /// Re-warms the video pool and image cache for the current top-of-stack cards.
+    /// Call when returning to the Swipe tab after the pool may have been drained
+    /// (e.g. after emptyTrash). No-op if everything is already cached.
+    func rewarmVideoPool() {
+        precacheNextImages()
+    }
+
     func count(for category: FilterCategory) -> Int {
         photoService.count(for: category, excluding: processedAssetIDs)
     }

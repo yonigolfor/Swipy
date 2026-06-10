@@ -251,6 +251,10 @@ struct SwipeStackView: View {
             }
             if viewModel.photoStack.isEmpty && !viewModel.isLoading {
                 viewModel.refreshPhotos()
+            } else {
+                // Pool may be cold after emptyTrash (drainAll) or first return to tab.
+                // For normal tab switches the pool is still warm; this is a fast no-op.
+                viewModel.rewarmVideoPool()
             }
         }
         .onDisappear {
