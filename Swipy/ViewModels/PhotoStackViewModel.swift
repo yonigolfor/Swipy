@@ -440,14 +440,17 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     private func restoreBinFromDisk() {
         let savedIDs = persistence.reviewBinIDs
         guard !savedIDs.isEmpty else { return }
-        // Targeted fetch — only the IDs we actually need, not the full library.
         let assetMap = photoService.fetchAssets(forIDs: savedIDs)
+        let fileSizes = persistence.reviewBinFileSizes
         let items = savedIDs.compactMap { id -> PhotoItem? in
             guard let asset = assetMap[id] else { return nil }
-            return PhotoItem(asset: asset)
+            var item = PhotoItem(asset: asset)
+            item.storedFileSize = fileSizes[id] ?? 0
+            return item
         }
         self.reviewBin = items
-        self.totalSpaceSaved = persistence.reviewBinSpaceSaved
+        // Recompute from stored sizes so totalSpaceSaved is always derivable from bin contents.
+        self.totalSpaceSaved = items.reduce(0) { $0 + $1.storedFileSize }
         items.forEach { processedAssetIDs.insert($0.id) }
     }
 
@@ -800,15 +803,17 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     /// Swipe Left — Delete (moves to Review Bin)
     func deletePhoto() {
-        guard let topCard = photoStack.first else { return }
+        guard !photoStack.isEmpty else { return }
+        var topCard = photoStack.removeFirst()
         lastSwipedImage = imageCache.object(forKey: topCard.id as NSString)
         processedAssetIDs.insert(topCard.id)
         persistence.clearSnoozedID(topCard.id)
+        // Freeze file size now — live asset.fileSize can return 0 for iCloud assets later.
+        topCard.storedFileSize = topCard.fileSize
         self.lastAction = (topCard, .delete)
-        photoStack.removeFirst()
         hasPendingCountUpdate = true
         reviewBin.append(topCard)
-        totalSpaceSaved += topCard.fileSize
+        totalSpaceSaved += topCard.storedFileSize
         OfflineCacheService.shared.evict(for: topCard.id)
         DailyLimitService.shared.recordSwipe()
         hapticService.delete()
@@ -883,7 +888,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
         if last.action == .delete {
             reviewBin.removeAll { $0.id == item.id }
-            totalSpaceSaved -= item.fileSize
+            totalSpaceSaved = max(0, totalSpaceSaved - item.storedFileSize)
             saveBinToDisk()
         }
 
@@ -907,7 +912,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         reviewBin.remove(at: index)
         processedAssetIDs.remove(item.id)
         persistence.removeKeptID(item.id)
-        totalSpaceSaved -= item.fileSize
+        totalSpaceSaved = max(0, totalSpaceSaved - item.storedFileSize)
         hapticService.selection()
         saveBinToDisk()
     }
@@ -985,59 +990,16 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         lastNetworkFailureDate = nil
         isOfflineMode = false
         PhotoLibraryService.shared.isOfflineMode = false
-
-        // Shared reset state.
         offlineFoundNoLocalItems = false
-        currentFilter = .all
+        preOfflineModeStack = nil
+        preOfflineFetchCursor = 0
         offlineFetchCursor = 0
-        isFetchingNextPage = false
-        loadedImageIDs = []
         isShuffleModeActive = false
         savedLinearCursor = 0
         preShuffleStack = nil
-        isLoading = true
-
-        // Try to restore the pre-offline snapshot first — instant, no PHFetchResult scan.
-        let snapshot = preOfflineModeStack?.filter { !processedAssetIDs.contains($0.id) } ?? []
-        preOfflineModeStack = nil
-
-        Task {
-            if !snapshot.isEmpty {
-                // Fast path: show the exact cards the user had queued before going offline.
-                // Wrapped in Task so isLoading true→false crosses a run-loop boundary,
-                // allowing onChange(of: isLoading) in SwipeStackView to fire.
-                fetchCursor = preOfflineFetchCursor
-                let firstVideoAssets = snapshot.prefix(3).filter { $0.isVideo }.map { $0.asset }
-                if !firstVideoAssets.isEmpty { VideoPlayerPool.shared.warmUp(for: firstVideoAssets) }
-                photoStack = snapshot
-                stageSnoozedItemsIfReady()
-                isLoading = false
-                precacheNextImages()
-                startBackgroundPrefetch()
-                if categoryCounts.isEmpty { refreshCategoryCounts() }
-            } else {
-                // Slow path: snapshot exhausted (user swiped everything before going offline).
-                // Fresh fetch from index 0 — shows newest items, same as first app launch.
-                fetchCursor = 0
-                if photoService.fetchResult == nil { photoService.fetchAllPhotos() }
-                let (rawItems, nextIdx) = photoService.fetchPageOfAssets(
-                    for: .all,
-                    startIndex: 0,
-                    pageSize: initialPageSize,
-                    excluding: processedAssetIDs
-                )
-                fetchCursor = nextIdx ?? photoService.totalAssetCount
-                let firstVideoAssets = rawItems.prefix(3).filter { $0.isVideo }.map { $0.asset }
-                if !firstVideoAssets.isEmpty { VideoPlayerPool.shared.warmUp(for: firstVideoAssets) }
-                photoStack = rawItems
-                stageSnoozedItemsIfReady()
-                isLoading = false
-                if !photoStack.isEmpty { precacheNextImages() }
-                if categoryCounts.isEmpty { refreshCategoryCounts() }
-                startBackgroundPrefetch()
-            }
-        }
-        // Landing animation is triggered in SwipeStackView by onChange(of: isLoading).
+        // Fresh start — identical to first app launch. Avoids stale snapshot state
+        // (e.g. shuffle-ordered cards captured as the pre-offline snapshot).
+        loadPhotos(filter: .all)
     }
 
     func dismissOfflinePrompt() {
@@ -1397,6 +1359,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     private func saveBinToDisk() {
         persistence.reviewBinIDs = reviewBin.map { $0.id }
+        persistence.reviewBinFileSizes = Dictionary(uniqueKeysWithValues: reviewBin.map { ($0.id, $0.storedFileSize) })
         persistence.reviewBinSpaceSaved = totalSpaceSaved
     }
 

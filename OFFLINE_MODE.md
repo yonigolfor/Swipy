@@ -260,6 +260,8 @@ Reset to `false` in `deactivateOfflineMode()`.
 - `deactivateOfflineMode()` sets `isOfflineMode = false`, which causes `scanLocalUniverse` to exit its loop at `guard isOfflineMode else { break }` — no explicit Task cancellation needed.
 - If `awaitingOfflineLanding` is `false` (normal deactivation), the full fly-out animation runs as usual.
 
+**On deactivation, the stack always does a fresh load** (`loadPhotos(filter: .all)`) — identical to first app launch. No snapshot is restored. This avoids a class of bugs where the pre-offline snapshot was captured while shuffle mode was active, landing the user back in a shuffle-ordered deck with shuffle visually off. A clean load is the most predictable outcome regardless of what state the user was in before going offline.
+
 ---
 
 ## Pagination in Offline Mode

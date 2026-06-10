@@ -23,14 +23,18 @@ struct PhotoItem: Identifiable {
     /// the stack. Set by stageSnoozedItemsIfReady() at staging time; 0 by default.
     var snoozeCount: Int = 0
 
+    /// Size in bytes captured at the moment of deletion — single source of truth for
+    /// space accounting. Live asset.fileSize can drift (iCloud sync) so we freeze it.
+    var storedFileSize: Int64 = 0
+
     init(asset: PHAsset) {
         self.id = asset.localIdentifier
         self.asset = asset
-        // רוטציה אקראית בין -4 ל-4 מעלות
         self.rotation = Double.random(in: -4...4)
     }
-    
-    /// גודל הקובץ
+
+    /// Live file size from PHAssetResource — used for badge display only.
+    /// For space accounting always use storedFileSize.
     var fileSize: Int64 {
         asset.fileSize
     }

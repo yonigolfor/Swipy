@@ -226,6 +226,7 @@ Views show a shimmer/loading indicator while Phase 2 is in progress. Never block
 - `hasCompletedOnboarding` — Bool, gates onboarding
 - `keptPhotoIDs` — Set of kept asset local identifiers
 - `reviewBinIDs` — array of bin asset local identifiers
+- `reviewBinFileSizes` — `[localIdentifier: Int64]` map of frozen file sizes captured at delete time; source of truth for space accounting (avoids iCloud-sync drift)
 - `reviewBinSpaceSaved` / `totalSpaceSavedLifetime` — space saved in bytes
 - `snoozedPhotos` — `[localIdentifier: snoozeCount]`, drives exponential backoff on re-injection
 

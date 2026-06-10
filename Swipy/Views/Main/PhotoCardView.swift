@@ -218,13 +218,15 @@ VStack {
                     .padding(.vertical, 6)
                     .background(Capsule().fill(Color.black.opacity(0.6)))
             }
-            Text(item.fileSizeString)
-                .font(.caption)
-                .fontWeight(.semibold)
-                .foregroundColor(.white)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Capsule().fill(Color.black.opacity(0.6)))
+            if item.fileSize > 0 {
+                Text(item.fileSizeString)
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(Capsule().fill(Color.black.opacity(0.6)))
+            }
         }
         .padding()
     }

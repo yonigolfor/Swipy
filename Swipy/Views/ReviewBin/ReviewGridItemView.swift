@@ -80,6 +80,7 @@ struct ReviewGridItemView: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 8))
+            .contentShape(Rectangle())
             .scaleEffect(cellScale)
             .opacity(restorePhase == .poofing ? 0 : 1)
             // Particles sit above the clipped, scaled cell without affecting layout.

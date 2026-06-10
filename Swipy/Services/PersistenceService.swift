@@ -116,6 +116,19 @@ class PersistenceService {
         }
     }
 
+    @AppStorage("reviewBinFileSizes") private var reviewBinFileSizesData: Data = Data()
+
+    /// Frozen file sizes keyed by asset localIdentifier — written at delete time,
+    /// read back when reconstructing bin items from disk.
+    var reviewBinFileSizes: [String: Int64] {
+        get { (try? JSONDecoder().decode([String: Int64].self, from: reviewBinFileSizesData)) ?? [:] }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                reviewBinFileSizesData = data
+            }
+        }
+    }
+
     // MARK: - Lifetime Space Saved
 
     var totalSpaceSavedLifetime: Int64 {
