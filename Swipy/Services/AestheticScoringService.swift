@@ -22,8 +22,6 @@ struct UserAestheticPersona: Codable {
     var avgSharpnessVariance: Double = 100.0
     /// Average color temperature of favorites: 0 = cool, 1 = warm.
     var avgColorTemperature: Double = 0.5
-    /// Fraction of favorites that contain people/portrait scenes.
-    var facePresenceRate: Double = 0.0
     /// Fraction of favorites that are Live Photos.
     var livePhotoRate: Double = 0.0
     /// Fraction of favorites that are HDR.
@@ -45,7 +43,6 @@ struct UserAestheticPersona: Codable {
           Samples:          \(sampleCount) favorites
           Sharpness (avg):  \(String(format: "%.1f", avgSharpnessVariance)) (Laplacian variance)
           Color temperature:\(String(format: " %.2f", avgColorTemperature)) (\(tempLabel))
-          Faces/portraits:  \(String(format: "%.0f%%", facePresenceRate * 100))
           Live Photos:      \(String(format: "%.0f%%", livePhotoRate * 100))
           HDR:              \(String(format: "%.0f%%", hdrRate * 100))
           Feature print:    \(centroidInfo)
@@ -151,7 +148,6 @@ final class AestheticScoringService {
         var colorTempValues: [Double] = []
         var fpAccum: [Float] = []       // element-wise sum of feature print vectors
         var fpCount = 0
-        var faceCount = 0
         var liveCount = 0
         var hdrCount = 0
         var loadedCount = 0
@@ -182,12 +178,6 @@ final class AestheticScoringService {
                     for j in 0..<fp.count { fpAccum[j] += fp[j] }
                 }
                 fpCount += 1
-
-                // Detect face/portrait via a lightweight category check on the same thumb
-                let cats = classifySync(img)
-                if cats.keys.contains(where: {
-                    $0.contains("people") || $0.contains("portrait") || $0.contains("selfie")
-                }) { faceCount += 1 }
             }
         }
 
@@ -202,7 +192,6 @@ final class AestheticScoringService {
         p.avgColorTemperature  = colorTempValues.isEmpty
             ? 0.5
             : colorTempValues.reduce(0, +) / Double(colorTempValues.count)
-        p.facePresenceRate = Double(faceCount) / Double(max(fpCount, 1))
         p.livePhotoRate    = Double(liveCount) / Double(sampleN)
         p.hdrRate          = Double(hdrCount)  / Double(sampleN)
         p.sampleCount      = sampleN
@@ -322,18 +311,6 @@ final class AestheticScoringService {
         for i in 0..<a.count { let d = a[i] - b[i]; sumSq += d * d }
         let distance = Double(sumSq.squareRoot())
         return max(0.0, 1.0 - distance / 8.0)
-    }
-
-    private func classifySync(_ image: UIImage) -> [String: Double] {
-        guard let cg = image.cgImage else { return [:] }
-        let req = VNClassifyImageRequest()
-        try? VNImageRequestHandler(cgImage: cg, options: [:]).perform([req])
-        return Dictionary(uniqueKeysWithValues:
-            (req.results ?? [])
-                .filter { $0.confidence > 0.05 }
-                .prefix(15)
-                .map { ($0.identifier, Double($0.confidence)) }
-        )
     }
 
     private func resized(_ image: UIImage, to size: CGSize) -> UIImage {
