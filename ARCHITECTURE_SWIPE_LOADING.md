@@ -24,8 +24,9 @@ SwipeStackView — ForEach(photoStack.prefix(3))
       │
       ▼
 PhotoCardView(item:, isTopCard:, cachedImage:)
-  ├── תמונה:  cachedImage != nil → מוצג מיידית (zero async round-trip)
+  ├── תמונה:  cachedImage != nil → מוצג מיידית כthumbnailImage; loadImage() עדיין רץ
   │           cachedImage == nil → Thumbnail Gate (ראה סעיף 7)
+  │           (cachedImage עלול להיות fastFormat נמוך-איכות — תמיד טוענים fullres מאחורה)
   └── וידאו:  loadVideoThumbnail() → placeholder מיידי
               VideoPlayerPool.player(for:) → AVPlayer (pre-warmed)
               pool miss → PHImageManager.requestPlayerItem → slow path
@@ -136,45 +137,67 @@ onAppear:
 
 | שדה | תיאור |
 |-----|--------|
-| `topCategories` | ממוצע confidence של VNClassifyImageRequest לכל קטגוריה |
+| `featurePrintCentroid` | ממוצע element-wise של וקטורי `VNGenerateImageFeaturePrintRequest` (512 floats) |
 | `avgSharpnessVariance` | ממוצע Laplacian (CIEdges) variance — baseline חדות |
 | `avgColorTemperature` | 0=קר, 1=חמים (CIAreaAverage) |
 | `facePresenceRate` | אחוז תמונות עם people/portrait/selfie |
 | `livePhotoRate` / `hdrRate` | העדפת סוג מדיה |
 
-הפרסונה נשמרת ב-`UserDefaults` (key: `"userAestheticPersona_v1"`) ולא נבנית מחדש בהפעלות הבאות.
+הפרסונה נשמרת ב-`UserDefaults` (key: `"userAestheticPersona_v2"`) ולא נבנית מחדש בהפעלות הבאות.
 
 ### ציון 1–10
 ```
-sharpness match   30%  (CIEdges variance / persona baseline)
-color temp match  20%  (1 − |delta| × 2.5)
-media type match  10%  (Live/HDR alignment)
-scene match       40%  (VNClassifyImageRequest overlap עם topCategories)
+feature print sim  50%  (L2 distance מהcentroid, normalized: max(0, 1 − dist/8))
+sharpness match    25%  (CIEdges variance / persona baseline)
+color temp match   15%  (1 − |delta| × 2.5)
+media type match   10%  (Live/HDR alignment)
 ```
 נוסחה: `max(1, min(10, Int(raw × 9) + 1))`
+
+`featurePrintCentroid` הוא הממוצע הפרספטואלי של ה-Favorites — תמונות שנראות קרוב לדפוסים שהמשתמש אהב מקבלות ציון גבוה, גם כשהן שייכות לאותה קטגוריה סמנטית.
 
 ### זרימת הציון
 ```
 resetAndLoad()
   → Task.detached: analyzeFavorites() [DispatchQueue.global — חוסם GCD, לא cooperative pool]
-        → buildPersonaBlocking(): PHImageManager + VNClassify על 299×299 thumbs
+        → buildPersonaBlocking(): PHImageManager + VNFeaturePrint + CIEdges על 299×299 thumbs
         → שמירה ל-UserDefaults
         → MainActor: scoreCachedCardsIfNeeded()  ← catches cards already in NSCache
 
 precacheNextImages() / prepareUpcomingCards()
   → loadImage completion → Task @MainActor → scheduleScore(item:image:)
-        → DispatchQueue.global: score(for:image:)  ← VNClassify חוסם; חייב GCD
-              → computeScore(): resize 299×299 → CIEdges + CIAreaAverage + VNClassify
+        → DispatchQueue.global: score(for:image:)  ← VNFeaturePrint חוסם; חייב GCD
+              → computeScore(): resize 299×299 → CIEdges + CIAreaAverage + VNFeaturePrint
               → DispatchQueue.main: loadedScoreIDs.insert(id)
                     → SwipeStackView re-render → PhotoCardView מקבל aestheticScore != nil
                           → badge מופיע עם .animation(.easeIn, value: aestheticScore != nil)
 ```
 
+### Blur Gate — שתי שכבות הגנה
+
+ציון תמונה מטושטשת יורד ללא תלות בדמיון לfavorites:
+
+```
+Tier 1 (hard): variance < 150  →  sharpnessFactor = variance / 150
+  תמונה מטושטשת בבירור (var≈30): עונש ×0.36, ציון max ≈ 4
+
+Tier 2 (soft): variance ≥ 150  →  sharpnessFactor = variance / max(avgSharpnessVariance, 150)
+  נמוך מהbenchmark של הפרסונה: עונש יחסי
+  Self-calibrating: אם המשתמש אוהב תמונות מטושטשות → avgSharpnessVariance נמוך → עונש קטן
+
+Fallback: variance = ∞ (CIEdges נכשל)  →  raw ×= 0.6
+
+נוסחת עונש: raw *= (0.2 + 0.8 × sharpnessFactor)
+  sharpnessFactor=0: raw ×= 0.2 → ציון max 2
+  sharpnessFactor=1: raw ×= 1.0 → אין עונש
+```
+
 ### כללים קריטיים
-- **`VNClassifyImageRequest.perform` חוסם את ה-cooperative thread pool** — חייב לרוץ על `DispatchQueue.global`, לא `Task.detached`.
+- **`VNGenerateImageFeaturePrintRequest.perform` חוסם את ה-cooperative thread pool** — חייב לרוץ על `DispatchQueue.global`, לא `Task.detached`.
 - **Resize ל-299×299 לפני כל חישוב** — ללא resize, Vision על 1080p לוקח 10+ שניות.
 - **`withAnimation` אסור על `loadedScoreIDs.insert`** — הtransaction מדמם לstack ומגרום לקלפים להגיע מהכיוון הלא נכון. השתמש ב-`.animation(_:value:)` על ה-VStack של הbadge בלבד.
 - **`CILaplacian` הוא macOS-only** — השתמש ב-`CIEdges` על iOS.
+- **`obs.data` הוא property מסוג `Data`**, לא method — גישה ישירה לbytes של ה-feature print ללא `copyingDataInto`.
 
 ---
 
@@ -285,34 +308,41 @@ undoLastAction()
 
 ---
 
-## 7. Thumbnail Gate — Cache Miss Path
+## 7. Thumbnail Gate — Image Loading Path
 
-כשקלף לא נמצא ב-NSCache (`cachedImage == nil`), `PhotoCardView.loadImage()` מפעיל **שתי קריאות מקבילות ונפרדות**:
+`PhotoCardView.onAppear` תמיד טוען fullres, גם אם `cachedImage` סופק. זה מגן מפני תמונות נמוכות-איכות ב-NSCache (fastFormat fallback מiCloud איטי).
 
 ```
-Pass 1: loadThumbnail()
-  deliveryMode = .fastFormat
-  isNetworkAccessAllowed = false
-  targetSize = 300×400 pt
-  → callback < 50ms (תמיד מקומי, לעולם לא iCloud)
-  → thumbnailImage = thumb   ← מוצג מיידית כ-base layer
+onAppear (תמונה):
+  אם cachedImage != nil:
+    thumbnailImage = cachedImage   ← placeholder מיידי (אולי נמוך-איכות)
+    image = nil
+  loadImage() ← תמיד
 
-Pass 2: loadImage()
-  deliveryMode = .highQualityFormat
-  isNetworkAccessAllowed = true
-  targetSize = 600×800 pt
-  → callback כשהתמונה המלאה מוכנה (ממתין בסבלנות ל-iCloud)
-  → אם thumbnailImage != nil → withAnimation(.easeIn(0.18)) { image = fullRes }
-  → אם thumbnailImage == nil → image = fullRes (ללא אנימציה — asset מקומי מהיר)
-  → asyncAfter(0.35s): thumbnailImage = nil  ← פינוי זיכרון
+loadImage() — שתי קריאות מקבילות:
+
+  Pass 1: loadThumbnail()
+    deliveryMode = .fastFormat, isNetworkAccessAllowed = false
+    targetSize = 300×400 pt
+    → דולג אם thumbnailImage כבר קיים (ה-cachedImage placeholder עדיף)
+    → אחרת: thumbnailImage = thumb (< 50ms, תמיד מקומי)
+
+  Pass 2: loadImage()
+    deliveryMode = .highQualityFormat, isNetworkAccessAllowed = true
+    targetSize = 600×800 pt
+    → ממתין לגרסה המלאה (iCloud כולל)
+    → אם thumbnailImage != nil → withAnimation(.easeIn(0.18)) { image = fullRes }
+    → אם thumbnailImage == nil → image = fullRes (ללא אנימציה — asset מהיר)
+    → asyncAfter(0.35s): thumbnailImage = nil
 ```
 
 **מה זה מבטיח**:
-- **אף פעם לא קלף שחור** — thumbnail מקומי תמיד מוכן לפני render
-- **ללא פשרות באיכות** — Pass 2 עם `.highQualityFormat` מחכה לגרסה המלאה
-- **iCloud slow path** — thumbnail נשאר כל עוד ההורדה לא הסתיימה; אם נכשלת, thumbnail נשאר לצמיתות
+- **אף פעם לא קלף שחור** — placeholder (מcache או thumbnail) מוצג מיידית
+- **ללא פשרות באיכות** — Pass 2 תמיד טוען highQuality, גם כשcache סיפק תמונה
+- **iCloud slow path** — placeholder נשאר עד שהורדה מסתיימת; spinner אחרי 1000ms
+- **fastFormat fallback protection** — תמונה שהגיעה לcache כfastFormat (iCloud איטי) מוחלפת בשקט בגרסה המלאה
 
-**אינדיקטור טעינה לתמונה**: אם Pass 2 לא הסתיים אחרי **1000ms**, מופיע spinner עדין מעל ה-thumbnail. נעלם ברגע שה-full-res מגיע. מיושם עם task handle שמבוטל ב-`onDisappear` — אין race condition אם הכרטיסייה נסגרת לפני סיום ה-debounce.
+**אינדיקטור טעינה לתמונה**: אם Pass 2 לא הסתיים אחרי **1000ms**, מופיע spinner עדין מעל ה-placeholder. נעלם ברגע שה-full-res מגיע. task handle מבוטל ב-`onDisappear` — אין race condition.
 
 **וידאו**: `loadVideoThumbnail()` נקרא ב-`onAppear` במקביל ל-`loadVideoPlayer()`.  
 `isVideoPlayerReady` מופעל 50ms אחרי שה-AVPlayer מוקצה (מאפשר ל-AVLayer לרנדר frame ראשון).  

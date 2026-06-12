@@ -4,6 +4,8 @@
 //
 //  Builds a UserAestheticPersona from the user's Favorites and scores
 //  every card 1–10 based on its match to that persona.
+//  Scoring uses VNGenerateImageFeaturePrintRequest (perceptual centroid)
+//  instead of VNClassifyImageRequest (coarse semantic categories).
 //
 
 import UIKit
@@ -14,8 +16,8 @@ import CoreImage
 // MARK: - Persona Model
 
 struct UserAestheticPersona: Codable {
-    /// Average VNClassifyImageRequest confidence per category, across all favorites.
-    var topCategories: [String: Double] = [:]
+    /// Element-wise mean of VNFeaturePrint float vectors across all favorites.
+    var featurePrintCentroid: [Float] = []
     /// Average Laplacian variance of favorites (sharpness baseline).
     var avgSharpnessVariance: Double = 100.0
     /// Average color temperature of favorites: 0 = cool, 1 = warm.
@@ -30,12 +32,14 @@ struct UserAestheticPersona: Codable {
     var isReady: Bool = false
 
     var debugDescription: String {
-        let tempLabel  = avgColorTemperature > 0.6 ? "warm" : avgColorTemperature < 0.4 ? "cool" : "neutral"
-        let topCatList = topCategories
-            .sorted { $0.value > $1.value }
-            .prefix(10)
-            .map { "    \($0.key): \(String(format: "%.2f", $0.value))" }
-            .joined(separator: "\n")
+        let tempLabel = avgColorTemperature > 0.6 ? "warm" : avgColorTemperature < 0.4 ? "cool" : "neutral"
+        let centroidInfo: String
+        if featurePrintCentroid.isEmpty {
+            centroidInfo = "not available"
+        } else {
+            let norm = sqrt(featurePrintCentroid.map { Double($0) * Double($0) }.reduce(0, +))
+            centroidInfo = "\(featurePrintCentroid.count) dims, L2 norm: \(String(format: "%.2f", norm))"
+        }
         return """
         [AestheticScoring] ── User Aesthetic Persona ──────────────────
           Samples:          \(sampleCount) favorites
@@ -44,8 +48,7 @@ struct UserAestheticPersona: Codable {
           Faces/portraits:  \(String(format: "%.0f%%", facePresenceRate * 100))
           Live Photos:      \(String(format: "%.0f%%", livePhotoRate * 100))
           HDR:              \(String(format: "%.0f%%", hdrRate * 100))
-          Top scene categories (avg confidence):
-        \(topCatList)
+          Feature print:    \(centroidInfo)
         [AestheticScoring] ─────────────────────────────────────────────
         """
     }
@@ -61,7 +64,7 @@ final class AestheticScoringService {
     /// Stores computed Int scores (1–10). Thread-safe via NSCache internals.
     let scoreCache = NSCache<NSString, NSNumber>()
     private let ciContext = CIContext(options: [.useSoftwareRenderer: false])
-    private let personaKey = "userAestheticPersona_v1"
+    private let personaKey = "userAestheticPersona_v2"
 
     var isPersonaReady: Bool { persona?.isReady == true }
 
@@ -142,11 +145,12 @@ final class AestheticScoringService {
         reqOpts.isSynchronous = true
         reqOpts.deliveryMode = .fastFormat
         reqOpts.resizeMode = .fast
-        reqOpts.isNetworkAccessAllowed = true  // allow iCloud thumbnails
+        reqOpts.isNetworkAccessAllowed = true
 
         var sharpnessValues: [Double] = []
         var colorTempValues: [Double] = []
-        var categoryAccum: [String: (sum: Double, count: Int)] = [:]
+        var fpAccum: [Float] = []       // element-wise sum of feature print vectors
+        var fpCount = 0
         var faceCount = 0
         var liveCount = 0
         var hdrCount = 0
@@ -170,15 +174,21 @@ final class AestheticScoringService {
 
             colorTempValues.append(colorTemperature(of: img))
 
-            let imgCats = classifySync(img)
-            for (id, conf) in imgCats {
-                let cur = categoryAccum[id] ?? (0.0, 0)
-                categoryAccum[id] = (cur.sum + conf, cur.count + 1)
-            }
+            // Feature print accumulation
+            if let fp = extractFeaturePrintVector(img) {
+                if fpAccum.isEmpty {
+                    fpAccum = fp
+                } else if fp.count == fpAccum.count {
+                    for j in 0..<fp.count { fpAccum[j] += fp[j] }
+                }
+                fpCount += 1
 
-            if imgCats.keys.contains(where: {
-                $0.contains("people") || $0.contains("portrait") || $0.contains("selfie")
-            }) { faceCount += 1 }
+                // Detect face/portrait via a lightweight category check on the same thumb
+                let cats = classifySync(img)
+                if cats.keys.contains(where: {
+                    $0.contains("people") || $0.contains("portrait") || $0.contains("selfie")
+                }) { faceCount += 1 }
+            }
         }
 
         print("[AestheticScoring] Loaded \(loadedCount)/\(sampleN) thumbnails successfully.")
@@ -192,18 +202,19 @@ final class AestheticScoringService {
         p.avgColorTemperature  = colorTempValues.isEmpty
             ? 0.5
             : colorTempValues.reduce(0, +) / Double(colorTempValues.count)
-        p.facePresenceRate = Double(faceCount) / Double(sampleN)
+        p.facePresenceRate = Double(faceCount) / Double(max(fpCount, 1))
         p.livePhotoRate    = Double(liveCount) / Double(sampleN)
         p.hdrRate          = Double(hdrCount)  / Double(sampleN)
         p.sampleCount      = sampleN
 
-        let avgCats: [(String, Double)] = categoryAccum
-            .mapValues { $0.sum / Double($0.count) }
-            .filter { $0.value > 0.05 }
-            .sorted { $0.value > $1.value }
-            .prefix(20)
-            .map { ($0.key, $0.value) }
-        p.topCategories = Dictionary(uniqueKeysWithValues: avgCats)
+        if fpCount > 0 && !fpAccum.isEmpty {
+            let n = Float(fpCount)
+            p.featurePrintCentroid = fpAccum.map { $0 / n }
+            print("[AestheticScoring] Feature print centroid built from \(fpCount) images (\(fpAccum.count) dims).")
+        } else {
+            print("[AestheticScoring] ⚠︎ Feature print extraction failed for all images — centroid unavailable.")
+        }
+
         p.isReady = true
         return p
     }
@@ -211,7 +222,7 @@ final class AestheticScoringService {
     // MARK: - Scoring
 
     /// Returns a 1–10 score. Returns 0 if persona isn't ready yet (badge hidden).
-    /// Synchronous — call from a background thread (Task.detached).
+    /// Synchronous — call from a background thread via DispatchQueue.global.
     func score(for asset: PHAsset, image: UIImage) -> Int {
         let key = asset.localIdentifier as NSString
         if let cached = scoreCache.object(forKey: key) {
@@ -232,23 +243,22 @@ final class AestheticScoringService {
     // MARK: - Private Computation
 
     private func computeScore(asset: PHAsset, image: UIImage, persona p: UserAestheticPersona) -> Int {
-        // Downscale to 299×299 for all CPU-heavy operations — same size used in persona building.
-        // Without this, Vision + CIEdges on a 1080p card image takes 10+ seconds.
+        // Downscale to 299×299 for all CPU-heavy operations.
         let thumb = resized(image, to: CGSize(width: 299, height: 299))
 
         var weightedSum = 0.0
         var totalWeight = 0.0
 
-        // Sharpness: 30%
+        // Sharpness: 25%
         let variance = BlurDetector.shared.sharpnessVariance(thumb)
         if variance.isFinite {
             let s = min(1.0, variance / max(p.avgSharpnessVariance, 1.0))
-            weightedSum += s * 0.30; totalWeight += 0.30
+            weightedSum += s * 0.25; totalWeight += 0.25
         }
 
-        // Color temperature match: 20%
+        // Color temperature match: 15%
         let tempS = max(0.0, 1.0 - abs(colorTemperature(of: thumb) - p.avgColorTemperature) * 2.5)
-        weightedSum += tempS * 0.20; totalWeight += 0.20
+        weightedSum += tempS * 0.15; totalWeight += 0.15
 
         // Media-type alignment: 10%
         var typeS = 0.5
@@ -256,20 +266,62 @@ final class AestheticScoringService {
         if asset.mediaSubtypes.contains(.photoHDR)  && p.hdrRate > 0.25       { typeS += 0.2 }
         weightedSum += min(1.0, typeS) * 0.10; totalWeight += 0.10
 
-        // Scene match: 40%
-        let cats = classifySync(thumb)
-        if !cats.isEmpty && !p.topCategories.isEmpty {
-            var overlap = 0.0
-            for (id, conf) in cats {
-                if let pConf = p.topCategories[id] { overlap += min(conf, pConf) }
-            }
-            let norm = max(p.topCategories.values.reduce(0, +) * 0.2, 0.001)
-            weightedSum += min(1.0, overlap / norm) * 0.40; totalWeight += 0.40
+        // Feature print similarity: 50%
+        if !p.featurePrintCentroid.isEmpty,
+           let cardFP = extractFeaturePrintVector(thumb),
+           cardFP.count == p.featurePrintCentroid.count {
+            let sim = featurePrintSimilarity(cardFP, p.featurePrintCentroid)
+            weightedSum += sim * 0.50; totalWeight += 0.50
         }
 
         guard totalWeight > 0 else { return 5 }
-        let raw = weightedSum / totalWeight
-        return max(1, min(10, Int(raw * 9) + 1))
+        var raw = weightedSum / totalWeight
+
+        // Blur gate — two tiers so blurry images can't ride a high feature-print score.
+        //
+        // Tier 1 (hard): variance < 150 → sharpnessFactor ramps 0→1 over that range.
+        //   A clearly blurry image (var≈30) gets ~0.36× reduction regardless of persona.
+        // Tier 2 (soft): variance ≥ 150 → relative to persona baseline.
+        //   If persona avg is also low (user likes blurry), factor stays near 1. Correct.
+        // Fallback: BlurDetector returned ∞ (CIEdges pipeline failed) → 0.6× penalty.
+        let hardBlurThreshold = 150.0
+        let sharpnessFactor: Double
+        if variance.isFinite && variance >= 0 {
+            if variance < hardBlurThreshold {
+                sharpnessFactor = variance / hardBlurThreshold
+            } else {
+                sharpnessFactor = min(1.0, variance / max(p.avgSharpnessVariance, hardBlurThreshold))
+            }
+            raw *= (0.2 + 0.8 * sharpnessFactor)
+        } else {
+            sharpnessFactor = -1  // sentinel: BlurDetector failed
+            raw *= 0.6
+        }
+
+        let finalScore = max(1, min(10, Int(raw * 9) + 1))
+        print("[AestheticScoring] score detail: var=\(variance.isFinite ? String(format:"%.0f",variance) : "∞") avg=\(String(format:"%.0f",p.avgSharpnessVariance)) sf=\(sharpnessFactor < 0 ? "n/a" : String(format:"%.2f",sharpnessFactor)) raw→\(String(format:"%.3f",raw)) score=\(finalScore)")
+        return finalScore
+    }
+
+    /// Extracts a raw float vector from a VNGenerateImageFeaturePrintRequest.
+    /// Must be called on a non-cooperative background thread (blocking Vision call).
+    private func extractFeaturePrintVector(_ image: UIImage) -> [Float]? {
+        guard let cg = image.cgImage else { return nil }
+        let req = VNGenerateImageFeaturePrintRequest()
+        try? VNImageRequestHandler(cgImage: cg, options: [:]).perform([req])
+        guard let obs = req.results?.first as? VNFeaturePrintObservation,
+              obs.elementType == .float,
+              obs.elementCount > 0 else { return nil }
+        return obs.data.withUnsafeBytes { buf in Array(buf.bindMemory(to: Float.self)) }
+    }
+
+    /// L2 distance between two feature print vectors, normalized to [0, 1].
+    /// Distance range for VNFeaturePrint: ~0 (identical) to ~10+ (very different).
+    private func featurePrintSimilarity(_ a: [Float], _ b: [Float]) -> Double {
+        var sumSq: Float = 0
+        for i in 0..<a.count { let d = a[i] - b[i]; sumSq += d * d }
+        let distance = Double(sumSq.squareRoot())
+        return max(0.0, 1.0 - distance / 8.0)
     }
 
     private func classifySync(_ image: UIImage) -> [String: Double] {

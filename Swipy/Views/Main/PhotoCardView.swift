@@ -317,10 +317,17 @@ VStack {
                     guard !Task.isCancelled, !isVideoPlayerReady else { return }
                     withAnimation(.easeIn(duration: 0.2)) { showLoadingSpinner = true }
                 }
-            } else if image == nil {
+            } else {
+                // Always reload full-res — even when a cachedImage was provided.
+                // The cached image may be a low-quality fast-format fallback from
+                // a slow iCloud prefetch. Demote it to thumbnailImage so it shows
+                // instantly while the HQ version loads in behind it.
+                if image != nil && thumbnailImage == nil {
+                    thumbnailImage = image
+                    image = nil
+                    isLoading = true
+                }
                 Task { @MainActor in
-                    // Disk cache check runs on OfflineCacheService.ioQueue (Bug #5 fix:
-                    // keeps file I/O off the main thread). Resumes here with the result.
                     if let diskCached = await OfflineCacheService.shared.retrieveAsync(for: item.id) {
                         image = diskCached
                         isLoading = false
@@ -438,11 +445,12 @@ VStack {
 
     private func loadImage() {
         // Pass 1 — instant local thumbnail, never touches iCloud.
+        // Skip if onAppear already set a thumbnailImage (demoted cached image).
         PhotoLibraryService.shared.loadThumbnail(
             for: item.asset,
             targetSize: CGSize(width: 300, height: 400)
         ) { thumb in
-            guard let thumb, self.image == nil else { return }
+            guard let thumb, self.image == nil, self.thumbnailImage == nil else { return }
             self.thumbnailImage = thumb
             self.isLoading = false
         }
