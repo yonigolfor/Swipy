@@ -37,7 +37,10 @@ PHPhotoLibrary
          └─ PhotoStackViewModel    # @MainActor, single source of truth
               ├─ photoStack        # @Published [PhotoItem]
               ├─ reviewBin         # @Published [PhotoItem]
-              ├─ NSCache<NSString, UIImage>  # 6 images / 6MB cap
+              ├─ loadedImageIDs    # @Published Set<String> — triggers SwiftUI re-render when image ready
+              ├─ loadedScoreIDs    # @Published Set<String> — triggers badge render when score ready
+              ├─ NSCache<NSString, UIImage>  # 8 images / 8MB cap
+              ├─ AestheticScoringService     # singleton — persona + score cache
               └─ VideoPlayerPool   # singleton, max 3 AVPlayers
 ```
 
@@ -47,7 +50,7 @@ PHPhotoLibrary
 - `PhotoStackViewModel` is `@MainActor` — all `@Published` mutations happen on main thread.
 - Heavy work (blur detection, burst analysis, category counting) runs in `Task.detached(priority: .userInitiated)` or `withTaskGroup`, then publishes to main.
 - Use `await MainActor.run { }` when pushing results from background tasks to the ViewModel.
-- Never use `DispatchQueue.main.async` for new code — use `await MainActor.run` instead.
+- **Exception — use `DispatchQueue.global` (not `Task.detached`) for:** `PHImageManager.requestImage(isSynchronous:true)` and `VNClassifyImageRequest.perform`. Both are synchronous blocking calls that deadlock the Swift cooperative thread pool. Bridge with `withCheckedContinuation` or `DispatchQueue.global(qos:).async` + `DispatchQueue.main.async` for the result.
 
 ---
 
@@ -57,7 +60,7 @@ PHPhotoLibrary
 Swipy/
 ├── SwipyApp.swift              # Entry point + AppDelegate
 ├── ContentView.swift           # Root: onboarding gate → 3-tab layout
-├── BlurDetector.swift          # CILaplacian variance on 200×200 thumb
+├── BlurDetector.swift          # CIEdges variance on 200×200 thumb (CILaplacian is macOS-only)
 ├── BurstAnalyzer.swift         # Groups by burstIdentifier OR (gap ≤30s AND VNFeaturePrint similarity < 0.85); chain comparison; min 5 items
 │
 ├── Models/
@@ -94,6 +97,7 @@ Swipy/
 │
 ├── Services/
 │   ├── PhotoLibraryService.swift   # PHPhotoLibrary access + pagination
+│   ├── AestheticScoringService.swift # Builds UserAestheticPersona from Favorites; scores cards 1–10
 │   ├── PersistenceService.swift    # UserDefaults (kept IDs, bin IDs, space saved)
 │   ├── HapticService.swift         # UIImpactFeedbackGenerator wrapper
 │   ├── AudioSessionManager.swift   # AVAudioSession — muted video mixes with background audio
@@ -211,12 +215,14 @@ Views show a shimmer/loading indicator while Phase 2 is in progress. Never block
 ## Performance Rules
 
 1. **Never enumerate full PHFetchResult** — use index-based access only.
-2. **Blur detection input**: Always downsample to 200×200 before running CILaplacian.
-3. **Concurrent counting**: Use `withTaskGroup` for parallel category counts.
-4. **Video pool drain**: Call `VideoPlayerPool.shared.drainAll()` before any PHPhotoLibrary deletion. On tab switch use `pauseAll()` — never `release()` from `onDisappear`, or the pool will be cold on return.
-5. **Cache eviction**: Keep only top-5 stack images + the undo item in NSCache; evict everything else.
-6. **Background tasks**: All heavy computation must be in `Task.detached` or `withTaskGroup`; results published via `await MainActor.run`.
-7. **Streaming results**: Blurry/burst detection must stream one-by-one into the stack — do not wait for full batch.
+2. **Blur detection input**: Always downsample to 200×200 before running `CIEdges` (`CILaplacian` is macOS-only and returns nil on iOS).
+3. **Scoring input**: Downscale to 299×299 before `VNClassifyImageRequest` — full-resolution images (1080p+) make Vision take 10+ seconds per frame.
+4. **Concurrent counting**: Use `withTaskGroup` for parallel category counts.
+5. **Video pool drain**: Call `VideoPlayerPool.shared.drainAll()` before any PHPhotoLibrary deletion. On tab switch use `pauseAll()` — never `release()` from `onDisappear`, or the pool will be cold on return.
+6. **Cache eviction**: Keep only top-5 stack images + the undo item in NSCache; evict everything else.
+7. **Background tasks**: All heavy computation must be in `Task.detached` or `withTaskGroup`; results published via `await MainActor.run`.
+8. **Streaming results**: Blurry/burst detection must stream one-by-one into the stack — do not wait for full batch.
+9. **Animation bleed**: Never wrap `@Published` set insertions in `withAnimation` at the ViewModel level — the ambient transaction bleeds into the card stack and causes cards to animate from wrong positions. Instead, use `.animation(_:value:)` on the specific view subtree that should animate.
 
 ---
 

@@ -43,11 +43,15 @@ struct PhotoCardView: View {
     @State private var videoSpinnerTask: Task<Void, Never>?
     @State private var imageSpinnerTask: Task<Void, Never>?
 
+    /// 1–10 aesthetic match score. Nil while persona is building or for videos.
+    let aestheticScore: Int?
+
     /// Pass a pre-loaded image from the ViewModel cache to display it instantly,
     /// skipping the async load path entirely and preventing any ProgressView flash.
-    init(item: PhotoItem, isTopCard: Bool, cachedImage: UIImage? = nil) {
+    init(item: PhotoItem, isTopCard: Bool, cachedImage: UIImage? = nil, aestheticScore: Int? = nil) {
         self.item = item
         self.isTopCard = isTopCard
+        self.aestheticScore = aestheticScore
         _image = State(initialValue: cachedImage)
         // For images: skip loading if we already have the pixels.
         // For videos: pool check happens in loadVideoPlayer(), keep loading=true.
@@ -189,45 +193,53 @@ struct PhotoCardView: View {
             }
 
             // ── File size + Favorite + Snooze badges (top-right) ──────
+            // Score badge lives here too, stacked directly below the MB badge.
 VStack {
     HStack {
         Spacer()
-        HStack(spacing: 6) {
-            if item.snoozeCount > 0 {
-                HStack(spacing: 4) {
-                    Image(systemName: "clock.arrow.circlepath")
+        VStack(alignment: .trailing, spacing: 6) {
+            HStack(spacing: 6) {
+                if item.snoozeCount > 0 {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.caption)
+                        Text(item.snoozeCount == 1 ? "Snoozed" : "Snoozed ×\(item.snoozeCount)")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                    }
+                    .foregroundColor(.orange)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(.ultraThinMaterial)
+                            .overlay(Capsule().fill(Color.orange.opacity(0.2)))
+                    )
+                }
+                if item.asset.isFavorite {
+                    Image(systemName: "heart.fill")
                         .font(.caption)
-                    Text(item.snoozeCount == 1 ? "Snoozed" : "Snoozed ×\(item.snoozeCount)")
+                        .foregroundColor(.pink)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(Color.black.opacity(0.6)))
+                }
+                if item.fileSize > 0 {
+                    Text(item.fileSizeString)
                         .font(.caption)
                         .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(Capsule().fill(Color.black.opacity(0.6)))
                 }
-                .foregroundColor(.orange)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(
-                    Capsule()
-                        .fill(.ultraThinMaterial)
-                        .overlay(Capsule().fill(Color.orange.opacity(0.2)))
-                )
             }
-            if item.asset.isFavorite {
-                Image(systemName: "heart.fill")
-                    .font(.caption)
-                    .foregroundColor(.pink)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(Color.black.opacity(0.6)))
-            }
-            if item.fileSize > 0 {
-                Text(item.fileSizeString)
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(Capsule().fill(Color.black.opacity(0.6)))
+            if let score = aestheticScore {
+                scoreBadgeView(score)
+                    .transition(.opacity.combined(with: .scale(scale: 0.85, anchor: .topTrailing)))
             }
         }
+        .animation(.easeIn(duration: 0.3), value: aestheticScore != nil)
         .padding()
     }
     Spacer()
@@ -549,6 +561,34 @@ VStack {
                 .overlay(ProgressView().tint(.white).scaleEffect(1.3))
                 .transition(.opacity)
         }
+    }
+
+    private func aestheticScoreColor(_ score: Int) -> Color {
+        switch score {
+        case 8...10: return .swipeGreen
+        case 5...7:  return .white
+        default:     return .orange
+        }
+    }
+
+    private func scoreBadgeView(_ score: Int) -> some View {
+        let color = aestheticScoreColor(score)
+        return HStack(spacing: 4) {
+            Image(systemName: "sparkles")
+                .font(.caption2)
+                .foregroundColor(color)
+            Text("\(score)/10")
+                .font(.caption)
+                .fontWeight(.semibold)
+                .foregroundColor(color)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .overlay(Capsule().fill(color.opacity(0.15)))
+        )
     }
 }
 

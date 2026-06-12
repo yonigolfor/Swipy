@@ -15,17 +15,19 @@ class BlurDetector {
 
     /// מחזיר true אם התמונה מטושטשת
     func isBlurry(_ image: UIImage, threshold: Double = 50.0) -> Bool {
-        variance(of: image) < threshold
+        sharpnessVariance(image) < threshold
     }
 
-    private func variance(of image: UIImage) -> Double {
+    /// Raw Laplacian variance — used by AestheticScoringService for sharpness scoring.
+    func sharpnessVariance(_ image: UIImage) -> Double {
         guard
             let resized = resize(image),
             let ciImage = CIImage(image: resized),
-            let filter = CIFilter(name: "CILaplacian")
+            let filter = CIFilter(name: "CIEdges")
         else { return Double.infinity }
 
         filter.setValue(ciImage, forKey: kCIInputImageKey)
+        filter.setValue(1.0, forKey: "inputIntensity")
 
         guard
             let output = filter.outputImage,

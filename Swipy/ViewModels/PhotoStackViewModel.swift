@@ -32,6 +32,10 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// thumbnail-gate in Layer 3 and for observability in general.
     @Published var loadedImageIDs: Set<String> = []
 
+    /// IDs of assets whose aesthetic score has been computed and cached in
+    /// AestheticScoringService. Views observe this to show the match badge.
+    @Published var loadedScoreIDs: Set<String> = []
+
     // MARK: - Offline Mode State
 
     enum OfflinePromptReason { case offline, constrained, slowNetwork }
@@ -386,6 +390,9 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 withAnimation(.spring(response: 0.6)) { self.onboardingLargeVideoCount = finalLarge }
                 withAnimation { self.onboardingScanComplete = true }
             }
+            // Kick off persona building while the user finishes the last onboarding step.
+            await AestheticScoringService.shared.analyzeFavorites()
+            await MainActor.run { self.scoreCachedCardsIfNeeded() }
         }
     }
 
@@ -509,10 +516,19 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         offlineFetchCursor = 0
         isFetchingNextPage = false
         loadedImageIDs = []
+        loadedScoreIDs = []
         // Reset shuffle so stale state doesn't leak across filter changes or tab refreshes.
         isShuffleModeActive = false
         savedLinearCursor = 0
         preShuffleStack = nil
+
+        // Build aesthetic persona once — no-op when already ready or in-flight.
+        // After it completes, score any cards that were already cached while it was building.
+        Task.detached(priority: .utility) { [weak self] in
+            await AestheticScoringService.shared.analyzeFavorites()
+            guard let self else { return }
+            await MainActor.run { [self] in self.scoreCachedCardsIfNeeded() }
+        }
 
         Task {
             if photoService.fetchResult == nil { photoService.fetchAllPhotos() }
@@ -1471,8 +1487,9 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
         for item in upcomingItems where !item.isVideo {
             let key = item.id as NSString
-            if imageCache.object(forKey: key) != nil {
+            if let cached = imageCache.object(forKey: key) {
                 loadedImageIDs.insert(item.id)
+                scheduleScore(item: item, image: cached)
                 continue
             }
             PhotoLibraryService.shared.loadImage(
@@ -1483,12 +1500,15 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             ) { [weak self] img in
                 guard let self, let img else { return }
                 self.imageCache.setObject(img, forKey: key, cost: Int(targetSize.width * targetSize.height * 4))
+                let capturedItem = item
+                let capturedImg  = img
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     // Remove then insert: if a quality upgrade just landed (second call),
                     // the toggle forces SwiftUI to re-render and pick up the better image.
-                    self.loadedImageIDs.remove(item.id)
-                    self.loadedImageIDs.insert(item.id)
+                    self.loadedImageIDs.remove(capturedItem.id)
+                    self.loadedImageIDs.insert(capturedItem.id)
+                    self.scheduleScore(item: capturedItem, image: capturedImg)
                 }
             }
         }
@@ -1497,6 +1517,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     private func precacheNextImages() {
         let nextItems = Array(photoStack.prefix(5))
         guard !nextItems.isEmpty else { return }
+        print("[AestheticScoring] precacheNextImages — \(nextItems.count) items, personaReady=\(AestheticScoringService.shared.isPersonaReady)")
         let targetSize = PhotoStackViewModel.cacheTargetSize
         photoService.startCaching(for: nextItems, targetSize: targetSize)
 
@@ -1507,8 +1528,9 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         // countLimit is now 8 so there is room for 5 cards + undo slot.
         for item in nextItems where !item.isVideo {
             let key = item.id as NSString
-            if imageCache.object(forKey: key) != nil {
+            if let cached = imageCache.object(forKey: key) {
                 loadedImageIDs.insert(item.id)
+                scheduleScore(item: item, image: cached)
                 continue
             }
             PhotoLibraryService.shared.loadImage(
@@ -1519,15 +1541,59 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             ) { [weak self] img in
                 guard let self, let img else { return }
                 self.imageCache.setObject(img, forKey: key, cost: Int(targetSize.width * targetSize.height * 4))
+                let capturedItem = item
+                let capturedImg  = img
                 Task { @MainActor [weak self] in
                     guard let self else { return }
-                    self.loadedImageIDs.remove(item.id)
-                    self.loadedImageIDs.insert(item.id)
+                    self.loadedImageIDs.remove(capturedItem.id)
+                    self.loadedImageIDs.insert(capturedItem.id)
+                    self.scheduleScore(item: capturedItem, image: capturedImg)
                 }
             }
         }
 
         evictStaleCacheEntries(keeping: nextItems)
+    }
+
+    /// Scores all cards currently in the image cache.
+    /// Called once after persona finishes building — catches cards that were cached
+    /// before the persona was ready and therefore skipped the scoring guard.
+    private func scoreCachedCardsIfNeeded() {
+        guard AestheticScoringService.shared.isPersonaReady else { return }
+        let stackSize = photoStack.prefix(8).filter { !$0.isVideo }.count
+        let cachedCount = photoStack.prefix(8).filter { !$0.isVideo && imageCache.object(forKey: $0.id as NSString) != nil }.count
+        print("[AestheticScoring] scoreCachedCardsIfNeeded — stack:\(stackSize) cached:\(cachedCount)")
+        for item in photoStack.prefix(8) where !item.isVideo {
+            guard let cached = imageCache.object(forKey: item.id as NSString) else { continue }
+            scheduleScore(item: item, image: cached)
+        }
+    }
+
+    /// Fires a background score task if the item hasn't been scored yet.
+    /// Called from both precache paths (cache-hit and post-load).
+    private func scheduleScore(item: PhotoItem, image: UIImage) {
+        print("[AestheticScoring] scheduleScore called for \(item.id.prefix(8)), personaReady=\(AestheticScoringService.shared.isPersonaReady)")
+        if AestheticScoringService.shared.cachedScore(for: item.id) != nil {
+            print("[AestheticScoring] scheduleScore: cache hit for \(item.id.prefix(8)), inserting into loadedScoreIDs")
+            _ = loadedScoreIDs.insert(item.id)
+            return
+        }
+        guard AestheticScoringService.shared.isPersonaReady else {
+            print("[AestheticScoring] scheduleScore: persona not ready, skipping \(item.id.prefix(8))")
+            return
+        }
+        let capturedItem = item
+        let capturedImg  = image
+        // VNClassifyImageRequest.perform is synchronous and blocks the cooperative thread pool.
+        // Dispatch to a GCD thread — same pattern used in analyzeFavorites().
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let score = AestheticScoringService.shared.score(for: capturedItem.asset, image: capturedImg)
+            print("[AestheticScoring] scheduleScore: scored \(capturedItem.id.prefix(8)) → \(score)")
+            guard score > 0 else { return }
+            DispatchQueue.main.async { [weak self] in
+                _ = self?.loadedScoreIDs.insert(capturedItem.id)
+            }
+        }
     }
 
     private func evictStaleCacheEntries(keeping items: [PhotoItem]) {
@@ -1539,6 +1605,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         for id in activeCacheIDs where !keepIDs.contains(id) && id != lastAction?.item.id {
             imageCache.removeObject(forKey: id as NSString)
             loadedImageIDs.remove(id)
+            loadedScoreIDs.remove(id)
             // Collect the PhotoItem so we can tell PHCachingImageManager to stop
             // pre-fetching assets that have left the visible window (Bug #3 fix).
             if let item = photoStack.first(where: { $0.id == id }) {

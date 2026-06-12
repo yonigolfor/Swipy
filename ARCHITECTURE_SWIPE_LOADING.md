@@ -119,6 +119,63 @@ onAppear:
 מאפשר לviews לצפות מתי קלף "מוכן" בלי לבצע cache lookup סינכרוני.  
 מנוקה ב-`resetAndLoad` (שינוי פילטר) ומעודכן ב-eviction.
 
+### loadedScoreIDs — Score Readiness
+```swift
+@Published var loadedScoreIDs: Set<String>
+```
+מסמן אילו קלפים כבר קיבלו ציון אסתטי ב-`AestheticScoringService.scoreCache`.  
+`SwipeStackView` קורא `cachedScore(for: item.id)` רק כשה-ID ב-set הזה — מונע חישוב סינכרוני מתוך ה-render.  
+מנוקה ב-`resetAndLoad` ומנוקה per-item ב-eviction.
+
+---
+
+## 3a. Aesthetic Scoring Pipeline
+
+### UserAestheticPersona
+`AestheticScoringService` סורק עד 200 Favorites של המשתמש ובונה פרסונה:
+
+| שדה | תיאור |
+|-----|--------|
+| `topCategories` | ממוצע confidence של VNClassifyImageRequest לכל קטגוריה |
+| `avgSharpnessVariance` | ממוצע Laplacian (CIEdges) variance — baseline חדות |
+| `avgColorTemperature` | 0=קר, 1=חמים (CIAreaAverage) |
+| `facePresenceRate` | אחוז תמונות עם people/portrait/selfie |
+| `livePhotoRate` / `hdrRate` | העדפת סוג מדיה |
+
+הפרסונה נשמרת ב-`UserDefaults` (key: `"userAestheticPersona_v1"`) ולא נבנית מחדש בהפעלות הבאות.
+
+### ציון 1–10
+```
+sharpness match   30%  (CIEdges variance / persona baseline)
+color temp match  20%  (1 − |delta| × 2.5)
+media type match  10%  (Live/HDR alignment)
+scene match       40%  (VNClassifyImageRequest overlap עם topCategories)
+```
+נוסחה: `max(1, min(10, Int(raw × 9) + 1))`
+
+### זרימת הציון
+```
+resetAndLoad()
+  → Task.detached: analyzeFavorites() [DispatchQueue.global — חוסם GCD, לא cooperative pool]
+        → buildPersonaBlocking(): PHImageManager + VNClassify על 299×299 thumbs
+        → שמירה ל-UserDefaults
+        → MainActor: scoreCachedCardsIfNeeded()  ← catches cards already in NSCache
+
+precacheNextImages() / prepareUpcomingCards()
+  → loadImage completion → Task @MainActor → scheduleScore(item:image:)
+        → DispatchQueue.global: score(for:image:)  ← VNClassify חוסם; חייב GCD
+              → computeScore(): resize 299×299 → CIEdges + CIAreaAverage + VNClassify
+              → DispatchQueue.main: loadedScoreIDs.insert(id)
+                    → SwipeStackView re-render → PhotoCardView מקבל aestheticScore != nil
+                          → badge מופיע עם .animation(.easeIn, value: aestheticScore != nil)
+```
+
+### כללים קריטיים
+- **`VNClassifyImageRequest.perform` חוסם את ה-cooperative thread pool** — חייב לרוץ על `DispatchQueue.global`, לא `Task.detached`.
+- **Resize ל-299×299 לפני כל חישוב** — ללא resize, Vision על 1080p לוקח 10+ שניות.
+- **`withAnimation` אסור על `loadedScoreIDs.insert`** — הtransaction מדמם לstack ומגרום לקלפים להגיע מהכיוון הלא נכון. השתמש ב-`.animation(_:value:)` על ה-VStack של הbadge בלבד.
+- **`CILaplacian` הוא macOS-only** — השתמש ב-`CIEdges` על iOS.
+
 ---
 
 ## 4. Early Precache — prepareUpcomingCards()
