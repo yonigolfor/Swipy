@@ -138,9 +138,8 @@ onAppear:
 | שדה | תיאור |
 |-----|--------|
 | `featurePrintCentroid` | ממוצע element-wise של וקטורי `VNGenerateImageFeaturePrintRequest` (512 floats) |
-| `avgSharpnessVariance` | ממוצע Laplacian (CIEdges) variance — baseline חדות |
+| `avgSharpnessVariance` | ממוצע grayscale CIEdges variance — baseline חדות |
 | `avgColorTemperature` | 0=קר, 1=חמים (CIAreaAverage) |
-| `facePresenceRate` | אחוז תמונות עם people/portrait/selfie |
 | `livePhotoRate` / `hdrRate` | העדפת סוג מדיה |
 
 הפרסונה נשמרת ב-`UserDefaults` (key: `"userAestheticPersona_v2"`) ולא נבנית מחדש בהפעלות הבאות.
@@ -175,22 +174,30 @@ precacheNextImages() / prepareUpcomingCards()
 
 ### Blur Gate — שתי שכבות הגנה
 
-ציון תמונה מטושטשת יורד ללא תלות בדמיון לfavorites:
+ציון תמונה מטושטשת יורד ללא תלות בדמיון לfavorites.
+
+**`BlurDetector.sharpnessVariance`:** ממיר ל-grayscale (`CIPhotoEffectMono`) לפני `CIEdges` —
+מונע inflation של variance מקצות צבע בתמונות מטושטשות.
+
+סף 600 מכויל מנתונים אמיתיים: תמונות מטושטשות הניבו var=290–580, חדות var=622+.
 
 ```
-Tier 1 (hard): variance < 150  →  sharpnessFactor = variance / 150
-  תמונה מטושטשת בבירור (var≈30): עונש ×0.36, ציון max ≈ 4
+Tier 1 (hard): variance < 600  →  sharpnessFactor = variance / 600
+  var=290 (מאוד מטושטש): gate≈0.51
+  var=440 (מטושטש):      gate≈0.75
+  var=580 (גבולי):       gate≈0.97
 
-Tier 2 (soft): variance ≥ 150  →  sharpnessFactor = variance / max(avgSharpnessVariance, 150)
-  נמוך מהbenchmark של הפרסונה: עונש יחסי
+Tier 2 (soft): variance ≥ 600  →  sharpnessFactor = variance / max(avgSharpnessVariance, 600)
   Self-calibrating: אם המשתמש אוהב תמונות מטושטשות → avgSharpnessVariance נמוך → עונש קטן
 
 Fallback: variance = ∞ (CIEdges נכשל)  →  raw ×= 0.6
 
-נוסחת עונש: raw *= (0.2 + 0.8 × sharpnessFactor)
-  sharpnessFactor=0: raw ×= 0.2 → ציון max 2
-  sharpnessFactor=1: raw ×= 1.0 → אין עונש
+נוסחת עונש: raw *= (0.05 + 0.95 × sharpnessFactor)
+  sharpnessFactor=0: raw ×= 0.05 → ציון max 1
+  sharpnessFactor=1: raw ×= 1.0  → אין עונש
 ```
+
+לכיול: grep ל-`[BlurCalib]` ב-Xcode Console — כל קלף מדפיס var, bucket (VERY-BLURRY/BLURRY/borderline/sharp), gate, ו-finalScore.
 
 ### כללים קריטיים
 - **`VNGenerateImageFeaturePrintRequest.perform` חוסם את ה-cooperative thread pool** — חייב לרוץ על `DispatchQueue.global`, לא `Task.detached`.

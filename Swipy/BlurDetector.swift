@@ -22,9 +22,15 @@ class BlurDetector {
     func sharpnessVariance(_ image: UIImage) -> Double {
         guard
             let resized = resize(image),
-            let ciImage = CIImage(image: resized),
+            var ciImage = CIImage(image: resized),
             let filter = CIFilter(name: "CIEdges")
         else { return Double.infinity }
+
+        // Grayscale first — color edges on blurry images inflate variance and mask true focus loss
+        if let grayFilter = CIFilter(name: "CIPhotoEffectMono") {
+            grayFilter.setValue(ciImage, forKey: kCIInputImageKey)
+            ciImage = grayFilter.outputImage ?? ciImage
+        }
 
         filter.setValue(ciImage, forKey: kCIInputImageKey)
         filter.setValue(1.0, forKey: "inputIntensity")

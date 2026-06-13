@@ -268,12 +268,12 @@ final class AestheticScoringService {
 
         // Blur gate — two tiers so blurry images can't ride a high feature-print score.
         //
-        // Tier 1 (hard): variance < 150 → sharpnessFactor ramps 0→1 over that range.
-        //   A clearly blurry image (var≈30) gets ~0.36× reduction regardless of persona.
-        // Tier 2 (soft): variance ≥ 150 → relative to persona baseline.
-        //   If persona avg is also low (user likes blurry), factor stays near 1. Correct.
+        // Tier 1 (hard): variance < 600 → sharpnessFactor ramps 0→1 over that range.
+        //   Calibrated from real images: blurry=290–580, sharp=622+.
+        //   var=290 → gate≈0.51, var=440 → gate≈0.75, var=580 → gate≈0.97.
+        // Tier 2 (soft): variance ≥ 600 → relative to persona baseline.
         // Fallback: BlurDetector returned ∞ (CIEdges pipeline failed) → 0.6× penalty.
-        let hardBlurThreshold = 150.0
+        let hardBlurThreshold = 600.0
         let sharpnessFactor: Double
         if variance.isFinite && variance >= 0 {
             if variance < hardBlurThreshold {
@@ -281,13 +281,15 @@ final class AestheticScoringService {
             } else {
                 sharpnessFactor = min(1.0, variance / max(p.avgSharpnessVariance, hardBlurThreshold))
             }
-            raw *= (0.2 + 0.8 * sharpnessFactor)
+            raw *= (0.05 + 0.95 * sharpnessFactor)
         } else {
             sharpnessFactor = -1  // sentinel: BlurDetector failed
             raw *= 0.6
         }
 
         let finalScore = max(1, min(10, Int(raw * 9) + 1))
+        let blurBucket = !variance.isFinite ? "∞(fail)" : variance < 50 ? "VERY-BLURRY" : variance < hardBlurThreshold ? "BLURRY" : variance < 300 ? "borderline" : "sharp"
+        print("[BlurCalib] \(blurBucket) | var=\(variance.isFinite ? String(format:"%.1f",variance) : "∞") | threshold=\(hardBlurThreshold) | gate=\(String(format:"%.3f", sharpnessFactor < 0 ? 0.6 : (0.05 + 0.95 * max(0, sharpnessFactor)))) | score=\(finalScore)")
         print("[AestheticScoring] score detail: var=\(variance.isFinite ? String(format:"%.0f",variance) : "∞") avg=\(String(format:"%.0f",p.avgSharpnessVariance)) sf=\(sharpnessFactor < 0 ? "n/a" : String(format:"%.2f",sharpnessFactor)) raw→\(String(format:"%.3f",raw)) score=\(finalScore)")
         return finalScore
     }
