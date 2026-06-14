@@ -262,6 +262,8 @@ Use `try?` for `PHPhotoLibrary.performChanges` (silent failure is acceptable —
 ### Commit & Push Policy
 **Never commit or push without explicitly asking the user for approval first.** Always show the diff or summarize the changes and wait for a green light. This applies to every commit, regardless of how small or "obvious" the change seems.
 
+**Before every commit:** check whether any `.md` file needs updating to reflect the change. Update the relevant doc in the same commit — never ship code that is out of sync with its documentation.
+
 ### Code Quality Standard
 Every code change must be **senior-level**: efficient, sharp, and precise. No over-engineering, no padding, no defensive code for scenarios that can't occur. Each change should do exactly what is needed — no more, no less.
 

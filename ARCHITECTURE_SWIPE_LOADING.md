@@ -189,7 +189,8 @@ precacheNextImages() / prepareUpcomingCards()
               → computeScore(): resize 299×299 → CIEdges + CIAreaAverage + VNFeaturePrint
               → DispatchQueue.main: loadedScoreIDs.insert(id)
                     → SwipeStackView re-render → PhotoCardView מקבל aestheticScore != nil
-                          → badge מופיע עם .animation(.easeIn, value: aestheticScore != nil)
+                          → badge מושבת כרגע (מסומן בהערה ב-PhotoCardView)
+                          → להחזרה: בטל הערה ל-scoreBadgeView block ב-imageContentView
 ```
 
 ### Blur Gate — שתי שכבות הגנה

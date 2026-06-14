@@ -193,57 +193,57 @@ struct PhotoCardView: View {
             }
 
             // ── File size + Favorite + Snooze badges (top-right) ──────
-            // Score badge lives here too, stacked directly below the MB badge.
-VStack {
-    HStack {
-        Spacer()
-        VStack(alignment: .trailing, spacing: 6) {
-            HStack(spacing: 6) {
-                if item.snoozeCount > 0 {
-                    HStack(spacing: 4) {
-                        Image(systemName: "clock.arrow.circlepath")
-                            .font(.caption)
-                        Text(item.snoozeCount == 1 ? "Snoozed" : "Snoozed ×\(item.snoozeCount)")
-                            .font(.caption)
-                            .fontWeight(.semibold)
+            VStack {
+                HStack {
+                    Spacer()
+                    VStack(alignment: .trailing, spacing: 6) {
+                        HStack(spacing: 6) {
+                            if item.snoozeCount > 0 {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "clock.arrow.circlepath")
+                                        .font(.caption)
+                                    Text(item.snoozeCount == 1 ? "Snoozed" : "Snoozed ×\(item.snoozeCount)")
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                }
+                                .foregroundColor(.orange)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(
+                                    Capsule()
+                                        .fill(.ultraThinMaterial)
+                                        .overlay(Capsule().fill(Color.orange.opacity(0.2)))
+                                )
+                            }
+                            if item.asset.isFavorite {
+                                Image(systemName: "heart.fill")
+                                    .font(.caption)
+                                    .foregroundColor(.pink)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Capsule().fill(Color.black.opacity(0.6)))
+                            }
+                            if item.fileSize > 0 {
+                                Text(item.fileSizeString)
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                    .background(Capsule().fill(Color.black.opacity(0.6)))
+                            }
+                        }
+                        // Aesthetic score badge — uncomment to re-enable
+                        // if let score = aestheticScore {
+                        //     scoreBadgeView(score)
+                        //         .transition(.opacity.combined(with: .scale(scale: 0.85, anchor: .topTrailing)))
+                        // }
                     }
-                    .foregroundColor(.orange)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        Capsule()
-                            .fill(.ultraThinMaterial)
-                            .overlay(Capsule().fill(Color.orange.opacity(0.2)))
-                    )
+                    .animation(.easeIn(duration: 0.3), value: aestheticScore != nil)
+                    .padding()
                 }
-                if item.asset.isFavorite {
-                    Image(systemName: "heart.fill")
-                        .font(.caption)
-                        .foregroundColor(.pink)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(Color.black.opacity(0.6)))
-                }
-                if item.fileSize > 0 {
-                    Text(item.fileSizeString)
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 6)
-                        .background(Capsule().fill(Color.black.opacity(0.6)))
-                }
+                Spacer()
             }
-            if let score = aestheticScore {
-                scoreBadgeView(score)
-                    .transition(.opacity.combined(with: .scale(scale: 0.85, anchor: .topTrailing)))
-            }
-        }
-        .animation(.easeIn(duration: 0.3), value: aestheticScore != nil)
-        .padding()
-    }
-    Spacer()
-}
 
             // ── Screenshot / Recording / Burst Best badge (top-left) ─────
             if item.isScreenshot || item.isScreenRecording || item.isBurstBest {

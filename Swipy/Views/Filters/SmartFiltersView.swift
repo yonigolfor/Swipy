@@ -21,9 +21,7 @@ struct SmartFiltersView: View {
             List {
                 Section {
                     ForEach(FilterCategory.allCases) { category in
-                        if (category != .blurryPhotos){
-                            filterRow(for: category)
-                        }
+                        filterRow(for: category)
                     }
                 } header: {
                                     Text(String(localized: "filters.section_header"))

@@ -14,7 +14,7 @@ class BlurDetector {
     private let thumbnailSize = CGSize(width: 200, height: 200)
 
     /// מחזיר true אם התמונה מטושטשת
-    func isBlurry(_ image: UIImage, threshold: Double = 50.0) -> Bool {
+    func isBlurry(_ image: UIImage, threshold: Double = 600.0) -> Bool {
         sharpnessVariance(image) < threshold
     }
 
