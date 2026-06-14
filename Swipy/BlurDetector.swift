@@ -13,7 +13,7 @@ class BlurDetector {
 
     /// Variance threshold for the blurry photos filter category.
     /// Calibrated from real images: blurry=155–445, sharp=1419+.
-    static let blurryFilterThreshold: Double = 500.0
+    static let blurryFilterThreshold: Double = 300.0
 
     private let context = CIContext()
     private let thumbnailSize = CGSize(width: 200, height: 200)
