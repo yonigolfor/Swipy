@@ -10,11 +10,15 @@ class BlurDetector {
     static let shared = BlurDetector()
     private init() {}
 
+    /// Variance threshold for the blurry photos filter category.
+    /// Calibrated from real images: blurry=290–320, moderate=403–440, sharp=580+.
+    static let blurryFilterThreshold: Double = 350.0
+
     private let context = CIContext()
     private let thumbnailSize = CGSize(width: 200, height: 200)
 
     /// מחזיר true אם התמונה מטושטשת
-    func isBlurry(_ image: UIImage, threshold: Double = 600.0) -> Bool {
+    func isBlurry(_ image: UIImage, threshold: Double = BlurDetector.blurryFilterThreshold) -> Bool {
         sharpnessVariance(image) < threshold
     }
 
