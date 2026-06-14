@@ -288,9 +288,11 @@ final class AestheticScoringService {
         }
 
         let finalScore = max(1, min(10, Int(raw * 9) + 1))
-        let blurBucket = !variance.isFinite ? "∞(fail)" : variance < 50 ? "VERY-BLURRY" : variance < hardBlurThreshold ? "BLURRY" : variance < 300 ? "borderline" : "sharp"
+        #if DEBUG
+        let blurBucket = !variance.isFinite ? "∞(fail)" : variance < 100 ? "VERY-BLURRY" : variance < hardBlurThreshold ? "BLURRY" : variance < hardBlurThreshold * 1.3 ? "borderline" : "sharp"
         print("[BlurCalib] \(blurBucket) | var=\(variance.isFinite ? String(format:"%.1f",variance) : "∞") | threshold=\(hardBlurThreshold) | gate=\(String(format:"%.3f", sharpnessFactor < 0 ? 0.6 : (0.05 + 0.95 * max(0, sharpnessFactor)))) | score=\(finalScore)")
         print("[AestheticScoring] score detail: var=\(variance.isFinite ? String(format:"%.0f",variance) : "∞") avg=\(String(format:"%.0f",p.avgSharpnessVariance)) sf=\(sharpnessFactor < 0 ? "n/a" : String(format:"%.2f",sharpnessFactor)) raw→\(String(format:"%.3f",raw)) score=\(finalScore)")
+        #endif
         return finalScore
     }
 

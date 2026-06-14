@@ -67,6 +67,8 @@ struct SwipeStackView: View {
                 // Card Stack — force LTR so swipe physics are always consistent:
                 // right = Keep, left = Delete, regardless of device language.
                 GeometryReader { geometry in
+                    let cardW = min(geometry.size.width - 40, geometry.size.height * 9.0 / 16.0)
+                    let cardH = cardW * 16.0 / 9.0
                     ZStack {
                         if viewModel.isOfflineMode && viewModel.isScanning && viewModel.photoStack.isEmpty {
                             offlineScanningView
@@ -107,10 +109,7 @@ struct SwipeStackView: View {
                                         ? AestheticScoringService.shared.cachedScore(for: item.id)
                                         : nil
                                 )
-                                    .frame(
-                                        width: geometry.size.width - 40,
-                                        height: geometry.size.height - 40
-                                    )
+                                    .frame(width: cardW, height: cardH)
                                     .zIndex(Double(cardStackSize - index))
                                     .offset(
                                         x: index == 0 ? dragOffset.width : 0,

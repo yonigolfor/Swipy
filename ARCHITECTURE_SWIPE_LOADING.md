@@ -48,6 +48,26 @@ private let cardStackSize = 3
 | 1 | קלף אחורי ראשון | scale 0.95, opacity 0.8, y=+8pt |
 | 2 | קלף אחורי שני | scale 0.90, opacity 0.6, y=+16pt |
 
+### גודל קלף — 9:16 Constrained
+
+גודל הקלף מחושב פעם אחת ב-`GeometryReader` של `SwipeStackView`:
+
+```swift
+let cardW = min(geometry.size.width - 40, geometry.size.height * 9.0 / 16.0)
+let cardH = cardW * 16.0 / 9.0
+```
+
+הלוגיקה: מוצא את **הקלף הגדול ביותר** בפרופורציה 9:16 שמתאים לשטח הזמין.
+- רוחב מגביל (מסך גדול): `cardW = width - 40`, `cardH = cardW × 16/9`
+- גובה מגביל (מסך קצר): `cardH = availableHeight`, `cardW = cardH × 9/16`
+
+**תצוגת תמונה ב-`imageContentView`**: כל תמונה — portrait וlandscape — מקבלת אותה טיפול:
+- שכבה 1 (רקע): `.scaledToFill()` + `blur(25)` + `scaleEffect(1.1)` + `clipped()` — ממלא את כל הקלף
+- שכבה 2 (תמונה ראשית): `.scaledToFit()` — מציג את התמונה המלאה ללא חיתוך
+
+תמונות 3:4 (iPhone portrait הרגיל) יקבלו פסי blur קטנים למעלה/למטה.
+תמונות 9:16 (landscape video ratio) ימלאו את הקלף ב-pixel-perfect ללא margins.
+
 ### Pagination
 
 | פרמטר | ערך |

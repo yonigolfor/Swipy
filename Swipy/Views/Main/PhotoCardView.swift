@@ -420,23 +420,19 @@ VStack {
     /// are visually identical and cross-fades look seamless.
     @ViewBuilder
     private func imageContentView(_ uiImage: UIImage) -> some View {
-        let isPortrait = item.asset.pixelHeight >= item.asset.pixelWidth
         GeometryReader { geo in
             ZStack {
-                if !isPortrait {
-                    Image(uiImage: uiImage)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: geo.size.width, height: geo.size.height)
-                        .blur(radius: 25)
-                        .scaleEffect(1.1)
-                        .clipped()
-                }
                 Image(uiImage: uiImage)
                     .resizable()
-                    .aspectRatio(contentMode: isPortrait ? .fill : .fit)
+                    .aspectRatio(contentMode: .fill)
                     .frame(width: geo.size.width, height: geo.size.height)
+                    .blur(radius: 25)
+                    .scaleEffect(1.1)
                     .clipped()
+                Image(uiImage: uiImage)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: geo.size.width, height: geo.size.height)
             }
         }
     }
