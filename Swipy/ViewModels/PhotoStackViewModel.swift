@@ -640,6 +640,31 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 isLoading = false
                 shuffleBatchID = UUID()
                 if !photoStack.isEmpty { precacheNextImages() }
+            } else if currentFilter == .blurryPhotos || currentFilter == .burstPhotos || currentFilter == .largeVideos {
+                // These filters require ViewModel-level detection (blur/burst/fileSize) —
+                // jump the cursor and delegate to scanUntilFull, same as the normal load path.
+                fetchCursor = randomStart
+                photoStack = []
+                await scanUntilFull(filter: currentFilter, targetCount: 15, batchSize: 300)
+
+                // Wrap around if we hit the end without finding enough items.
+                if photoStack.isEmpty && randomStart > 0 {
+                    fetchCursor = 0
+                    await scanUntilFull(filter: currentFilter, targetCount: 15, batchSize: 300)
+                }
+
+                // Still empty → no matching items exist anywhere; exit shuffle gracefully.
+                if photoStack.isEmpty {
+                    isShuffleModeActive = false
+                    photoStack = restoreLinearStack()
+                    fetchCursor = savedLinearCursor
+                    preShuffleStack = nil
+                }
+
+                stageSnoozedItemsIfReady()
+                isLoading = false
+                shuffleBatchID = UUID()
+                if !photoStack.isEmpty { precacheNextImages() }
             } else {
                 let (items, nextIdx) = photoService.fetchPageOfAssets(
                     for: currentFilter,
@@ -1526,11 +1551,14 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
         // Pull all top-5 non-video images into NSCache (was top-3).
         // countLimit is now 8 so there is room for 5 cards + undo slot.
-        for item in nextItems where !item.isVideo {
+        for (stackIndex, item) in nextItems.enumerated() where !item.isVideo {
             let key = item.id as NSString
             if let cached = imageCache.object(forKey: key) {
                 loadedImageIDs.insert(item.id)
                 scheduleScore(item: item, image: cached)
+                #if DEBUG
+                debugLogBlurVariance(of: cached, id: item.id, stackIndex: stackIndex)
+                #endif
                 continue
             }
             PhotoLibraryService.shared.loadImage(
@@ -1543,6 +1571,9 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 self.imageCache.setObject(img, forKey: key, cost: Int(targetSize.width * targetSize.height * 4))
                 let capturedItem = item
                 let capturedImg  = img
+                #if DEBUG
+                self.debugLogBlurVariance(of: capturedImg, id: capturedItem.id, stackIndex: stackIndex)
+                #endif
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     self.loadedImageIDs.remove(capturedItem.id)
@@ -1622,4 +1653,15 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// Tracks which asset IDs currently have entries in `imageCache` so we can
     /// perform targeted eviction without enumerating the NSCache.
     private var activeCacheIDs: Set<String> = []
+
+    #if DEBUG
+    private func debugLogBlurVariance(of image: UIImage, id: String, stackIndex: Int) {
+        DispatchQueue.global(qos: .utility).async {
+            let info = BlurDetector.shared.advancedSharpnessInfo(image)
+            let bucket = info.raw < BlurDetector.blurryFilterThreshold ? "BLURRY" : info.raw < 600 ? "borderline" : "sharp"
+            let label = stackIndex == 0 ? "★ ON SCREEN" : "  stack[\(stackIndex)]"
+            print("[BlurVar] \(label) | \(bucket) | raw=\(String(format: "%.1f", info.raw)) region=\(info.region) | id=\(id.prefix(8))")
+        }
+    }
+    #endif
 }
