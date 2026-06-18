@@ -1423,15 +1423,39 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         let counter = persistence.globalActionCounter
         var indicesToRemove: [Int] = []
         var toStage: [(PhotoItem, Int)] = []
+        // Lazily computed on first offline skip: anchored past the furthest existing
+        // milestone so rescheduled items never collide with anything already in the queue.
+        var nextRescheduleSlot: Int? = nil
+        var milestoneUpdates: [String: Int] = [:]
         for i in snoozeQueue.indices {
             guard counter >= snoozeQueue[i].stagingMilestone else { continue }
             if matchesCurrentFilter(snoozeQueue[i].item) {
+                // Offline guard: iCloud-only items can't load — reschedule to end of queue.
+                if isOfflineMode,
+                   !photoService.isLocallyAvailable(snoozeQueue[i].item.asset),
+                   !OfflineCacheService.shared.isCached(for: snoozeQueue[i].item.id) {
+                    if nextRescheduleSlot == nil {
+                        let maxMilestone = snoozeQueue.map(\.stagingMilestone).max() ?? counter
+                        nextRescheduleSlot = max(counter + 40, maxMilestone + 40)
+                    }
+                    let slot = nextRescheduleSlot!
+                    snoozeQueue[i] = SnoozedPhoto(
+                        item: snoozeQueue[i].item,
+                        targetMilestone: snoozeQueue[i].targetMilestone,
+                        stagingMilestone: slot,
+                        snoozeCount: snoozeQueue[i].snoozeCount
+                    )
+                    milestoneUpdates[snoozeQueue[i].item.id] = slot
+                    nextRescheduleSlot! += 40
+                    continue
+                }
                 indicesToRemove.append(i)
                 toStage.append((snoozeQueue[i].item, snoozeQueue[i].snoozeCount))
             }
             // Milestone reached but wrong category — leave in queue until the user
             // returns to a compatible context.
         }
+        persistence.updateSnoozedMilestones(milestoneUpdates)
         guard !indicesToRemove.isEmpty else { return }
         for i in indicesToRemove.reversed() { snoozeQueue.remove(at: i) }
         for (item, count) in toStage {

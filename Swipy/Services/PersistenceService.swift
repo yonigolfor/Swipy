@@ -77,6 +77,21 @@ class PersistenceService {
         snoozedPhotos = current
     }
 
+    /// Applies multiple stagingMilestone updates in a single encode/decode cycle.
+    func updateSnoozedMilestones(_ updates: [String: Int]) {
+        guard !updates.isEmpty else { return }
+        var current = snoozedPhotos
+        for (id, milestone) in updates {
+            guard let existing = current[id] else { continue }
+            current[id] = SnoozedPhotoRecord(
+                snoozeCount: existing.snoozeCount,
+                targetMilestone: existing.targetMilestone,
+                stagingMilestone: milestone
+            )
+        }
+        snoozedPhotos = current
+    }
+
     // MARK: - Migration (V1 → V2)
 
     /// One-time migration from [String: Int] (V1) to [String: SnoozedPhotoRecord] (V2).
