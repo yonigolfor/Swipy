@@ -363,11 +363,18 @@ struct PhotoCardView: View {
         }
         .onChange(of: isTopCard) { _, nowTop in
             if nowTop {
-                AudioSessionManager.shared.configure(muted: PhotoCardView.globalMute)
-                player?.seek(to: .zero)
-                player?.play()
+                if let p = player {
+                    AudioSessionManager.shared.configure(muted: PhotoCardView.globalMute)
+                    p.seek(to: .zero)
+                    p.play()
+                }
                 NotificationCenter.default.post(name: .resumeVideoObserver, object: nil)
             } else {
+                // Relax audio exclusivity when an unmuted video card is swiped away so
+                // background audio isn't silenced indefinitely by a stale session state.
+                if player != nil && !isMuted {
+                    AudioSessionManager.shared.configure(muted: true)
+                }
                 stopPlayer()
             }
         }
