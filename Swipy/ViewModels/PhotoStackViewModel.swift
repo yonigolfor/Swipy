@@ -71,6 +71,10 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     @Published var shouldShowPaywall = false
 
+    // MARK: - Zoom State (pinch-to-zoom on swipe card)
+
+    @Published var isCardZooming = false
+
     var canSwipe: Bool {
         DailyLimitService.shared.canSwipe(isPremium: PremiumManager.shared.isPremium)
     }

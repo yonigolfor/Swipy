@@ -12,6 +12,9 @@ struct SwipeStackView: View {
     // Use the shared VM passed from ContentView — fixes the ReviewBin empty bug
     @EnvironmentObject private var viewModel: PhotoStackViewModel
     @Binding var selectedTab: Int
+    /// Space to reserve at the bottom of the card column so cards don't slip under
+    /// the tab bar. Equals tab bar visual height + device bottom safe area.
+    var tabBarReservedHeight: CGFloat = 90
     @State private var dragOffset: CGSize = .zero
     @State private var dragRotation: Double = 0
 
@@ -42,6 +45,13 @@ struct SwipeStackView: View {
     /// True between drag start and drag end — used to cancel/resume pre-fetch.
     @State private var isDragging = false
 
+    @State private var pinchScale: CGFloat = 1.0
+    @State private var pinchOffset: CGSize = .zero
+    @State private var pinchAnchor: UnitPoint = .center
+    @State private var isPinching = false
+    @State private var cardSize: CGSize = .zero
+    @State private var pinchPanOrigin: CGSize = .zero
+
     // Shake hint toast — shown once after the user's 3rd swipe (first session only).
     @AppStorage("shakeHintSwipeCount") private var shakeHintSwipeCount = 0
     @AppStorage("hasSeenShakeHint") private var hasSeenShakeHint = false
@@ -58,7 +68,7 @@ struct SwipeStackView: View {
             Color(UIColor.systemGroupedBackground)
                 .ignoresSafeArea()
 
-            // 2. Column: spacer gap + cards + instructions
+            // 2. Column: spacer gap + cards + bottom reserve
             VStack(spacing: 0) {
                 // Reserve the same vertical space SessionSavingsBarView will occupy
                 // so the cards don't slide underneath it (≈ 100pt incl. padding).
@@ -109,26 +119,32 @@ struct SwipeStackView: View {
                                         ? AestheticScoringService.shared.cachedScore(for: item.id)
                                         : nil
                                 )
-                                    .frame(width: cardW, height: cardH)
-                                    .zIndex(Double(cardStackSize - index))
-                                    .offset(
-                                        x: index == 0 ? dragOffset.width : 0,
-                                        y: index == 0 ? dragOffset.height : CGFloat(index * 8)
-                                    )
-                                    .scaleEffect(index == 0 ? 1.0 : (1.0 - CGFloat(index) * 0.05))
-                                    .rotationEffect(
-                                        .degrees(index == 0 ? dragRotation : item.rotation)
-                                    )
-                                    .opacity(index == 0 ? 1.0 : (1.0 - Double(index) * 0.2))
-                                    .animation(.spring(response: 0.3, dampingFraction: 0.7), value: dragOffset)
-                                    .gesture(index == 0 ? dragGesture : nil)
-                                    .overlay {
-                                        if index == 0 { swipeIndicatorOverlay }
-                                    }
+                                .frame(width: cardW, height: cardH)
+                                .zIndex(Double(cardStackSize - index))
+                                .offset(
+                                    x: index == 0 ? dragOffset.width : 0,
+                                    y: index == 0 ? dragOffset.height : CGFloat(index * 8)
+                                )
+                                .scaleEffect(
+                                    index == 0 ? pinchScale : (1.0 - CGFloat(index) * 0.05),
+                                    anchor: index == 0 ? pinchAnchor : .center
+                                )
+                                .offset(index == 0 ? pinchOffset : .zero)
+                                .rotationEffect(
+                                    .degrees(index == 0 ? dragRotation : item.rotation)
+                                )
+                                .opacity(index == 0 ? 1.0 : (1.0 - Double(index) * 0.2))
+                                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: dragOffset)
+                                .gesture(index == 0 ? dragGesture : nil)
+                                .simultaneousGesture(index == 0 ? pinchGesture : nil)
+                                .overlay {
+                                    if index == 0 { swipeIndicatorOverlay }
+                                }
                             }
                         }
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .onAppear { cardSize = CGSize(width: cardW, height: cardH) }
                     .animation(.easeInOut(duration: 0.35), value: viewModel.isScanning)
                     // Shuffle / offline transition modifiers — applied to the whole card area
                     .offset(y: cardStackOffset)
@@ -137,7 +153,12 @@ struct SwipeStackView: View {
                 }
                 .padding(.vertical, 10)
                 .environment(\.layoutDirection, .leftToRight)
+
+                // Push cards above the tab bar. tabBarReservedHeight = bar visual
+                // height + device bottom safe area, so this works on all devices.
+                Color.clear.frame(height: tabBarReservedHeight)
             }
+            .zIndex(isPinching ? 200 : 0)
 
             // 3. SessionSavingsBarView — floats above everything in this ZStack.
             //    .zIndex(100) works here because it is a direct ZStack sibling,
@@ -220,7 +241,15 @@ struct SwipeStackView: View {
             .environment(\.layoutDirection, .leftToRight)
             .zIndex(50)
 
-            // 7. Particle explosion overlay — rendered above everything including DopamineMeter
+            // 7. Pinch-zoom background dim — above all chrome but below the zoomed card (zIndex 200).
+            Color.black
+                .opacity(isPinching ? 0.55 : 0)
+                .ignoresSafeArea()
+                .allowsHitTesting(false)
+                .zIndex(190)
+                .animation(.easeInOut(duration: 0.2), value: isPinching)
+
+            // 8. Particle explosion overlay — rendered above everything including DopamineMeter
             if showParticles {
                 ParticleExplosionView(
                     origin: particleOrigin,
@@ -234,6 +263,18 @@ struct SwipeStackView: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
                         showParticles = false
                     }
+                }
+            }
+        }
+        .onChange(of: isPinching) { _, zooming in
+            viewModel.isCardZooming = zooming
+            if !zooming {
+                // Spring reset runs here (inside SwiftUI's render cycle) rather than
+                // inside the UIKit gesture callback where withAnimation is unreliable.
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
+                    pinchScale  = 1.0
+                    pinchOffset = .zero
+                    pinchAnchor = .center
                 }
             }
         }
@@ -814,6 +855,49 @@ struct SwipeStackView: View {
         return formatter.string(from: date)
     }
 
+    // MARK: - Pinch Gesture
+
+    // Pure SwiftUI: MagnificationGesture handles scale, inner DragGesture captures the
+    // anchor (startLocation) and drives pan. Both coexist with the primary DragGesture
+    // (swipe) via .simultaneousGesture — iOS naturally routes 1-finger to DragGesture
+    // and 2-finger to MagnificationGesture without any hitTest tricks.
+    // Spring reset lives in onChange(of: isPinching) so it runs inside SwiftUI's render
+    // cycle where withAnimation is reliable; onEnded only flips the flag.
+    private var pinchGesture: some Gesture {
+        MagnificationGesture()
+            .onChanged { scale in
+                pinchScale = max(1.0, scale)
+                if !isPinching, pinchScale > 1.01 { isPinching = true }
+            }
+            .onEnded { _ in
+                // Spring reset handled by onChange(of: isPinching) below.
+                isPinching = false
+                pinchPanOrigin = .zero
+            }
+            .simultaneously(with:
+                DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                    .onChanged { drag in
+                        if !isPinching {
+                            // Capture anchor from touch start — best approximation of
+                            // centroid available in pure SwiftUI (no 2-finger centroid API).
+                            if cardSize.width > 0 {
+                                pinchAnchor = UnitPoint(
+                                    x: min(1, max(0, drag.startLocation.x / cardSize.width)),
+                                    y: min(1, max(0, drag.startLocation.y / cardSize.height))
+                                )
+                            }
+                            pinchPanOrigin = drag.translation
+                        } else {
+                            // .local coords are in the view's unscaled frame, so multiply
+                            // delta by pinchScale to get 1:1 screen-space movement.
+                            let dx = (drag.translation.width  - pinchPanOrigin.width)  * pinchScale
+                            let dy = (drag.translation.height - pinchPanOrigin.height) * pinchScale
+                            pinchOffset = CGSize(width: dx, height: dy)
+                        }
+                    }
+            )
+    }
+
     // MARK: - Swipe Gesture
 
     // In RTL layout iOS flips the translation.width sign.
@@ -822,6 +906,10 @@ struct SwipeStackView: View {
     private var dragGesture: some Gesture {
         DragGesture()
             .onChanged { value in
+                // Pan is handled exclusively by pinchGesture's inner DragGesture.
+                // If this 1-finger recognizer fires during a 2-finger pinch its
+                // translation comes from the wrong touch point and corrupts pinchOffset.
+                guard !isPinching else { return }
                 if !isDragging {
                     isDragging = true
                     viewModel.cancelPrefetch()
@@ -841,6 +929,13 @@ struct SwipeStackView: View {
             .onEnded { value in
                 isDragging = false
                 hasFiredEarlyPrecache = false
+                // If a pinch is active or scale hasn't fully reset, discard swipe.
+                // MagnificationGesture.onEnded owns the spring-reset of pinchOffset.
+                guard !isPinching, pinchScale <= 1.01 else {
+                    dragOffset = .zero
+                    dragRotation = 0
+                    return
+                }
                 // SwipeDirection uses the RAW translation (not flipped)
                 // because .left/.right are already correct in RTL context.
                 let direction = SwipeDirection.from(offset: value.translation)
