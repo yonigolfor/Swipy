@@ -135,6 +135,18 @@ struct SwipeStackView: View {
                                 )
                                 .opacity(index == 0 ? 1.0 : (1.0 - Double(index) * 0.2))
                                 .animation(.spring(response: 0.3, dampingFraction: 0.7), value: dragOffset)
+                                // During pinch: nil = immediate 1:1 response to gesture.
+                                // After pinch ends: spring returns card to original size/position.
+                                .animation(
+                                    index == 0 && !isPinching
+                                        ? .spring(response: 0.3, dampingFraction: 1.0) : nil,
+                                    value: pinchScale
+                                )
+                                .animation(
+                                    index == 0 && !isPinching
+                                        ? .spring(response: 0.3, dampingFraction: 1.0) : nil,
+                                    value: pinchOffset
+                                )
                                 .gesture(index == 0 ? dragGesture : nil)
                                 .simultaneousGesture(index == 0 ? pinchGesture : nil)
                                 .overlay {
@@ -242,12 +254,14 @@ struct SwipeStackView: View {
             .zIndex(50)
 
             // 7. Pinch-zoom background dim — above all chrome but below the zoomed card (zIndex 200).
+            // Animates IN only; disappears instantly on release so it doesn't compete
+            // with the card's return animation.
             Color.black
                 .opacity(isPinching ? 0.55 : 0)
                 .ignoresSafeArea()
                 .allowsHitTesting(false)
                 .zIndex(190)
-                .animation(.easeInOut(duration: 0.2), value: isPinching)
+                .animation(isPinching ? .easeInOut(duration: 0.2) : nil, value: isPinching)
 
             // 8. Particle explosion overlay — rendered above everything including DopamineMeter
             if showParticles {
@@ -269,13 +283,12 @@ struct SwipeStackView: View {
         .onChange(of: isPinching) { _, zooming in
             viewModel.isCardZooming = zooming
             if !zooming {
-                // Spring reset runs here (inside SwiftUI's render cycle) rather than
-                // inside the UIKit gesture callback where withAnimation is unreliable.
-                withAnimation(.spring(response: 0.35, dampingFraction: 0.75)) {
-                    pinchScale  = 1.0
-                    pinchOffset = .zero
-                    pinchAnchor = .center
-                }
+                pinchScale  = 1.0
+                pinchOffset = .zero
+                // pinchAnchor intentionally not reset here — at scale=1.0 the anchor
+                // is visually irrelevant, and resetting it mid-spring (scale still > 1)
+                // causes a visible position jump. The next DragGesture.onChanged will
+                // set a fresh anchor when a new pinch begins.
             }
         }
         .onShake {
