@@ -12,9 +12,6 @@ struct SwipeStackView: View {
     // Use the shared VM passed from ContentView — fixes the ReviewBin empty bug
     @EnvironmentObject private var viewModel: PhotoStackViewModel
     @Binding var selectedTab: Int
-    /// Space to reserve at the bottom of the card column so cards don't slip under
-    /// the tab bar. Equals tab bar visual height + device bottom safe area.
-    var tabBarReservedHeight: CGFloat = 90
     @State private var dragOffset: CGSize = .zero
     @State private var dragRotation: Double = 0
 
@@ -166,9 +163,6 @@ struct SwipeStackView: View {
                 .padding(.vertical, 10)
                 .environment(\.layoutDirection, .leftToRight)
 
-                // Push cards above the tab bar. tabBarReservedHeight = bar visual
-                // height + device bottom safe area, so this works on all devices.
-                Color.clear.frame(height: tabBarReservedHeight)
             }
             .zIndex(isPinching ? 200 : 0)
 
@@ -280,8 +274,8 @@ struct SwipeStackView: View {
                 }
             }
         }
+        .toolbar(isPinching ? .hidden : .visible, for: .tabBar)
         .onChange(of: isPinching) { _, zooming in
-            viewModel.isCardZooming = zooming
             if !zooming {
                 pinchScale  = 1.0
                 pinchOffset = .zero
