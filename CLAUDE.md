@@ -85,7 +85,6 @@ Swipy/
 │   │   ├── ReviewGridItemView.swift
 │   │   └── FullScreenMediaView.swift
 │   └── Components/
-│       ├── GlassmorphicTabBar.swift    # Custom bottom bar (not UITabBar)
 │       ├── SessionSavingsBarView.swift # Gamified top bar: MB progress + lava-star + GB milestone celebration
 │       ├── LifetimeSavingsView.swift
 │       ├── SwipeIndicator.swift
@@ -148,12 +147,11 @@ Color(red: 0.1, green: 0.1, blue: 0.12)       // #1A1A1F
 Color.cardBackground  →  UIColor.systemBackground
 
 // Tab bar
-.ultraThinMaterial + white overlay (glassmorphism)
+Native iOS TabView (.tabItem) — iOS 18 renders the floating capsule style automatically
 ```
 
 ### Gradients
 - Use `LinearGradient` for backgrounds and overlays
-- Use `AngularGradient` only for the selected tab glow (iridescent effect)
 - Cards use `shadow(color: .black.opacity(0.1), radius: 8, y: 2)`
 
 ### Typography
@@ -175,10 +173,11 @@ SplashScreenView
     ├── [first launch]    → OnboardingView (5 steps) → set hasCompletedOnboarding = true
     └── [returning user]  → ContentView
 
-ContentView: TabView(selection: $selectedTab)
+ContentView: TabView(selection: $selectedTab)   ← native iOS TabView with .tabItem
     Tab 0 — SmartFiltersView
         └── tap category → loadPhotos(filter:) → selectedTab = 1
     Tab 1 — SwipeStackView    (main experience)
+        └── pinch-to-zoom on top card; tab bar hides via .toolbar(.hidden, for: .tabBar)
     Tab 2 — ReviewBinView
         └── tap item → fullScreenCover → FullScreenMediaView
 
@@ -188,6 +187,8 @@ Deep linking:
 ```
 
 No `NavigationStack` or `NavigationView` is used at the root level. Tab switching is the primary navigation. `fullScreenCover` is used for full-screen media preview only.
+
+The tab bar is the native iOS `TabView` — on iOS 18 it renders automatically as the floating capsule style (as in WhatsApp / Instagram). Content views stop above the tab bar via the safe area injected by `TabView`; no manual height math needed.
 
 ---
 
