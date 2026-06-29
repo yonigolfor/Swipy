@@ -3,7 +3,7 @@ import Foundation
 class DailyLimitService: ObservableObject {
     static let shared = DailyLimitService()
 
-    let dailyLimit = 100
+    let dailyLimit = 300
     private let swipesKey      = "dailySwipesCount"
     private let dateKey        = "dailySwipesDate"
     private let bonusKey       = "dailyBonusSwipes"
