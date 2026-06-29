@@ -944,13 +944,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Your daily swipes have refreshed — come clean up some more."
+            "value" : "Your daily swipes have refreshed!"
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "המכסה היומית שלך התחדשה — בוא נמשיך לנקות."
+            "value" : "המכסה היומית שלך התחדשה!"
           }
         }
       }
