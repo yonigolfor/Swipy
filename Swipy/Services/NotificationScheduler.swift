@@ -86,23 +86,27 @@ class NotificationScheduler {
     // MARK: - Trigger 1: Review Bin (fires 24h after items are left pending)
 
     private func checkReviewBinTrigger() {
-        guard currentDayCount() < 2 else { return }
         guard !persistence.reviewBinIDs.isEmpty else {
-            // Bin was emptied — cancel any pending reminder
             UNUserNotificationCenter.current()
                 .removePendingNotificationRequests(withIdentifiers: [NotificationManager.reviewBinNotif])
             return
         }
 
-        // Don't nag again within 12 h of the last scheduled reminder
-        if let last = UserDefaults.standard.object(forKey: "lastReviewBinNotifScheduled") as? Date,
-           Date().timeIntervalSince(last) < 12 * 3600 { return }
+        // If there's a pending notification that hasn't fired yet (scheduled < 24h ago),
+        // replace it with fresh data. The same identifier means iOS atomically swaps
+        // the pending one — not an additional notification, so no daily cap hit.
+        let lastScheduled = UserDefaults.standard.object(forKey: "lastReviewBinNotifScheduled") as? Date
+        let hasPendingNotif = lastScheduled.map { Date().timeIntervalSince($0) < 24 * 3600 } ?? false
+
+        if !hasPendingNotif {
+            guard currentDayCount() < 2 else { return }
+        }
 
         manager.scheduleReviewBinReminder(
             itemCount: persistence.reviewBinIDs.count,
             spaceSavedBytes: persistence.reviewBinSpaceSaved
         )
-        incrementDayCount()
+        if !hasPendingNotif { incrementDayCount() }
     }
 
     // MARK: - Trigger 2: Photo Burst (50+ new photos since last check)
@@ -120,15 +124,18 @@ class NotificationScheduler {
 
         let previousKey = "lastKnownPhotoCount"
 
-        // First run: baseline the count without notifying
+        // First run: baseline without notifying
         guard let previous = UserDefaults.standard.object(forKey: previousKey) as? Int else {
             UserDefaults.standard.set(current, forKey: previousKey)
             return
         }
 
-        UserDefaults.standard.set(current, forKey: previousKey)
         let diff = current - previous
+        // Do NOT advance the baseline here — let diffs accumulate across background cycles
+        // until they cross the threshold. Baseline only moves when a notification fires.
         guard diff >= 50 else { return }
+
+        UserDefaults.standard.set(current, forKey: previousKey)
 
         let opts = PHFetchOptions()
         opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
