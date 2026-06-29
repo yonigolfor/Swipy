@@ -104,24 +104,16 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             .appendingPathComponent("largeVideoCount.json")
     }
 
-    // MARK: - Image Cache
+    // MARK: - Active Request Tracking
 
-    /// App-level UIImage cache — allows PhotoCardView to receive images synchronously
-    /// at init time, preventing any ProgressView flash on cards we've already seen.
-    /// NSCache evicts automatically under memory pressure.
-    let imageCache: NSCache<NSString, UIImage> = {
-        let cache = NSCache<NSString, UIImage>()
-        cache.countLimit = 8          // top-5 stack + early-precache buffer + 1 undo slot
-        cache.totalCostLimit = 8 * 1024 * 1024  // ~8 MB ceiling
-        return cache
-    }()
+    /// In-flight PHImageRequestIDs keyed by asset ID.
+    /// Cancelled when a card leaves the stack (swipe or eviction) to prevent
+    /// stale full-res callbacks from triggering unnecessary re-renders.
+    private var activeRequests: [String: PHImageRequestID] = [:]
 
-    /// The target pixel size used when pre-loading images into the cache.
-    /// Matches the approximate card size on screen — avoids decoding full-res assets.
-    static let cacheTargetSize = CGSize(
-        width: UIScreen.main.bounds.width - 40,
-        height: UIScreen.main.bounds.height * 0.65
-    )
+    /// Returns the cached UIImage for the given asset ID, delegating to PhotoLibraryService.
+    /// Views use this instead of accessing the cache directly.
+    func image(for id: String) -> UIImage? { photoService.cachedImage(for: id) }
 
     // MARK: - Snooze Queue
 
@@ -788,7 +780,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                     self.photoStack.append(contentsOf: rawItems)
                     self.photoService.startCaching(
                         for: rawItems,
-                        targetSize: CGSize(width: 400, height: 600)
+                        targetSize: photoService.cardTargetSize
                     )
                 }
                 self.fetchCursor = newFetchCursor
@@ -826,7 +818,8 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// Swipe Right — Keep
     func keepPhoto() {
         guard let topCard = photoStack.first else { return }
-        lastSwipedImage = imageCache.object(forKey: topCard.id as NSString)
+        lastSwipedImage = photoService.cachedImage(for: topCard.id)
+        if let reqID = activeRequests.removeValue(forKey: topCard.id) { photoService.cancelRequest(reqID) }
         processedAssetIDs.insert(topCard.id)
         persistence.saveKeptID(topCard.id)
         persistence.clearSnoozedID(topCard.id)
@@ -846,7 +839,8 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     func deletePhoto() {
         guard !photoStack.isEmpty else { return }
         var topCard = photoStack.removeFirst()
-        lastSwipedImage = imageCache.object(forKey: topCard.id as NSString)
+        lastSwipedImage = photoService.cachedImage(for: topCard.id)
+        if let reqID = activeRequests.removeValue(forKey: topCard.id) { photoService.cancelRequest(reqID) }
         processedAssetIDs.insert(topCard.id)
         persistence.clearSnoozedID(topCard.id)
         // Freeze file size now — live asset.fileSize can return 0 for iCloud assets later.
@@ -869,7 +863,8 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// Uses an absolute targetMilestone so the delay survives force-quit and app relaunches.
     func snoozePhoto() {
         guard let topCard = photoStack.first else { return }
-        lastSwipedImage = imageCache.object(forKey: topCard.id as NSString)
+        lastSwipedImage = photoService.cachedImage(for: topCard.id)
+        if let reqID = activeRequests.removeValue(forKey: topCard.id) { photoService.cancelRequest(reqID) }
         // Block from pagination until the staging milestone is reached (removed by
         // stageSnoozedItemsIfReady on staging, or by undoLastAction on undo).
         processedAssetIDs.insert(topCard.id)
@@ -914,9 +909,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
         // Restore the cached image so the undo card appears instantly.
         if let img = lastSwipedImage {
-            imageCache.setObject(img, forKey: item.id as NSString,
-                                 cost: Int(PhotoStackViewModel.cacheTargetSize.width *
-                                           PhotoStackViewModel.cacheTargetSize.height * 4))
+            photoService.cacheImage(img, for: item.id)
             activeCacheIDs.insert(item.id)
             loadedImageIDs.insert(item.id)
             lastSwipedImage = nil
@@ -1060,14 +1053,13 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
         let items = Array(photoStack.dropFirst().prefix(20)).filter { !$0.isVideo }
         guard !items.isEmpty else { return }
-        let targetSize = PhotoStackViewModel.cacheTargetSize
+        let targetSize = photoService.cardTargetSize
 
         prefetchTask = Task.detached(priority: .utility) { [weak self] in
             for item in items {
                 guard !Task.isCancelled else { break }
-                // Skip if already in NSCache
                 let inMemory = await MainActor.run { [weak self] in
-                    self?.imageCache.object(forKey: item.id as NSString) != nil
+                    self?.photoService.cachedImage(for: item.id) != nil
                 } ?? false
                 if inMemory { continue }
                 // Skip if already on disk
@@ -1357,7 +1349,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                             self.photoStack.append(found)
                             self.photoService.startCaching(
                                 for: [found],
-                                targetSize: CGSize(width: 400, height: 600)
+                                targetSize: photoService.cardTargetSize
                             )
                             // Hide loading indicator as soon as first result arrives
                             if self.isLoading { self.isLoading = false }
@@ -1372,7 +1364,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                         self.photoStack.append(contentsOf: analyzed)
                         self.photoService.startCaching(
                             for: analyzed,
-                            targetSize: CGSize(width: 400, height: 600)
+                            targetSize: photoService.cardTargetSize
                         )
                         if self.isLoading { self.isLoading = false }
                     }
@@ -1384,7 +1376,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                         self.photoStack.append(contentsOf: rawItems)
                         self.photoService.startCaching(
                             for: rawItems,
-                            targetSize: CGSize(width: 400, height: 600)
+                            targetSize: photoService.cardTargetSize
                         )
                         if self.isLoading { self.isLoading = false }
                     }
@@ -1525,39 +1517,32 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         let upcomingItems = Array(photoStack.dropFirst().prefix(5))
         guard !upcomingItems.isEmpty else { return }
 
-        let targetSize = PhotoStackViewModel.cacheTargetSize
-        photoService.startCaching(for: upcomingItems, targetSize: targetSize)
+        photoService.warmUpCache(for: upcomingItems)
 
-        // Pass the top card's ID as protected so its AVPlayer is never evicted
-        // while the gesture is still in flight (user may drag back to centre).
         let topCardID = photoStack.first?.asset.localIdentifier
         let upcomingAssets = upcomingItems.map { $0.asset }
         Task { await VideoPlayerPool.shared.warmUp(for: upcomingAssets, protectedID: topCardID) }
 
         for item in upcomingItems where !item.isVideo {
-            let key = item.id as NSString
-            if let cached = imageCache.object(forKey: key) {
+            if let cached = photoService.cachedImage(for: item.id) {
                 loadedImageIDs.insert(item.id)
                 scheduleScore(item: item, image: cached)
                 continue
             }
-            PhotoLibraryService.shared.loadImage(
-                for: item.asset, targetSize: targetSize,
-                onSlowNetwork: { [weak self] in
-                    Task { @MainActor [weak self] in self?.recordNetworkFailure() }
-                }
-            ) { [weak self] img in
-                guard let self, let img else { return }
-                self.imageCache.setObject(img, forKey: key, cost: Int(targetSize.width * targetSize.height * 4))
-                let capturedItem = item
-                let capturedImg  = img
+            if let existing = activeRequests[item.id] { photoService.cancelRequest(existing) }
+            let capturedItem = item
+            activeRequests[item.id] = photoService.requestCardImage(for: item.asset) { [weak self] image, isDegraded in
+                guard let self else { return }
+                self.photoService.cacheImage(image, for: capturedItem.id)
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
-                    // Remove then insert: if a quality upgrade just landed (second call),
-                    // the toggle forces SwiftUI to re-render and pick up the better image.
+                    guard let self,
+                          self.photoStack.contains(where: { $0.id == capturedItem.id }) else { return }
                     self.loadedImageIDs.remove(capturedItem.id)
                     self.loadedImageIDs.insert(capturedItem.id)
-                    self.scheduleScore(item: capturedItem, image: capturedImg)
+                    if !isDegraded {
+                        self.scheduleScore(item: capturedItem, image: image)
+                        self.activeRequests.removeValue(forKey: capturedItem.id)
+                    }
                 }
             }
         }
@@ -1567,17 +1552,14 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         let nextItems = Array(photoStack.prefix(5))
         guard !nextItems.isEmpty else { return }
         print("[AestheticScoring] precacheNextImages — \(nextItems.count) items, personaReady=\(AestheticScoringService.shared.isPersonaReady)")
-        let targetSize = PhotoStackViewModel.cacheTargetSize
-        photoService.startCaching(for: nextItems, targetSize: targetSize)
+
+        photoService.warmUpCache(for: nextItems)
 
         let nextAssets = nextItems.map { $0.asset }
         Task { await VideoPlayerPool.shared.warmUp(for: nextAssets) }
 
-        // Pull all top-5 non-video images into NSCache (was top-3).
-        // countLimit is now 8 so there is room for 5 cards + undo slot.
         for (stackIndex, item) in nextItems.enumerated() where !item.isVideo {
-            let key = item.id as NSString
-            if let cached = imageCache.object(forKey: key) {
+            if let cached = photoService.cachedImage(for: item.id) {
                 loadedImageIDs.insert(item.id)
                 scheduleScore(item: item, image: cached)
                 #if DEBUG
@@ -1585,24 +1567,24 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 #endif
                 continue
             }
-            PhotoLibraryService.shared.loadImage(
-                for: item.asset, targetSize: targetSize,
-                onSlowNetwork: { [weak self] in
-                    Task { @MainActor [weak self] in self?.recordNetworkFailure() }
-                }
-            ) { [weak self] img in
-                guard let self, let img else { return }
-                self.imageCache.setObject(img, forKey: key, cost: Int(targetSize.width * targetSize.height * 4))
-                let capturedItem = item
-                let capturedImg  = img
-                #if DEBUG
-                self.debugLogBlurVariance(of: capturedImg, id: capturedItem.id, stackIndex: stackIndex)
-                #endif
+            if let existing = activeRequests[item.id] { photoService.cancelRequest(existing) }
+            let capturedItem = item
+            let capturedStackIndex = stackIndex
+            activeRequests[item.id] = photoService.requestCardImage(for: item.asset) { [weak self] image, isDegraded in
+                guard let self else { return }
+                self.photoService.cacheImage(image, for: capturedItem.id)
                 Task { @MainActor [weak self] in
-                    guard let self else { return }
+                    guard let self,
+                          self.photoStack.contains(where: { $0.id == capturedItem.id }) else { return }
                     self.loadedImageIDs.remove(capturedItem.id)
                     self.loadedImageIDs.insert(capturedItem.id)
-                    self.scheduleScore(item: capturedItem, image: capturedImg)
+                    if !isDegraded {
+                        #if DEBUG
+                        self.debugLogBlurVariance(of: image, id: capturedItem.id, stackIndex: capturedStackIndex)
+                        #endif
+                        self.scheduleScore(item: capturedItem, image: image)
+                        self.activeRequests.removeValue(forKey: capturedItem.id)
+                    }
                 }
             }
         }
@@ -1616,10 +1598,10 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     private func scoreCachedCardsIfNeeded() {
         guard AestheticScoringService.shared.isPersonaReady else { return }
         let stackSize = photoStack.prefix(8).filter { !$0.isVideo }.count
-        let cachedCount = photoStack.prefix(8).filter { !$0.isVideo && imageCache.object(forKey: $0.id as NSString) != nil }.count
+        let cachedCount = photoStack.prefix(8).filter { !$0.isVideo && photoService.cachedImage(for: $0.id) != nil }.count
         print("[AestheticScoring] scoreCachedCardsIfNeeded — stack:\(stackSize) cached:\(cachedCount)")
         for item in photoStack.prefix(8) where !item.isVideo {
-            guard let cached = imageCache.object(forKey: item.id as NSString) else { continue }
+            guard let cached = photoService.cachedImage(for: item.id) else { continue }
             scheduleScore(item: item, image: cached)
         }
     }
@@ -1653,23 +1635,18 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     private func evictStaleCacheEntries(keeping items: [PhotoItem]) {
         var keepIDs = Set(items.map { $0.id })
-        // Index-0 immunity: never evict the card currently on screen,
-        // even if called unexpectedly while a drag is in progress.
         if let topID = photoStack.first?.id { keepIDs.insert(topID) }
         var evictedItems: [PhotoItem] = []
         for id in activeCacheIDs where !keepIDs.contains(id) && id != lastAction?.item.id {
-            imageCache.removeObject(forKey: id as NSString)
+            if let reqID = activeRequests.removeValue(forKey: id) { photoService.cancelRequest(reqID) }
+            photoService.evictImage(for: id)
             loadedImageIDs.remove(id)
             loadedScoreIDs.remove(id)
-            // Collect the PhotoItem so we can tell PHCachingImageManager to stop
-            // pre-fetching assets that have left the visible window (Bug #3 fix).
             if let item = photoStack.first(where: { $0.id == id }) {
                 evictedItems.append(item)
             }
         }
-        if !evictedItems.isEmpty {
-            photoService.stopCaching(for: evictedItems)
-        }
+        if !evictedItems.isEmpty { photoService.stopCaching(for: evictedItems) }
         activeCacheIDs = keepIDs
         if let lastID = lastAction?.item.id { activeCacheIDs.insert(lastID) }
     }

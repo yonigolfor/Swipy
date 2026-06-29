@@ -458,11 +458,10 @@ struct PhotoCardView: View {
             self.isLoading = false
         }
 
-        // Pass 2 — full-res. Respects isOfflineMode via PhotoLibraryService.
-        // In offline mode: .opportunistic + no network → returns best local quality.
+        // Pass 2 — full-res at retina card dimensions. Respects isOfflineMode via PhotoLibraryService.
         PhotoLibraryService.shared.loadImage(
             for: item.asset,
-            targetSize: CGSize(width: 600, height: 800)
+            targetSize: PhotoLibraryService.shared.cardTargetSize
         ) { fullRes in
             guard let fullRes else {
                 // Asset missing or corrupt — stop the spinner so the card

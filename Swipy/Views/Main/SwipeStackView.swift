@@ -111,7 +111,7 @@ struct SwipeStackView: View {
                                 PhotoCardView(
                                     item: item,
                                     isTopCard: index == 0,
-                                    cachedImage: viewModel.imageCache.object(forKey: item.id as NSString),
+                                    cachedImage: viewModel.image(for: item.id),
                                     aestheticScore: viewModel.loadedScoreIDs.contains(item.id)
                                         ? AestheticScoringService.shared.cachedScore(for: item.id)
                                         : nil

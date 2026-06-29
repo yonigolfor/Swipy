@@ -21,6 +21,26 @@ class PhotoLibraryService: ObservableObject {
 
     private let imageManager = PHCachingImageManager()
 
+    // MARK: - Card Image Cache (service-owned; ViewModel stays stateless for images)
+
+    /// In-memory store for the top-5 visible cards + 1 undo slot.
+    /// NSCache evicts automatically under memory pressure.
+    private let cardCache: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.countLimit = 6
+        return c
+    }()
+
+    /// Screen-pixel dimensions for card images. Computed once on first access.
+    /// Multiplied by UIScreen.main.scale so PHImageManager returns retina-density pixels.
+    lazy var cardTargetSize: CGSize = {
+        let scale = UIScreen.main.scale
+        return CGSize(
+            width:  (UIScreen.main.bounds.width  - 40) * scale,
+            height:  UIScreen.main.bounds.height * 0.65 * scale
+        )
+    }()
+
     // The raw PHFetchResult — treated as a lazy index, never fully enumerated.
     // Access individual objects with object(at:) or bounded ranges only.
     private(set) var fetchResult: PHFetchResult<PHAsset>?
@@ -299,6 +319,50 @@ class PhotoLibraryService: ObservableObject {
             return (resource.value(forKey: "locallyAvailable") as? Bool) ?? true
         }
         return true
+    }
+
+    // MARK: - Card Image API
+
+    func cachedImage(for assetID: String) -> UIImage? {
+        cardCache.object(forKey: assetID as NSString)
+    }
+
+    func cacheImage(_ image: UIImage, for assetID: String) {
+        cardCache.setObject(image, forKey: assetID as NSString)
+    }
+
+    func evictImage(for assetID: String) {
+        cardCache.removeObject(forKey: assetID as NSString)
+    }
+
+    /// Pre-warms PHCachingImageManager's buffer for upcoming items using screen-pixel dimensions.
+    func warmUpCache(for items: [PhotoItem]) {
+        startCaching(for: items, targetSize: cardTargetSize)
+    }
+
+    /// Opportunistic request — handler fires twice per asset:
+    ///   isDegraded=true  → fast low-res, show immediately
+    ///   isDegraded=false → full-res, upgrade when relevant
+    /// Returns a PHImageRequestID for cancellation.
+    @discardableResult
+    func requestCardImage(
+        for asset: PHAsset,
+        onResult: @escaping (_ image: UIImage, _ isDegraded: Bool) -> Void
+    ) -> PHImageRequestID {
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .opportunistic
+        options.isNetworkAccessAllowed = !isOfflineMode
+        options.isSynchronous = false
+        return imageManager.requestImage(
+            for: asset,
+            targetSize: cardTargetSize,
+            contentMode: .aspectFill,
+            options: options
+        ) { image, info in
+            guard let image else { return }
+            let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+            onResult(image, isDegraded)
+        }
     }
 
     // MARK: - Image Loading
