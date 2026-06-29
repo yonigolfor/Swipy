@@ -308,17 +308,26 @@ class PhotoLibraryService: ObservableObject {
 
     // MARK: - Local Availability
 
-    /// Returns true if the asset's primary resource is fully stored on-device.
+    /// Returns true if the asset's full-size original is physically on-device.
     /// Uses PHAssetResource metadata — no file I/O, safe to call on any thread.
+    ///
+    /// On iCloud-optimized devices iOS stores a low-res proxy (.photo/.video) that is
+    /// always locallyAvailable=true, while the full-size original (.fullSizePhoto /
+    /// .fullSizeVideo) may only exist in iCloud. We must check the full-size resource
+    /// first; fall back to .photo/.video only when no separate full-size exists
+    /// (non-optimized devices where .photo IS the original).
     func isLocallyAvailable(_ asset: PHAsset) -> Bool {
         let resources = PHAssetResource.assetResources(for: asset)
-        let primaryTypes: Set<PHAssetResourceType> = [.photo, .video, .audio,
-                                                       .fullSizePhoto, .fullSizeVideo,
-                                                       .fullSizePairedVideo]
+        let fullSizeTypes: Set<PHAssetResourceType> = [.fullSizePhoto, .fullSizeVideo, .fullSizePairedVideo]
+        if let fullSize = resources.first(where: { fullSizeTypes.contains($0.type) }) {
+            return (fullSize.value(forKey: "locallyAvailable") as? Bool) ?? false
+        }
+        // No separate full-size resource → .photo/.video is the original.
+        let primaryTypes: Set<PHAssetResourceType> = [.photo, .video, .audio]
         for resource in resources where primaryTypes.contains(resource.type) {
             return (resource.value(forKey: "locallyAvailable") as? Bool) ?? true
         }
-        return true
+        return false
     }
 
     // MARK: - Card Image API
@@ -343,9 +352,10 @@ class PhotoLibraryService: ObservableObject {
     /// Requests a card image with delivery appropriate for the current mode.
     ///
     /// **Online** — `.opportunistic`: handler fires twice (`isDegraded` true → false).
-    /// **Offline** — `.fastFormat`: handler fires once, always `isDegraded=false` (final).
-    ///   If the asset is unavailable/corrupted, `image` will be nil with `isDegraded=false`
-    ///   so callers know loading is complete and won't wait indefinitely.
+    /// **Offline** — `.highQualityFormat` + degraded guard: fires once with the full-res
+    ///   local original. If iOS can only deliver a proxy (isDegraded=true), returns nil so
+    ///   the card is excluded rather than shown blurry. Always marked final (isDegraded=false)
+    ///   so callers never wait for a second callback that will never arrive.
     ///
     /// Returns a PHImageRequestID for cancellation.
     @discardableResult
@@ -358,15 +368,17 @@ class PhotoLibraryService: ObservableObject {
         options.isSynchronous = false
 
         if isOfflineMode {
-            // Single callback, always marked final — no network upgrade will ever arrive.
-            options.deliveryMode = .fastFormat
+            // highQualityFormat ensures the full-size local original is delivered.
+            // If iOS can only produce a degraded proxy, return nil — never show blurry cards.
+            options.deliveryMode = .highQualityFormat
             return imageManager.requestImage(
                 for: asset,
                 targetSize: cardTargetSize,
                 contentMode: .aspectFill,
                 options: options
-            ) { image, _ in
-                onResult(image, false)
+            ) { image, info in
+                let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+                onResult(isDegraded ? nil : image, false)
             }
         }
 

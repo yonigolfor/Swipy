@@ -154,10 +154,10 @@ The "no network in offline mode" guarantee is enforced at four independent layer
 
 | Layer | Mechanism |
 |---|---|
-| **`requestCardImage()`** | In offline mode uses `deliveryMode = .fastFormat`, `isNetworkAccessAllowed = false`. Handler fires exactly once with `isDegraded=false` — ViewModel inserts into `finalImageIDs` immediately so the View never shows a spinner or waits for a second callback that will never come. |
+| **`requestCardImage()`** | In offline mode uses `deliveryMode = .highQualityFormat`, `isNetworkAccessAllowed = false`. Checks `PHImageResultIsDegradedKey` — returns `nil` if iOS can only deliver a proxy so blurry cards are never shown. Handler fires exactly once with `isDegraded=false` — ViewModel inserts into `finalImageIDs` immediately. |
 | **`loadImage()`** | `options.isNetworkAccessAllowed = !isOfflineMode`; in offline mode, checks `PHImageResultIsDegradedKey` — returns `nil` for any degraded proxy so blurry stand-ins are never shown. |
 | **`startCaching()`** | Explicit `PHImageRequestOptions` with `isNetworkAccessAllowed = !isOfflineMode` — replaces previous `options: nil` which defaulted to network allowed |
-| **`VideoPlayerPool.load()`** | `options.isNetworkAccessAllowed = !PhotoLibraryService.shared.isOfflineMode` — prevents iCloud video requests from hanging indefinitely in airplane mode |
+| **`VideoPlayerPool.load()`** | `deliveryMode = offline ? .highQualityFormat : .fastFormat`; `isNetworkAccessAllowed = !offline` — full-quality local video, no iCloud fetch, no transcoded proxy. |
 | **Background prefetch** | `startBackgroundPrefetch()` guard: `network.isOnline && !network.isExpensive && !network.isConstrained` — never runs while offline |
 
 The `startCaching()` and `VideoPlayerPool` fixes are what ensure snoozed items flushed via `flushSnoozedItemsNow()` load cleanly: the items have already passed the `isLocallyAvailable` / `isCached` filter, and the media pipeline now confirms it will never reach out to iCloud.
@@ -205,6 +205,8 @@ let cachedIDs = diskCache.cachedAssetIDSet()   // Set<String> of sanitized asset
 let sanitizedID = asset.localIdentifier.replacingOccurrences(of: "/", with: "_")
 let isLocal = service.isLocallyAvailable(asset) || cachedIDs.contains(sanitizedID)
 ```
+
+**`isLocallyAvailable()` checks full-size resources first:** On iCloud-optimized devices, iOS stores a low-res proxy (`.photo` / `.video`) that is always `locallyAvailable = true`, while the full-size original (`.fullSizePhoto` / `.fullSizeVideo`) may only exist in iCloud. `isLocallyAvailable()` checks `.fullSizePhoto` / `.fullSizeVideo` / `.fullSizePairedVideo` first — if any such resource exists, its `locallyAvailable` flag is the authoritative answer. It falls back to `.photo` / `.video` only when no separate full-size resource exists (non-optimized devices where `.photo` IS the original). This ensures proxy-only iCloud assets are excluded from the offline stack.
 
 **Why not `diskCache.retrieve()` per asset:** the previous implementation called `Data(contentsOf:)` for every non-local asset — a failed filesystem syscall for each. On a 20k all-iCloud library this totalled ~40 seconds. The `cachedAssetIDSet()` approach pays one `contentsOfDirectory` call upfront, then every lookup is a hash-set `contains` with no disk I/O.
 

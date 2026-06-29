@@ -22,6 +22,9 @@
     "99+" : {
 
     },
+    "Active" : {
+
+    },
     "Awesome! 💪" : {
       "localizations" : {
         "he" : {
@@ -313,6 +316,9 @@
         }
       }
     },
+    "Device" : {
+
+    },
     "filter.all" : {
       "comment" : "MARK: - Filter Categories",
       "extractionState" : "manual",
@@ -446,6 +452,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ממוינים לפי גודל קובץ"
+          }
+        }
+      }
+    },
+    "filter.local_storage" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local Storage"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "אחסון מקומי"
+          }
+        }
+      }
+    },
+    "filter.local_storage.desc" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Photos saved on your device"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "תמונות שמורות במכשיר"
           }
         }
       }
@@ -1842,6 +1882,23 @@
         }
       }
     },
+    "victory.exit_offline" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Browse All Photos"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "עיין בכל התמונות"
+          }
+        }
+      }
+    },
     "victory.import_photos" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2010,57 +2067,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "לא נמצאו תמונות במכשיר"
-          }
-        }
-      }
-    },
-    "filter.local_storage" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Local Storage"
-          }
-        },
-        "he" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "אחסון מקומי"
-          }
-        }
-      }
-    },
-    "filter.local_storage.desc" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Photos saved on your device"
-          }
-        },
-        "he" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "תמונות שמורות במכשיר"
-          }
-        }
-      }
-    },
-    "victory.exit_offline" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Browse All Photos"
-          }
-        },
-        "he" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "עיין בכל התמונות"
           }
         }
       }
