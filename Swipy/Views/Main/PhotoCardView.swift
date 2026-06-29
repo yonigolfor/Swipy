@@ -46,11 +46,17 @@ struct PhotoCardView: View {
     /// 1–10 aesthetic match score. Nil while persona is building or for videos.
     let aestheticScore: Int?
 
+    /// True when `cachedImage` is the fully-resolved version — no further
+    /// PHImageManager callbacks will arrive for this asset. The View skips
+    /// the reload dance and spinner entirely when this is set.
+    let isCachedImageFinal: Bool
+
     /// Pass a pre-loaded image from the ViewModel cache to display it instantly,
     /// skipping the async load path entirely and preventing any ProgressView flash.
-    init(item: PhotoItem, isTopCard: Bool, cachedImage: UIImage? = nil, aestheticScore: Int? = nil) {
+    init(item: PhotoItem, isTopCard: Bool, cachedImage: UIImage? = nil, isCachedImageFinal: Bool = false, aestheticScore: Int? = nil) {
         self.item = item
         self.isTopCard = isTopCard
+        self.isCachedImageFinal = isCachedImageFinal
         self.aestheticScore = aestheticScore
         _image = State(initialValue: cachedImage)
         // For images: skip loading if we already have the pixels.
@@ -318,27 +324,34 @@ struct PhotoCardView: View {
                     withAnimation(.easeIn(duration: 0.2)) { showLoadingSpinner = true }
                 }
             } else {
-                // Always reload full-res — even when a cachedImage was provided.
-                // The cached image may be a low-quality fast-format fallback from
-                // a slow iCloud prefetch. Demote it to thumbnailImage so it shows
-                // instantly while the HQ version loads in behind it.
-                if image != nil && thumbnailImage == nil {
-                    thumbnailImage = image
-                    image = nil
-                    isLoading = true
-                }
-                Task { @MainActor in
-                    if let diskCached = await OfflineCacheService.shared.retrieveAsync(for: item.id) {
-                        image = diskCached
-                        isLoading = false
-                    } else {
-                        loadImage()
+                if isCachedImageFinal, image != nil {
+                    // Image is the confirmed final version — no reload or spinner needed.
+                    isLoading = false
+                } else {
+                    // Demote cached image to thumbnail while the HQ version loads behind it.
+                    // (Cached image may be a degraded fast-format intermediate.)
+                    if image != nil && thumbnailImage == nil {
+                        thumbnailImage = image
+                        image = nil
+                        isLoading = true
                     }
-                }
-                imageSpinnerTask = Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 1_000_000_000)
-                    guard !Task.isCancelled, image == nil else { return }
-                    withAnimation(.easeIn(duration: 0.2)) { showImageSpinner = true }
+                    Task { @MainActor in
+                        if let diskCached = await OfflineCacheService.shared.retrieveAsync(for: item.id) {
+                            image = diskCached
+                            isLoading = false
+                        } else {
+                            loadImage()
+                        }
+                    }
+                    // Skip the spinner for isCachedImageFinal cards with nil image:
+                    // the asset is locally unavailable in offline mode — no point waiting.
+                    if !isCachedImageFinal {
+                        imageSpinnerTask = Task { @MainActor in
+                            try? await Task.sleep(nanoseconds: 1_000_000_000)
+                            guard !Task.isCancelled, image == nil else { return }
+                            withAnimation(.easeIn(duration: 0.2)) { showImageSpinner = true }
+                        }
+                    }
                 }
             }
         }

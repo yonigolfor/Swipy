@@ -340,19 +340,39 @@ class PhotoLibraryService: ObservableObject {
         startCaching(for: items, targetSize: cardTargetSize)
     }
 
-    /// Opportunistic request — handler fires twice per asset:
-    ///   isDegraded=true  → fast low-res, show immediately
-    ///   isDegraded=false → full-res, upgrade when relevant
+    /// Requests a card image with delivery appropriate for the current mode.
+    ///
+    /// **Online** — `.opportunistic`: handler fires twice (`isDegraded` true → false).
+    /// **Offline** — `.fastFormat`: handler fires once, always `isDegraded=false` (final).
+    ///   If the asset is unavailable/corrupted, `image` will be nil with `isDegraded=false`
+    ///   so callers know loading is complete and won't wait indefinitely.
+    ///
     /// Returns a PHImageRequestID for cancellation.
     @discardableResult
     func requestCardImage(
         for asset: PHAsset,
-        onResult: @escaping (_ image: UIImage, _ isDegraded: Bool) -> Void
+        onResult: @escaping (_ image: UIImage?, _ isDegraded: Bool) -> Void
     ) -> PHImageRequestID {
         let options = PHImageRequestOptions()
-        options.deliveryMode = .opportunistic
-        options.isNetworkAccessAllowed = !isOfflineMode
+        options.isNetworkAccessAllowed = false
         options.isSynchronous = false
+
+        if isOfflineMode {
+            // Single callback, always marked final — no network upgrade will ever arrive.
+            options.deliveryMode = .fastFormat
+            return imageManager.requestImage(
+                for: asset,
+                targetSize: cardTargetSize,
+                contentMode: .aspectFill,
+                options: options
+            ) { image, _ in
+                onResult(image, false)
+            }
+        }
+
+        // Online: opportunistic — fast degraded first, then full-res.
+        options.deliveryMode = .opportunistic
+        options.isNetworkAccessAllowed = true
         return imageManager.requestImage(
             for: asset,
             targetSize: cardTargetSize,

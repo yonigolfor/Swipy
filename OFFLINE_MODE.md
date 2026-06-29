@@ -132,12 +132,18 @@ loadImage() called (highQualityFormat, isNetworkAccessAllowed = true)
 `precacheNextImages()` and `prepareUpcomingCards()` handle the double completion:
 
 ```swift
-imageCache.setObject(fullQualityImage, forKey: key, cost: ...)
-loadedImageIDs.remove(item.id)   // toggle forces SwiftUI re-render
-loadedImageIDs.insert(item.id)   // card re-reads from NSCache → full quality
+// isDegraded=true (fast first pass):
+photoService.cacheImage(image, for: id)
+loadedImageIDs.remove(id); loadedImageIDs.insert(id)  // re-render with fast image
+// finalImageIDs not set yet — View knows more is coming
+
+// isDegraded=false (full-res):
+photoService.cacheImage(image, for: id)
+loadedImageIDs.remove(id); loadedImageIDs.insert(id)  // re-render with full image
+finalImageIDs.insert(id)                              // signals: no more callbacks
 ```
 
-The `remove` + `insert` toggle on `@Published var loadedImageIDs` causes SwiftUI to re-render the card and pick up the better image already stored in `NSCache`.
+The `remove` + `insert` toggle on `@Published var loadedImageIDs` causes SwiftUI to re-render the card and pick up the better image already in `NSCache`. Once `finalImageIDs` contains the ID, the next card that inherits this image from cache skips the reload dance entirely.
 
 ---
 
@@ -147,7 +153,8 @@ The "no network in offline mode" guarantee is enforced at four independent layer
 
 | Layer | Mechanism |
 |---|---|
-| **`loadImage()`** | `options.isNetworkAccessAllowed = !isOfflineMode`; `deliveryMode = .highQualityFormat` always. In offline mode, checks `PHImageResultIsDegradedKey` — returns `nil` for any degraded proxy so blurry stand-ins are never shown. |
+| **`requestCardImage()`** | In offline mode uses `deliveryMode = .fastFormat`, `isNetworkAccessAllowed = false`. Handler fires exactly once with `isDegraded=false` — ViewModel inserts into `finalImageIDs` immediately so the View never shows a spinner or waits for a second callback that will never come. |
+| **`loadImage()`** | `options.isNetworkAccessAllowed = !isOfflineMode`; in offline mode, checks `PHImageResultIsDegradedKey` — returns `nil` for any degraded proxy so blurry stand-ins are never shown. |
 | **`startCaching()`** | Explicit `PHImageRequestOptions` with `isNetworkAccessAllowed = !isOfflineMode` — replaces previous `options: nil` which defaulted to network allowed |
 | **`VideoPlayerPool.load()`** | `options.isNetworkAccessAllowed = !PhotoLibraryService.shared.isOfflineMode` — prevents iCloud video requests from hanging indefinitely in airplane mode |
 | **Background prefetch** | `startBackgroundPrefetch()` guard: `network.isOnline && !network.isExpensive && !network.isConstrained` — never runs while offline |
@@ -289,6 +296,7 @@ photoStack.count drops to 12
 | `isScanning` | `Bool` | Whether `scanLocalUniverse` is currently running |
 | `isLoading` | `Bool` | Generic loading flag; drives `onChange` landing animation |
 | `offlineFoundNoLocalItems` | `Bool` | Set after scan completes with zero results — no locally-stored photos exist |
+| `finalImageIDs` | `Set<String>` | IDs for which image delivery is complete. In offline mode, populated on every non-nil `requestCardImage` callback (`.fastFormat` = always final). Cleared on `activateOfflineMode()` and `resetAndLoad()`. |
 
 ## Key Files
 

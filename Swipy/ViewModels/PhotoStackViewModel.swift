@@ -36,6 +36,12 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// AestheticScoringService. Views observe this to show the match badge.
     @Published var loadedScoreIDs: Set<String> = []
 
+    /// IDs of assets whose image delivery is complete — no further PHImageManager
+    /// callbacks will arrive. Online: set when isDegraded==false. Offline: set on
+    /// every non-nil callback (fastFormat delivers exactly one final result).
+    /// Views skip the reload dance and spinner for any ID present in this set.
+    @Published var finalImageIDs: Set<String> = []
+
     // MARK: - Offline Mode State
 
     enum OfflinePromptReason { case offline, constrained, slowNetwork }
@@ -509,6 +515,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         isFetchingNextPage = false
         loadedImageIDs = []
         loadedScoreIDs = []
+        finalImageIDs = []
         // Reset shuffle so stale state doesn't leak across filter changes or tab refreshes.
         isShuffleModeActive = false
         savedLinearCursor = 0
@@ -912,6 +919,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             photoService.cacheImage(img, for: item.id)
             activeCacheIDs.insert(item.id)
             loadedImageIDs.insert(item.id)
+            finalImageIDs.insert(item.id)
             lastSwipedImage = nil
         }
 
@@ -1004,6 +1012,8 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         offlineFetchCursor = 0
         PhotoLibraryService.shared.isOfflineMode = true
         cancelPrefetch()
+        finalImageIDs = []
+        loadedImageIDs = []
         // If shuffle was active, reset it cleanly — shuffle and offline are mutually exclusive.
         isShuffleModeActive = false
         preShuffleStack = nil
@@ -1532,15 +1542,17 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             if let existing = activeRequests[item.id] { photoService.cancelRequest(existing) }
             let capturedItem = item
             activeRequests[item.id] = photoService.requestCardImage(for: item.asset) { [weak self] image, isDegraded in
-                guard let self else { return }
+                guard let self, let image else { return }
                 self.photoService.cacheImage(image, for: capturedItem.id)
+                let capturedImage = image
                 Task { @MainActor [weak self] in
                     guard let self,
                           self.photoStack.contains(where: { $0.id == capturedItem.id }) else { return }
                     self.loadedImageIDs.remove(capturedItem.id)
                     self.loadedImageIDs.insert(capturedItem.id)
                     if !isDegraded {
-                        self.scheduleScore(item: capturedItem, image: image)
+                        self.finalImageIDs.insert(capturedItem.id)
+                        self.scheduleScore(item: capturedItem, image: capturedImage)
                         self.activeRequests.removeValue(forKey: capturedItem.id)
                     }
                 }
@@ -1571,18 +1583,20 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             let capturedItem = item
             let capturedStackIndex = stackIndex
             activeRequests[item.id] = photoService.requestCardImage(for: item.asset) { [weak self] image, isDegraded in
-                guard let self else { return }
+                guard let self, let image else { return }
                 self.photoService.cacheImage(image, for: capturedItem.id)
+                let capturedImage = image
                 Task { @MainActor [weak self] in
                     guard let self,
                           self.photoStack.contains(where: { $0.id == capturedItem.id }) else { return }
                     self.loadedImageIDs.remove(capturedItem.id)
                     self.loadedImageIDs.insert(capturedItem.id)
                     if !isDegraded {
+                        self.finalImageIDs.insert(capturedItem.id)
                         #if DEBUG
-                        self.debugLogBlurVariance(of: image, id: capturedItem.id, stackIndex: capturedStackIndex)
+                        self.debugLogBlurVariance(of: capturedImage, id: capturedItem.id, stackIndex: capturedStackIndex)
                         #endif
-                        self.scheduleScore(item: capturedItem, image: image)
+                        self.scheduleScore(item: capturedItem, image: capturedImage)
                         self.activeRequests.removeValue(forKey: capturedItem.id)
                     }
                 }
@@ -1642,6 +1656,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             photoService.evictImage(for: id)
             loadedImageIDs.remove(id)
             loadedScoreIDs.remove(id)
+            finalImageIDs.remove(id)
             if let item = photoStack.first(where: { $0.id == id }) {
                 evictedItems.append(item)
             }

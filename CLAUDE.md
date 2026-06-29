@@ -39,9 +39,13 @@ PHPhotoLibrary
               ├─ reviewBin         # @Published [PhotoItem]
               ├─ loadedImageIDs    # @Published Set<String> — triggers SwiftUI re-render when image ready
               ├─ loadedScoreIDs    # @Published Set<String> — triggers badge render when score ready
-              ├─ NSCache<NSString, UIImage>  # 8 images / 8MB cap
+              ├─ finalImageIDs     # @Published Set<String> — signals delivery complete (no more callbacks)
               ├─ AestheticScoringService     # singleton — persona + score cache
               └─ VideoPlayerPool   # singleton, max 3 AVPlayers
+
+PhotoLibraryService (service-owned):
+              ├─ NSCache<NSString, UIImage>  # 6 images, OS-managed eviction (retina-pixel dimensions)
+              └─ requestCardImage()  # .opportunistic online / .fastFormat offline (always isDegraded=false)
 ```
 
 **State flows down, events flow up** through the ViewModel. Views only read `@EnvironmentObject var vm: PhotoStackViewModel` — they never touch services directly.
