@@ -96,6 +96,9 @@ struct SwipeStackView: View {
                                     UIApplication.shared.open(url)
                                 } : nil,
                                 onReviewSnoozed: viewModel.pendingSnoozedCount > 0 ? { viewModel.flushSnoozedItemsNow() } : nil,
+                                onExitOfflineMode: viewModel.isOfflineMode ? {
+                                    performOfflineTransition(deactivating: true) { viewModel.deactivateOfflineMode() }
+                                } : nil,
                                 reviewBinCount: viewModel.reviewBin.count,
                                 snoozedCount: viewModel.pendingSnoozedCount,
                                 currentFilter: viewModel.currentFilter,
@@ -217,12 +220,12 @@ struct SwipeStackView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            // 6. FAB row — shuffle (left, hidden in offline mode) + offline mode (right)
-            // Force LTR so FABs stay on correct sides in RTL locales (e.g. Hebrew).
-            VStack {
-                Spacer()
-                HStack {
-                    if !viewModel.isOfflineMode {
+            // 6. FAB row — shuffle only (offline entry point moved to SmartFiltersView)
+            // Force LTR so FAB stays on correct side in RTL locales (e.g. Hebrew).
+            if !viewModel.isOfflineMode {
+                VStack {
+                    Spacer()
+                    HStack {
                         shuffleFAB
                             .overlay(alignment: .top) {
                                 if viewModel.isShuffleModeActive {
@@ -235,18 +238,16 @@ struct SwipeStackView: View {
                                 }
                             }
                             .animation(.spring(response: 0.4, dampingFraction: 0.75), value: viewModel.isShuffleModeActive)
-                            .transition(.opacity.combined(with: .scale))
+                        Spacer()
                     }
-                    Spacer()
-                    offlineFAB
+                    .padding(.horizontal, 24)
+                    // Extra clearance when the top card is a video so the FAB
+                    // doesn't sit on top of the VideoProgressBar.
+                    .padding(.bottom, 140)
                 }
-                .padding(.horizontal, 24)
-                // Extra clearance when the top card is a video so the FABs
-                // don't sit on top of the VideoProgressBar.
-                .padding(.bottom, 140)
+                .environment(\.layoutDirection, .leftToRight)
+                .zIndex(50)
             }
-            .environment(\.layoutDirection, .leftToRight)
-            .zIndex(50)
 
             // 7. Pinch-zoom background dim — above all chrome but below the zoomed card (zIndex 200).
             // Animates IN only; disappears instantly on release so it doesn't compete
@@ -447,51 +448,6 @@ struct SwipeStackView: View {
                 )
         )
         .shadow(color: .black.opacity(0.25), radius: 10, y: 3)
-    }
-
-    // MARK: - Offline FAB
-
-    private var offlineFAB: some View {
-        Button {
-            performOfflineTransition(deactivating: viewModel.isOfflineMode) {
-                if viewModel.isOfflineMode {
-                    viewModel.deactivateOfflineMode()
-                } else {
-                    viewModel.activateOfflineMode()
-                }
-            }
-        } label: {
-            ZStack {
-                Circle()
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        Circle().fill(
-                            viewModel.isOfflineMode
-                                ? LinearGradient(
-                                    colors: [Color(red: 0.1, green: 0.35, blue: 0.9),
-                                             Color(red: 0.3, green: 0.1, blue: 0.75)],
-                                    startPoint: .topLeading, endPoint: .bottomTrailing)
-                                : LinearGradient(
-                                    colors: [Color.white.opacity(0.2), Color.white.opacity(0.05)],
-                                    startPoint: .topLeading, endPoint: .bottomTrailing)
-                        )
-                    )
-                    .frame(width: 56, height: 56)
-                    .shadow(
-                        color: viewModel.isOfflineMode
-                            ? Color(red: 0.1, green: 0.35, blue: 0.9).opacity(0.5)
-                            : .black.opacity(0.18),
-                        radius: 14, y: 5
-                    )
-
-                Image(systemName: viewModel.isOfflineMode ? "airplane.circle.fill" : "airplane")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundColor(.white)
-                    .scaleEffect(viewModel.isOfflineMode ? 1.1 : 1.0)
-                    .animation(.spring(response: 0.35, dampingFraction: 0.65), value: viewModel.isOfflineMode)
-            }
-        }
-        .buttonStyle(.plain)
     }
 
     // MARK: - Offline Badge

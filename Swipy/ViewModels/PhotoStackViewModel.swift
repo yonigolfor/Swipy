@@ -1046,6 +1046,23 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         loadPhotos(filter: .all)
     }
 
+    /// Deactivates offline mode without triggering a load — caller is responsible
+    /// for immediately calling loadPhotos(filter:). Used when the user navigates
+    /// to a filter category from SmartFiltersView while offline mode is active.
+    func deactivateOfflineSilently() {
+        networkFailureCount = 0
+        lastNetworkFailureDate = nil
+        isOfflineMode = false
+        PhotoLibraryService.shared.isOfflineMode = false
+        offlineFoundNoLocalItems = false
+        preOfflineModeStack = nil
+        preOfflineFetchCursor = 0
+        offlineFetchCursor = 0
+        isShuffleModeActive = false
+        savedLinearCursor = 0
+        preShuffleStack = nil
+    }
+
     func dismissOfflinePrompt() {
         showOfflinePrompt = false
     }

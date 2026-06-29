@@ -5,12 +5,13 @@
 When active, the stack is filtered to **locally-available assets only** — photos and videos that are physically on-device (not waiting in iCloud). No network traffic is initiated for any media loading operation. This guarantee holds regardless of whether offline mode was triggered by a real network loss or manually by the user on a slow connection.
 
 Activated via:
-- User tapping "Switch" in the offline prompt banner
-- User tapping the airplane FAB in `SwipeStackView`
+- User tapping **"Local Storage"** tile in `SmartFiltersView` → calls `activateOfflineMode()` + switches to SwipeStackView tab
+- User tapping **"Switch"** in the offline prompt banner (appears on WiFi loss / slow network detection)
 
 Deactivated via:
-- Tapping the X in the offline badge
-- Tapping the airplane FAB again
+- Tapping **"Browse All Photos"** in `VictoryView` (after swiping all local items)
+- Tapping the **X** in the offline badge in `SwipeStackView`
+- Tapping **any filter category** in `SmartFiltersView` → calls `deactivateOfflineSilently()` + `loadPhotos(filter:)`
 
 Offline mode is **session-scoped** — it does not persist across app launches. It's a "boarding a flight now" action, not a persistent setting.
 
@@ -287,6 +288,14 @@ photoStack.count drops to 12
 ```
 
 ---
+
+## Key Methods (ViewModel)
+
+| Method | When to use |
+|---|---|
+| `activateOfflineMode()` | Full offline activation — scans local universe, sets `isOfflineMode = true`. Used by SmartFiltersView tile and the offline prompt banner. |
+| `deactivateOfflineMode()` | Full deactivation — resets all offline state and calls `loadPhotos(filter: .all)`. Used by VictoryView CTA and the offline badge X. |
+| `deactivateOfflineSilently()` | Resets offline state **without** triggering a load. Caller is responsible for calling `loadPhotos(filter:)` immediately after. Used by SmartFiltersView when the user taps a regular filter category while offline. |
 
 ## Key Published Properties (ViewModel)
 

@@ -24,10 +24,16 @@ struct SmartFiltersView: View {
                         filterRow(for: category)
                     }
                 } header: {
-                                    Text(String(localized: "filters.section_header"))
-                                } footer: {
-                                    Text(String(localized: "filters.section_footer"))
-                                }
+                    Text(String(localized: "filters.section_header"))
+                } footer: {
+                    Text(String(localized: "filters.section_footer"))
+                }
+
+                Section {
+                    localStorageRow
+                } header: {
+                    Text("Device")
+                }
             }
             .navigationTitle(String(localized: "filters.title"))
             .navigationBarTitleDisplayMode(.large)
@@ -64,14 +70,72 @@ struct SmartFiltersView: View {
         }
     }
     
+    // MARK: - Local Storage Row
+
+    private var localStorageRow: some View {
+        let isActive = stackViewModel.isOfflineMode
+        let offlineBlue = Color(red: 0.1, green: 0.35, blue: 0.9)
+
+        return Button {
+            if isActive {
+                selectedTab = 1
+            } else {
+                stackViewModel.activateOfflineMode()
+                selectedTab = 1
+            }
+        } label: {
+            HStack(spacing: 16) {
+                ZStack {
+                    Circle()
+                        .fill(isActive
+                              ? offlineBlue.opacity(0.2)
+                              : offlineBlue.opacity(0.12))
+                        .frame(width: 50, height: 50)
+                    Image(systemName: "airplane")
+                        .font(.title3)
+                        .foregroundColor(offlineBlue)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(String(localized: "filter.local_storage"))
+                        .font(.headline)
+                        .foregroundColor(.primary)
+                    Text(String(localized: "filter.local_storage.desc"))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Spacer()
+
+                if isActive {
+                    Text("Active")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(Capsule().fill(offlineBlue))
+                } else {
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.vertical, 8)
+        }
+    }
+
     // MARK: - Filter Row
-    
+
     private func filterRow(for category: FilterCategory) -> some View {
         let count = stackViewModel.categoryCounts[category] ?? 0
         let isEmpty = stackViewModel.categoryCounts[category] != nil && count == 0
 
         return Button {
             guard !isEmpty else { return }
+            if stackViewModel.isOfflineMode {
+                stackViewModel.deactivateOfflineSilently()
+            }
             stackViewModel.loadPhotos(filter: category)
             selectedTab = 1
         } label: {

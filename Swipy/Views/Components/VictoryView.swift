@@ -4,6 +4,7 @@ struct VictoryView: View {
     let onEmptyBin: () -> Void
     var onImportPhotos: (() -> Void)? = nil
     var onReviewSnoozed: (() -> Void)? = nil
+    var onExitOfflineMode: (() -> Void)? = nil
     var reviewBinCount: Int = 0
     var snoozedCount: Int = 0
     var currentFilter: FilterCategory = .all
@@ -127,6 +128,27 @@ struct VictoryView: View {
                     .frame(maxWidth: .infinity)
                     .padding()
                     .background(Capsule().fill(Color.blue.opacity(0.1)))
+                }
+                .padding(.horizontal)
+            }
+
+            if isOfflineMode, let onExitOfflineMode {
+                Button(action: onExitOfflineMode) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "photo.stack")
+                        Text(String(localized: "victory.exit_offline"))
+                            .font(.headline)
+                    }
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding()
+                    .background(Capsule().fill(
+                        LinearGradient(
+                            colors: [Color(red: 0.1, green: 0.35, blue: 0.9),
+                                     Color(red: 0.3, green: 0.1, blue: 0.75)],
+                            startPoint: .leading, endPoint: .trailing
+                        )
+                    ))
                 }
                 .padding(.horizontal)
             }
