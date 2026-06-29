@@ -921,6 +921,40 @@
         }
       }
     },
+    "notif.swipeLimitReset.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You can keep swiping! 🃏"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "אפשר להמשיך להחליק! 🃏"
+          }
+        }
+      }
+    },
+    "notif.swipeLimitReset.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your daily swipes have refreshed — come clean up some more."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "המכסה היומית שלך התחדשה — בוא נמשיך לנקות."
+          }
+        }
+      }
+    },
     "Offline Mode" : {
 
     },

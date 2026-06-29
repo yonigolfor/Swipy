@@ -1,4 +1,5 @@
 import Foundation
+import UserNotifications
 
 class DailyLimitService: ObservableObject {
     static let shared = DailyLimitService()
@@ -71,5 +72,8 @@ class DailyLimitService: ObservableObject {
         UserDefaults.standard.set(0, forKey: swipesKey)
         UserDefaults.standard.set(0, forKey: bonusKey)
         UserDefaults.standard.set(today, forKey: dateKey)
+        // Limit has reset — cancel the "you can swipe again" notification if still pending.
+        UNUserNotificationCenter.current()
+            .removePendingNotificationRequests(withIdentifiers: [NotificationManager.swipeLimitResetNotif])
     }
 }

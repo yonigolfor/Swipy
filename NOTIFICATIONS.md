@@ -81,7 +81,28 @@ checkPhotoBurstTrigger()
 
 ---
 
-### 4. ניקוי שבועי
+### 4. מכסת החלקות התחדשה
+
+**מתי:** כשמשתמש חינמי מגיע ל-0 החלקות ביום, ובחצות הלילה (00:01) כשהמכסה מתאפסת.
+
+**תנאים:**
+- `DailyLimitService.shared.hasReachedLimit == true`
+- `!PremiumManager.shared.isPremium` — פרמיום לא מוגבל, לא צריך התראה
+- מתוזמן בסיום כל החלקת keep/delete שגרמה להגיע למגבלה
+
+**טריגר:** `scheduleSwipeLimitResetIfNeeded()` ב-`PhotoStackViewModel` — נקרא מיד אחרי `recordSwipe()` ב-`keepPhoto()` וב-`deletePhoto()`.
+
+**מסירה:** `UNCalendarNotificationTrigger` ל-00:01 ביום המחרת (דקה אחרי האיפוס). לא חוזרת (`repeats: false`).
+
+**ביטול:** `DailyLimitService.resetIfNewDay()` מבטל את ההתראה הממתינה כשהיום מתחדש — safety net למקרה שהמשתמש פתח את האפליקציה לפני חצות.
+
+**לא נספרת** במכסת ה-2 ביום — היא התראה פונקציונלית שהמשתמש יזם (הגיע למגבלה).
+
+**פעולה זמינה:** "בוא נמיין" → פותח Swipe (טאב 1)
+
+---
+
+### 5. ניקוי שבועי
 **מתי:** כל יום ראשון בערב בשעה 21:30.
 
 **מנגנון:** `UNCalendarNotificationTrigger` עם `repeats: true` — **מובטח לחלוטין**, לא תלוי ב-background task.
@@ -92,7 +113,7 @@ checkPhotoBurstTrigger()
 
 ---
 
-### 5. תזכורת אי-פעילות (72 שעות)
+### 6. תזכורת אי-פעילות (72 שעות)
 **מתי:** 72 שעות לאחר הכניסה האחרונה לאפליקציה, אם המשתמש לא חזר.
 
 **כותרת:** "60 שניות זה המון זמן! ⏱️"

@@ -10,11 +10,12 @@ class NotificationManager {
     static let shared = NotificationManager()
 
     // Category identifiers
-    static let reviewBinCategory  = "REVIEW_BIN"
-    static let photoBurstCategory = "PHOTO_BURST"
-    static let milestoneCategory  = "MILESTONE"
-    static let weeklyCategory     = "WEEKLY_CLEANUP"
-    static let inactivityCategory = "INACTIVITY"
+    static let reviewBinCategory      = "REVIEW_BIN"
+    static let photoBurstCategory     = "PHOTO_BURST"
+    static let milestoneCategory      = "MILESTONE"
+    static let weeklyCategory         = "WEEKLY_CLEANUP"
+    static let inactivityCategory     = "INACTIVITY"
+    static let swipeLimitResetCategory = "SWIPE_LIMIT_RESET"
 
     // Action identifiers
     static let cleanNowAction  = "CLEAN_NOW"
@@ -22,11 +23,12 @@ class NotificationManager {
     static let sortNowAction   = "SORT_NOW"
 
     // Notification identifiers
-    static let reviewBinNotif  = "com.swipy.reviewBinReminder"
-    static let photoBurstNotif = "com.swipy.photoBurst"
-    static let milestoneNotif  = "com.swipy.milestone"
-    static let weeklyNotif     = "com.swipy.weeklyCleanup"
-    static let inactivityNotif = "com.swipy.inactivity"
+    static let reviewBinNotif       = "com.swipy.reviewBinReminder"
+    static let photoBurstNotif      = "com.swipy.photoBurst"
+    static let milestoneNotif       = "com.swipy.milestone"
+    static let weeklyNotif          = "com.swipy.weeklyCleanup"
+    static let inactivityNotif      = "com.swipy.inactivity"
+    static let swipeLimitResetNotif = "com.swipy.swipeLimitReset"
 
     private init() {}
 
@@ -74,6 +76,9 @@ class NotificationManager {
                                    actions: [sortNow],
                                    intentIdentifiers: []),
             UNNotificationCategory(identifier: Self.inactivityCategory,
+                                   actions: [sortNow],
+                                   intentIdentifiers: []),
+            UNNotificationCategory(identifier: Self.swipeLimitResetCategory,
                                    actions: [sortNow],
                                    intentIdentifiers: [])
         ]
@@ -124,6 +129,33 @@ class NotificationManager {
 
         schedule(identifier: "\(Self.milestoneNotif).\(gbSaved)gb", content: content, delay: 1)
         UserDefaults.standard.set(gbSaved, forKey: "lastMilestoneNotifiedGB")
+    }
+
+    // MARK: - Swipe Limit Reset
+
+    /// Schedules a notification for 00:01 of the next calendar day — when the daily limit resets.
+    /// Only call when a free user has just exhausted their daily swipe allowance.
+    /// Replaces any previously scheduled reset notification (same identifier = atomic swap).
+    func scheduleSwipeLimitResetNotification() {
+        let content = UNMutableNotificationContent()
+        content.title = String(localized: "notif.swipeLimitReset.title")
+        content.body = String(localized: "notif.swipeLimitReset.body")
+        content.categoryIdentifier = Self.swipeLimitResetCategory
+        content.sound = .default
+        content.userInfo = ["destination": "swipe"]
+
+        // 00:01 next day — one minute after the daily counter resets at midnight.
+        let tomorrow = Calendar.current.date(
+            byAdding: .day, value: 1,
+            to: Calendar.current.startOfDay(for: Date())
+        )!
+        let fireDate = Calendar.current.date(byAdding: .minute, value: 1, to: tomorrow)!
+        let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
+
+        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+        let request = UNNotificationRequest(identifier: Self.swipeLimitResetNotif, content: content, trigger: trigger)
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [Self.swipeLimitResetNotif])
+        UNUserNotificationCenter.current().add(request)
     }
 
     // MARK: - Weekly Cleanup

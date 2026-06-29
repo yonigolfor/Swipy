@@ -835,6 +835,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         hasPendingCountUpdate = true
         OfflineCacheService.shared.evict(for: topCard.id)
         DailyLimitService.shared.recordSwipe()
+        scheduleSwipeLimitResetIfNeeded()
         hapticService.keep()
         persistence.globalActionCounter += 1  // increment before milestone check
         stageSnoozedItemsIfReady()
@@ -858,12 +859,19 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         totalSpaceSaved += topCard.storedFileSize
         OfflineCacheService.shared.evict(for: topCard.id)
         DailyLimitService.shared.recordSwipe()
+        scheduleSwipeLimitResetIfNeeded()
         hapticService.delete()
         persistence.globalActionCounter += 1  // increment before milestone check
         stageSnoozedItemsIfReady()
         precacheNextImages()
         saveBinToDisk()
         loadNextPageIfNeeded()
+    }
+
+    private func scheduleSwipeLimitResetIfNeeded() {
+        guard DailyLimitService.shared.hasReachedLimit,
+              !PremiumManager.shared.isPremium else { return }
+        NotificationManager.shared.scheduleSwipeLimitResetNotification()
     }
 
     /// Swipe Up — Snooze (re-inserts into stack after N keep/delete swipes, exponential backoff).
