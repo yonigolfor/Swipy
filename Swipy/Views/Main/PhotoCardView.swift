@@ -526,13 +526,19 @@ struct PhotoCardView: View {
             //    who outruns the pool, or memory-pressure pool eviction between tab switches).
             //    Reset the ready gate so the loading state shows while the new player buffers.
             isVideoPlayerReady = false
+            let isOffline = PhotoLibraryService.shared.isOfflineMode
             let options = PHVideoRequestOptions()
-            options.deliveryMode = .fastFormat
-            options.isNetworkAccessAllowed = !PhotoLibraryService.shared.isOfflineMode
+            // Mirror the pool's delivery policy: full quality offline, fast online.
+            options.deliveryMode = isOffline ? .highQualityFormat : .fastFormat
+            options.isNetworkAccessAllowed = !isOffline
 
             PHImageManager.default().requestPlayerItem(forVideo: item.asset, options: options) { playerItem, _ in
                 guard let playerItem else {
-                    DispatchQueue.main.async { self.isLoading = false }
+                    DispatchQueue.main.async {
+                        self.isLoading = false
+                        self.showLoadingSpinner = false   // prevent infinite spinner
+                        if isOffline { self.playerItemFailed = true }  // show error icon
+                    }
                     return
                 }
                 DispatchQueue.main.async {

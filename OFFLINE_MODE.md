@@ -150,7 +150,7 @@ The `remove` + `insert` toggle on `@Published var loadedImageIDs` causes SwiftUI
 
 ## Network Access Enforcement in Offline Mode
 
-The "no network in offline mode" guarantee is enforced at four independent layers:
+The "no network in offline mode" guarantee is enforced at five independent layers:
 
 | Layer | Mechanism |
 |---|---|
@@ -158,9 +158,22 @@ The "no network in offline mode" guarantee is enforced at four independent layer
 | **`loadImage()`** | `options.isNetworkAccessAllowed = !isOfflineMode`; in offline mode, checks `PHImageResultIsDegradedKey` — returns `nil` for any degraded proxy so blurry stand-ins are never shown. |
 | **`startCaching()`** | Explicit `PHImageRequestOptions` with `isNetworkAccessAllowed = !isOfflineMode` — replaces previous `options: nil` which defaulted to network allowed |
 | **`VideoPlayerPool.load()`** | `deliveryMode = offline ? .highQualityFormat : .fastFormat`; `isNetworkAccessAllowed = !offline` — full-quality local video, no iCloud fetch, no transcoded proxy. |
+| **`PhotoCardView.loadVideoPlayer()` slow path** | When pool misses (0.5 s `awaitPlayer` timeout), the slow-path fallback also uses `deliveryMode = offline ? .highQualityFormat : .fastFormat` and `isNetworkAccessAllowed = !offline`. On failure (nil playerItem in offline mode): sets `playerItemFailed = true` (error icon) and clears `showLoadingSpinner`. Prevents the infinite-spinner state that occurred when only `isLoading` was cleared but `showLoadingSpinner` was left `true`. |
 | **Background prefetch** | `startBackgroundPrefetch()` guard: `network.isOnline && !network.isExpensive && !network.isConstrained` — never runs while offline |
 
 The `startCaching()` and `VideoPlayerPool` fixes are what ensure snoozed items flushed via `flushSnoozedItemsNow()` load cleanly: the items have already passed the `isLocallyAvailable` / `isCached` filter, and the media pipeline now confirms it will never reach out to iCloud.
+
+### Known failure mode — video card stuck as infinite spinner
+
+**Symptom:** A video card in offline mode spins forever and never shows video or an error.
+
+**Root cause:** Two compounding issues in `PhotoCardView.loadVideoPlayer()`:
+
+1. `videoSpinnerTask` fires at 450 ms → sets `showLoadingSpinner = true`. If the pool misses and the slow-path `requestPlayerItem()` returns nil, only `isLoading = false` is set — `showLoadingSpinner` is never cleared. The spinner condition `showLoadingSpinner && !isVideoPlayerReady` stays `true` indefinitely.
+
+2. The slow-path used `deliveryMode = .fastFormat` unconditionally even after the pool was fixed to use `.highQualityFormat` in offline mode — inconsistency that could deliver a proxy even when the pool would have rejected one.
+
+**Fix:** In the slow-path `guard let playerItem else` branch: clear `showLoadingSpinner = false` and in offline mode set `playerItemFailed = true` (shows the error triangle that already exists in the view). Mirror the pool's delivery mode selection.
 
 ## Background Prefetch Guards
 
@@ -188,6 +201,20 @@ Sourced from `NWPathMonitor` in `NetworkMonitorService.swift`:
 | `isConstrained` | `Bool` | Low Data Mode enabled in Settings |
 
 All three are `@Published` and observed via async `for await` streams on `@MainActor`.
+
+---
+
+## Zero Loading Time Guarantee
+
+In offline mode every card must be ready to display the instant it appears — no PHImageManager async gap, no spinner, no waiting. This is enforced by pre-loading all media during the scan itself, before items enter `photoStack`.
+
+**Images:** `scanLocalUniverse()` runs `requestCardImage()` for each locally-available image asset inside a `withTaskGroup` (parallel local disk reads, < 100 ms each). The image is put in NSCache, `loadedImageIDs` + `finalImageIDs` are both populated, and the item is appended to `photoStack` **only after the pixel data is confirmed in cache**. Items where the image is nil (inaccessible asset despite metadata saying local) are silently excluded — they never reach the stack.
+
+**Videos:** `VideoPlayerPool.warmUp()` is called immediately for each batch of found video assets. Items are appended to `photoStack` right away (the pool loads async in background; by the time the user swipes to the card the player is warm).
+
+**NSCache:** Expanded from countLimit=6 → 30 while offline mode is active (`setOfflineCacheLimit(true)` on `activateOfflineMode`, reversed on deactivate). This keeps the pre-loaded batch warm across all visible cards, not just top-5. Manual eviction (`evictStaleCacheEntries`) is skipped in offline mode — NSCache handles pressure eviction on its own.
+
+**Result:** `isCachedImageFinal=true` for every image card before it's visible → `PhotoCardView` skips the reload dance and spinner entirely. Zero observable loading time.
 
 ---
 

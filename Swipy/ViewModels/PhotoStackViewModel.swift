@@ -1019,6 +1019,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         isOfflineMode = true
         offlineFetchCursor = 0
         PhotoLibraryService.shared.isOfflineMode = true
+        photoService.setOfflineCacheLimit(true)
         cancelPrefetch()
         finalImageIDs = []
         loadedImageIDs = []
@@ -1042,6 +1043,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         lastNetworkFailureDate = nil
         isOfflineMode = false
         PhotoLibraryService.shared.isOfflineMode = false
+        photoService.setOfflineCacheLimit(false)
         offlineFoundNoLocalItems = false
         preOfflineModeStack = nil
         preOfflineFetchCursor = 0
@@ -1062,6 +1064,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         lastNetworkFailureDate = nil
         isOfflineMode = false
         PhotoLibraryService.shared.isOfflineMode = false
+        photoService.setOfflineCacheLimit(false)
         offlineFoundNoLocalItems = false
         preOfflineModeStack = nil
         preOfflineFetchCursor = 0
@@ -1290,9 +1293,48 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
             if !batch.isEmpty {
                 for item in batch { seenIDs.insert(item.id) }
-                photoStack.append(contentsOf: batch)
-                if isLoading { isLoading = false }
-                precacheNextImages()
+
+                let imageItems = batch.filter { !$0.isVideo }
+                let videoItems = batch.filter { $0.isVideo }
+
+                // Videos: warmUp pool immediately, then add to stack.
+                // isLocallyAvailable() guarantees the full video file is on-device.
+                // The pool loads async; by the time the user swipes to the card it's ready.
+                if !videoItems.isEmpty {
+                    let videoAssets = videoItems.map { $0.asset }
+                    Task { await VideoPlayerPool.shared.warmUp(for: videoAssets) }
+                    let slotsLeft = max(0, targetCount - photoStack.count)
+                    photoStack.append(contentsOf: videoItems.prefix(slotsLeft))
+                }
+
+                // Images: pre-load every pixel before the card is visible.
+                // requestCardImage in offline mode is a local disk read (< 100 ms).
+                // nil result means the asset is inaccessible — excluded silently.
+                let svc = photoService
+                let remaining = max(0, targetCount - photoStack.count)
+                if !imageItems.isEmpty && remaining > 0 {
+                    await withTaskGroup(of: (PhotoItem, UIImage?).self) { group in
+                        for item in imageItems.prefix(remaining) {
+                            group.addTask {
+                                await withCheckedContinuation { cont in
+                                    svc.requestCardImage(for: item.asset) { image, _ in
+                                        cont.resume(returning: (item, image))
+                                    }
+                                }
+                            }
+                        }
+                        for await (item, image) in group {
+                            guard let image else { continue }
+                            svc.cacheImage(image, for: item.id)
+                            loadedImageIDs.insert(item.id)
+                            finalImageIDs.insert(item.id)
+                            activeCacheIDs.insert(item.id)
+                            photoStack.append(item)
+                        }
+                    }
+                }
+
+                if isLoading && !photoStack.isEmpty { isLoading = false }
             }
 
             await Task.yield()
@@ -1673,6 +1715,9 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     }
 
     private func evictStaleCacheEntries(keeping items: [PhotoItem]) {
+        // In offline mode all images are pre-loaded; NSCache manages its own pressure eviction.
+        // Manual eviction would kick out items ahead in the stack that should stay warm.
+        guard !isOfflineMode else { return }
         var keepIDs = Set(items.map { $0.id })
         if let topID = photoStack.first?.id { keepIDs.insert(topID) }
         var evictedItems: [PhotoItem] = []
