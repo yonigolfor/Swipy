@@ -1018,7 +1018,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         preOfflineFetchCursor = fetchCursor
         isOfflineMode = true
         offlineFetchCursor = 0
-        PhotoLibraryService.shared.isOfflineMode = true
+        photoService.isOfflineMode = true
         photoService.setOfflineCacheLimit(true)
         cancelPrefetch()
         finalImageIDs = []
@@ -1039,18 +1039,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     }
 
     func deactivateOfflineMode() {
-        networkFailureCount = 0
-        lastNetworkFailureDate = nil
-        isOfflineMode = false
-        PhotoLibraryService.shared.isOfflineMode = false
-        photoService.setOfflineCacheLimit(false)
-        offlineFoundNoLocalItems = false
-        preOfflineModeStack = nil
-        preOfflineFetchCursor = 0
-        offlineFetchCursor = 0
-        isShuffleModeActive = false
-        savedLinearCursor = 0
-        preShuffleStack = nil
+        resetOfflineState()
         // Fresh start — identical to first app launch. Avoids stale snapshot state
         // (e.g. shuffle-ordered cards captured as the pre-offline snapshot).
         loadPhotos(filter: .all)
@@ -1060,10 +1049,14 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// for immediately calling loadPhotos(filter:). Used when the user navigates
     /// to a filter category from SmartFiltersView while offline mode is active.
     func deactivateOfflineSilently() {
+        resetOfflineState()
+    }
+
+    private func resetOfflineState() {
         networkFailureCount = 0
         lastNetworkFailureDate = nil
         isOfflineMode = false
-        PhotoLibraryService.shared.isOfflineMode = false
+        photoService.isOfflineMode = false
         photoService.setOfflineCacheLimit(false)
         offlineFoundNoLocalItems = false
         preOfflineModeStack = nil

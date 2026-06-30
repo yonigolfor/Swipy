@@ -145,12 +145,10 @@ class NotificationManager {
         content.userInfo = ["destination": "swipe"]
 
         // 00:01 next day — one minute after the daily counter resets at midnight.
-        let tomorrow = Calendar.current.date(
-            byAdding: .day, value: 1,
-            to: Calendar.current.startOfDay(for: Date())
-        )!
-        let fireDate = Calendar.current.date(byAdding: .minute, value: 1, to: tomorrow)!
-        let comps = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
+        let nextDay = Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: Date()))!
+        var comps = Calendar.current.dateComponents([.year, .month, .day], from: nextDay)
+        comps.hour = 0
+        comps.minute = 1
 
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
         let request = UNNotificationRequest(identifier: Self.swipeLimitResetNotif, content: content, trigger: trigger)
