@@ -36,8 +36,11 @@ struct OnboardingView: View {
     @State private var demoCardVisible = true
     @State private var demoLabel: String? = nil
 
-    // Step 5 snooze intro state
-    @State private var snoozeAnimateArrow = false
+    // Snooze intro interactive card state
+    @State private var snoozeCardOffset: CGSize = .zero
+    @State private var snoozeCardRotation: Double = 0
+    @State private var snoozeCardVisible = true
+    @State private var snoozeLabel: String? = nil
 
     private let totalSteps = 6
     private let haptic = UIImpactFeedbackGenerator(style: .medium)
@@ -611,42 +614,103 @@ struct OnboardingView: View {
             .padding(.horizontal, 32)
 
             ZStack {
-                RoundedRectangle(cornerRadius: 20)
-                    .fill(Color(white: 0.18))
-                    .frame(width: 240, height: 300)
-                    .offset(y: 10)
-                    .scaleEffect(0.95)
-
+                // Second card — visible behind when main card is dragged up
                 RoundedRectangle(cornerRadius: 20)
                     .fill(
                         LinearGradient(
-                            colors: [Color(white: 0.28), Color(white: 0.20)],
+                            colors: [Color(white: 0.25), Color(white: 0.18)],
                             startPoint: .topLeading,
                             endPoint: .bottomTrailing
                         )
                     )
                     .frame(width: 240, height: 300)
                     .overlay {
-                        VStack(spacing: 20) {
-                            Text(verbatim: "🤔")
-                                .font(.system(size: 72))
-                            Image(systemName: "arrow.up.circle.fill")
-                                .font(.system(size: 38))
-                                .foregroundColor(.swipeBlue)
-                                .offset(y: snoozeAnimateArrow ? -10 : 0)
-                                .animation(
-                                    .easeInOut(duration: 0.7).repeatForever(autoreverses: true),
-                                    value: snoozeAnimateArrow
-                                )
-                        }
+                        Image(systemName: "photo.fill")
+                            .font(.system(size: 50))
+                            .foregroundColor(.white.opacity(0.2))
                     }
-                    .shadow(color: .black.opacity(0.4), radius: 15, y: 8)
+                    .offset(y: 10)
+                    .scaleEffect(0.95)
+
+                // Main draggable card
+                if snoozeCardVisible {
+                    RoundedRectangle(cornerRadius: 20)
+                        .fill(
+                            LinearGradient(
+                                colors: [Color(white: 0.28), Color(white: 0.20)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 240, height: 300)
+                        .overlay {
+                            Image(systemName: "photo.fill")
+                                .font(.system(size: 50))
+                                .foregroundColor(.white.opacity(0.3))
+                        }
+                        .overlay {
+                            if snoozeLabel != nil {
+                                HStack(spacing: 8) {
+                                    Text(verbatim: "🤷‍♂️").font(.title)
+                                    Text(String(localized: "swipe.later")).font(.headline)
+                                }
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 20)
+                                .padding(.vertical, 12)
+                                .background(Capsule().fill(Color.swipeBlue.gradient))
+                                .shadow(color: .swipeBlue.opacity(0.5), radius: 10)
+                                .transition(.scale.combined(with: .opacity))
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                                .padding(.top, 30)
+                                .allowsHitTesting(false)
+                            }
+                        }
+                        .clipShape(RoundedRectangle(cornerRadius: 20))
+                        .rotationEffect(.degrees(snoozeCardRotation))
+                        .offset(snoozeCardOffset)
+                        .gesture(
+                            DragGesture()
+                                .onChanged { value in
+                                    snoozeCardOffset = value.translation
+                                    snoozeCardRotation = Double(value.translation.width / 20)
+                                    withAnimation(.spring(response: 0.2)) {
+                                        snoozeLabel = value.translation.height < -30
+                                            ? String(localized: "swipe.later") : nil
+                                    }
+                                    softHaptic.impactOccurred()
+                                }
+                                .onEnded { value in
+                                    if value.translation.height < -80 {
+                                        withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
+                                            snoozeCardOffset = CGSize(
+                                                width: value.translation.width,
+                                                height: -600
+                                            )
+                                        }
+                                        haptic.impactOccurred()
+                                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                                            snoozeCardVisible = false
+                                            snoozeCardOffset = .zero
+                                            snoozeCardRotation = 0
+                                            snoozeLabel = nil
+                                            withAnimation(.spring(response: 0.4)) {
+                                                snoozeCardVisible = true
+                                            }
+                                        }
+                                    } else {
+                                        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
+                                            snoozeCardOffset = .zero
+                                            snoozeCardRotation = 0
+                                            snoozeLabel = nil
+                                        }
+                                    }
+                                }
+                        )
+                        .shadow(color: .black.opacity(0.4), radius: 15, y: 8)
+                        .environment(\.layoutDirection, .leftToRight)
+                }
             }
             .frame(height: 320)
-            .task {
-                try? await Task.sleep(for: .milliseconds(150))
-                snoozeAnimateArrow = true
-            }
 
             Text(String(localized: "onboarding.snooze.body"))
                 .font(.subheadline)

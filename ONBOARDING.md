@@ -90,9 +90,15 @@ Step changes always use `.spring(response: 0.4, dampingFraction: 0.75)`.
 ### step_SnoozeIntro (`case 5`)
 **Localization prefix:** `onboarding.snooze.*`
 
-- **Visual:** Same dark card (240×300) with 🤔 emoji (size 72) + `arrow.up.circle.fill` SF Symbol (size 38) in `.swipeBlue`
-- **Animation:** Arrow bounces up/down 10pt via `snoozeAnimateArrow` state + `.easeInOut(duration: 0.7).repeatForever(autoreverses: true)`
-  - Started with `.task { try? await Task.sleep(for: .milliseconds(150)) }` — avoids ambient transaction bleed from step transition
+- **Visual:** Interactive card stack (same style as SwipeDemo):
+  - Shadow/second card (240×300, `Color(white: 0.25→0.18)`, `offset(y:10) + scaleEffect(0.95)`) with `photo.fill` icon (opacity 0.2) — peeks through when main card is dragged
+  - Main draggable card (240×300, gradient `white 0.28→0.20`) with `photo.fill` icon (opacity 0.3)
+- **Drag gesture:** Upward drag → card follows offset + slight rotation based on `width / 20`
+  - `dy < -30` → shows snooze label (with `withAnimation(.spring(response: 0.2))`)
+  - `dy < -80` on release → card flies off to `y: -600`, resets via `DispatchQueue.main.asyncAfter(0.6s)`
+  - Otherwise → spring snap-back
+- **Snooze label (overlay, top of card):** `🤷‍♂️ + "Later"/"אחר כך"`, white text on `Color.swipeBlue.gradient` capsule with blue shadow — exact match to `starIndicator` in `SwipeIndicator.swift`. Uses `swipe.later` localization key.
+- **Clipping:** `.clipShape(RoundedRectangle(cornerRadius: 20))` on main card keeps label overlay within card bounds
 - **Subtitle color:** `.swipeBlue` = `Color(red: 0.25, green: 0.55, blue: 0.95)`
 - **CTA:** → `currentStep = 1` (Scan)
 
@@ -190,7 +196,10 @@ RoundedRectangle(cornerRadius: 20).fill(Color(white: 0.18))
 | `demoRotation` | `Double` | SwipeDemo — card tilt |
 | `demoCardVisible` | `Bool` | SwipeDemo — hide/re-show card after fly-off |
 | `demoLabel` | `String?` | SwipeDemo — KEEP / DELETE label overlay |
-| `snoozeAnimateArrow` | `Bool` | SnoozeIntro — triggers arrow bounce animation |
+| `snoozeCardOffset` | `CGSize` | SnoozeIntro — card drag position |
+| `snoozeCardRotation` | `Double` | SnoozeIntro — card tilt (width / 20) |
+| `snoozeCardVisible` | `Bool` | SnoozeIntro — hide/re-show card after fly-off |
+| `snoozeLabel` | `String?` | SnoozeIntro — "Later"/"אחר כך" label overlay |
 
 ---
 
