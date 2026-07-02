@@ -40,7 +40,7 @@ Step changes always use `.spring(response: 0.4, dampingFraction: 0.75)`.
 | 1 | `0` | `step1_VisualHook` | הטלפון שלך סוחב משקל מיותר | → `3` |
 | 2 | `3` | `step4_Permission` | כדי שנוכל לעשות את הקסם | → `2` (via permission request) |
 | 3 | `2` | `step3_SwipeDemo` | ניקוי בסטייל | → `5` |
-| 4 | `5` | `step_SnoozeIntro` | לא בטוח? אין בעיה | → `1` |
+| 4 | `5` | `step_SnoozeIntro` | לא בטוחים? אין בעיה | → `1` |
 | 5 | `1` | `step2_Scan` | סורק את הגלריה | → `4` |
 | 6 | `4` | `step5_QuickWin` | הכל מוכן! | → `onComplete()` |
 
@@ -90,15 +90,18 @@ Step changes always use `.spring(response: 0.4, dampingFraction: 0.75)`.
 ### step_SnoozeIntro (`case 5`)
 **Localization prefix:** `onboarding.snooze.*`
 
+- **Title:** `lineLimit(1) + minimumScaleFactor(0.7)` — scales down, never wraps
+- **Subtitle:** `fixedSize(horizontal: false, vertical: true)` — wraps to multiple lines, never truncates
 - **Visual:** Interactive card stack (same style as SwipeDemo):
-  - Shadow/second card (240×300, `Color(white: 0.25→0.18)`, `offset(y:10) + scaleEffect(0.95)`) with `photo.fill` icon (opacity 0.2) — peeks through when main card is dragged
-  - Main draggable card (240×300, gradient `white 0.28→0.20`) with `photo.fill` icon (opacity 0.3)
+  - Shadow/second card (240×300, `Color(white: 0.25→0.18)`, `offset(y:10) + scaleEffect(0.95)`) with `photo.fill` icon (opacity 0.2) — peeks through when main card is dragged up
+  - Main draggable card (240×300, gradient `white 0.28→0.20`) with `🤔` emoji (size 64) + bouncing `arrow.up.circle.fill` in `.swipeBlue`
+- **Arrow animation:** `snoozeAnimateArrow` state drives `offset(y: -8 / 0)` bounce via `.easeInOut(0.7).repeatForever`. Started via `.task { sleep(150ms); animate = true }`. Reset to `false` on card fly-off so animation restarts on card re-appearance.
 - **Drag gesture:** Upward drag → card follows offset + slight rotation based on `width / 20`
   - `dy < -30` → shows snooze label (with `withAnimation(.spring(response: 0.2))`)
   - `dy < -80` on release → card flies off to `y: -600`, resets via `DispatchQueue.main.asyncAfter(0.6s)`
   - Otherwise → spring snap-back
-- **Snooze label (overlay, top of card):** `🤷‍♂️ + "Later"/"אחר כך"`, white text on `Color.swipeBlue.gradient` capsule with blue shadow — exact match to `starIndicator` in `SwipeIndicator.swift`. Uses `swipe.later` localization key.
-- **Clipping:** `.clipShape(RoundedRectangle(cornerRadius: 20))` on main card keeps label overlay within card bounds
+- **Snooze label (top of card, padding 24pt):** text `"Later"/"אחר כך"` in `.swipeBlue`, capsule `Color.swipeBlue.opacity(0.2)` background, rotation `-15°` — matches SwipeDemo label style exactly. No emoji. Uses `swipe.later` key.
+- **Clipping:** `.clipShape(RoundedRectangle(cornerRadius: 20))` keeps label within card bounds
 - **Subtitle color:** `.swipeBlue` = `Color(red: 0.25, green: 0.55, blue: 0.95)`
 - **CTA:** → `currentStep = 1` (Scan)
 
@@ -113,12 +116,13 @@ Step changes always use `.spring(response: 0.4, dampingFraction: 0.75)`.
   - `video.fill` — Videos — `.purple`
   - `film.fill` — Large Videos — `.orange`
 - **Scanning state:** `ScanningDotsView` (3 pulsing circles, color-matched) shows while value == 0 and scan not complete
-- **Animated counters:** `displayedPhotoCount / Video / Large` animate via `animateScanCounts()` — 20 steps × 55ms
-- **Scan complete indicator:** `checkmark.circle.fill` in `.green` fades in on the header
-- **Two CTAs:**
-  - Gold capsule (appears when `viewModel.onboardingScanComplete == true`) → `currentStep = 4`
-  - Gray "Skip" text button (visible while scanning) → `currentStep = 4`
-- **Triggers:** `.onAppear` + `.onChange(of: viewModel.onboardingPhotoCount)` to animate counters when data lands
+- **Animated counters:** `displayedPhotoCount / Video / Large` animate via `animateScanCounts()` — 20 steps × 55ms. Always called on `.onAppear` (even if counts are 0), so `scanAnimationComplete` is always set after 1.1s.
+- **Scan complete indicator:** `checkmark.circle.fill` in `.green` fades in on the header when `viewModel.onboardingScanComplete == true`
+- **Two CTAs — gated on `scanAnimationComplete` (not `onboardingScanComplete`):**
+  - Gold capsule (appears when `scanAnimationComplete == true`) → `currentStep = 4`
+  - Gray "Skip" text button (visible while `!scanAnimationComplete`) → `currentStep = 4`
+  - Phase 1 of the scan completes in <100ms — long before the user reaches this screen — so `onboardingScanComplete` is always `true` by arrival. The button is therefore gated purely on the animation finishing.
+- **Triggers:** `.onAppear` always calls `animateScanCounts`. `.onChange(of: viewModel.onboardingPhotoCount)` re-calls it only if `displayedPhotoCount == 0` (scan arrived after screen appeared).
 
 ---
 
@@ -196,10 +200,12 @@ RoundedRectangle(cornerRadius: 20).fill(Color(white: 0.18))
 | `demoRotation` | `Double` | SwipeDemo — card tilt |
 | `demoCardVisible` | `Bool` | SwipeDemo — hide/re-show card after fly-off |
 | `demoLabel` | `String?` | SwipeDemo — KEEP / DELETE label overlay |
+| `scanAnimationComplete` | `Bool` | Scan — set to `true` at end of `animateScanCounts()`; gates "Got it" button |
 | `snoozeCardOffset` | `CGSize` | SnoozeIntro — card drag position |
 | `snoozeCardRotation` | `Double` | SnoozeIntro — card tilt (width / 20) |
 | `snoozeCardVisible` | `Bool` | SnoozeIntro — hide/re-show card after fly-off |
 | `snoozeLabel` | `String?` | SnoozeIntro — "Later"/"אחר כך" label overlay |
+| `snoozeAnimateArrow` | `Bool` | SnoozeIntro — drives bouncing arrow; reset on fly-off so animation restarts |
 
 ---
 

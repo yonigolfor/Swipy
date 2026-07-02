@@ -364,7 +364,11 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 PHAssetMediaType.video.rawValue
             )
             let quickEstimate = PHAsset.fetchAssets(with: quickOptions).count
-            await MainActor.run { withAnimation { self.onboardingLargeVideoCount = quickEstimate } }
+            // Phase 1 complete — show button now. Phase 2 refines large-video count in background.
+            await MainActor.run {
+                withAnimation { self.onboardingLargeVideoCount = quickEstimate }
+                withAnimation { self.onboardingScanComplete = true }
+            }
 
             // Phase 2 — accurate fileSize scan: concurrent, duration >= 3 s to skip tiny clips.
             // PHFetchResult is documented thread-safe; each iteration writes to a distinct index.
@@ -386,7 +390,6 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
             await MainActor.run {
                 withAnimation(.spring(response: 0.6)) { self.onboardingLargeVideoCount = finalLarge }
-                withAnimation { self.onboardingScanComplete = true }
             }
             // Kick off persona building while the user finishes the last onboarding step.
             await AestheticScoringService.shared.analyzeFavorites()

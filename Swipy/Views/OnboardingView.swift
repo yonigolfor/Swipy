@@ -29,6 +29,7 @@ struct OnboardingView: View {
     @State private var displayedPhotoCount = 0
     @State private var displayedVideoCount = 0
     @State private var displayedLargeCount = 0
+    @State private var scanAnimationComplete = false
 
     // Step 3 demo swipe state
     @State private var demoOffset: CGSize = .zero
@@ -41,6 +42,7 @@ struct OnboardingView: View {
     @State private var snoozeCardRotation: Double = 0
     @State private var snoozeCardVisible = true
     @State private var snoozeLabel: String? = nil
+    @State private var snoozeAnimateArrow = false
 
     private let totalSteps = 6
     private let haptic = UIImpactFeedbackGenerator(style: .medium)
@@ -256,8 +258,8 @@ struct OnboardingView: View {
             Spacer()
 
             VStack(spacing: 12) {
-                // Primary CTA — appears when scan completes
-                if viewModel.onboardingScanComplete {
+                // Primary CTA — appears when count-up animation finishes
+                if scanAnimationComplete {
                     Button {
                         haptic.impactOccurred()
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
@@ -282,8 +284,8 @@ struct OnboardingView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
 
-                // Skip button — always visible while scanning
-                if !viewModel.onboardingScanComplete {
+                // Skip button — visible while animation is running
+                if !scanAnimationComplete {
                     Button {
                         haptic.impactOccurred()
                         withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
@@ -302,17 +304,17 @@ struct OnboardingView: View {
             .padding(.bottom, 48)
         }
         .onAppear {
-            // Scan may have finished during SwipeDemo — animate immediately on arrival.
-            let p = viewModel.onboardingPhotoCount
-            let v = viewModel.onboardingVideoCount
-            if p > 0 { animateScanCounts(photo: p, video: v) }
+            // Always animate — even if counts are 0 (auth denied / empty library),
+            // the loop still runs and sets scanAnimationComplete after 1.1s.
+            animateScanCounts(photo: viewModel.onboardingPhotoCount,
+                              video: viewModel.onboardingVideoCount)
             if viewModel.onboardingLargeVideoCount > 0 {
                 withAnimation(.spring(response: 0.6)) { displayedLargeCount = viewModel.onboardingLargeVideoCount }
             }
         }
         // Scan finishes after arriving — animate when values land.
         .onChange(of: viewModel.onboardingPhotoCount) { _, new in
-            if new > 0 && displayedPhotoCount == 0 {
+            if displayedPhotoCount == 0 {
                 animateScanCounts(photo: new, video: viewModel.onboardingVideoCount)
             }
         }
@@ -604,12 +606,14 @@ struct OnboardingView: View {
                 Text(String(localized: "onboarding.snooze.title"))
                     .font(.system(size: 32, weight: .bold, design: .rounded))
                     .foregroundColor(.white)
-                    .multilineTextAlignment(.center)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
                 Text(String(localized: "onboarding.snooze.subtitle"))
                     .font(.title3)
                     .fontWeight(.bold)
                     .foregroundColor(.swipeBlue)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 32)
 
@@ -644,25 +648,32 @@ struct OnboardingView: View {
                         )
                         .frame(width: 240, height: 300)
                         .overlay {
-                            Image(systemName: "photo.fill")
-                                .font(.system(size: 50))
-                                .foregroundColor(.white.opacity(0.3))
+                            VStack(spacing: 16) {
+                                Text(verbatim: "🤔")
+                                    .font(.system(size: 64))
+                                Image(systemName: "arrow.up.circle.fill")
+                                    .font(.system(size: 32))
+                                    .foregroundColor(.swipeBlue)
+                                    .offset(y: snoozeAnimateArrow ? -8 : 0)
+                                    .animation(
+                                        .easeInOut(duration: 0.7).repeatForever(autoreverses: true),
+                                        value: snoozeAnimateArrow
+                                    )
+                            }
                         }
                         .overlay {
                             if snoozeLabel != nil {
-                                HStack(spacing: 8) {
-                                    Text(verbatim: "🤷‍♂️").font(.title)
-                                    Text(String(localized: "swipe.later")).font(.headline)
-                                }
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 20)
-                                .padding(.vertical, 12)
-                                .background(Capsule().fill(Color.swipeBlue.gradient))
-                                .shadow(color: .swipeBlue.opacity(0.5), radius: 10)
-                                .transition(.scale.combined(with: .opacity))
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                                .padding(.top, 30)
-                                .allowsHitTesting(false)
+                                Text(String(localized: "swipe.later"))
+                                    .font(.system(size: 28, weight: .bold))
+                                    .foregroundColor(.swipeBlue)
+                                    .padding(.horizontal, 16)
+                                    .padding(.vertical, 8)
+                                    .background(Capsule().fill(Color.swipeBlue.opacity(0.2)))
+                                    .rotationEffect(.degrees(-15))
+                                    .transition(.scale.combined(with: .opacity))
+                                    .allowsHitTesting(false)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                                    .padding(.top, 24)
                             }
                         }
                         .clipShape(RoundedRectangle(cornerRadius: 20))
@@ -693,6 +704,7 @@ struct OnboardingView: View {
                                             snoozeCardOffset = .zero
                                             snoozeCardRotation = 0
                                             snoozeLabel = nil
+                                            snoozeAnimateArrow = false
                                             withAnimation(.spring(response: 0.4)) {
                                                 snoozeCardVisible = true
                                             }
@@ -708,6 +720,10 @@ struct OnboardingView: View {
                         )
                         .shadow(color: .black.opacity(0.4), radius: 15, y: 8)
                         .environment(\.layoutDirection, .leftToRight)
+                        .task {
+                            try? await Task.sleep(for: .milliseconds(150))
+                            snoozeAnimateArrow = true
+                        }
                 }
             }
             .frame(height: 320)
@@ -796,6 +812,7 @@ struct OnboardingView: View {
                     displayedVideoCount = (video * step) / steps
                 }
             }
+            withAnimation { scanAnimationComplete = true }
         }
     }
 
