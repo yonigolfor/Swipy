@@ -13,6 +13,9 @@
     "🎉" : {
 
     },
+    "🤔" : {
+
+    },
     "🤷‍♂️" : {
 
     },
@@ -887,6 +890,40 @@
         }
       }
     },
+    "notif.swipeLimitReset.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your daily swipes have refreshed!"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "המכסה היומית שלך התחדשה!"
+          }
+        }
+      }
+    },
+    "notif.swipeLimitReset.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You can keep swiping! 🃏"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "אפשר להמשיך להחליק! 🃏"
+          }
+        }
+      }
+    },
     "notif.weekly.body" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -917,40 +954,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ניקיון יום ראשון 🧹"
-          }
-        }
-      }
-    },
-    "notif.swipeLimitReset.title" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "You can keep swiping! 🃏"
-          }
-        },
-        "he" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "אפשר להמשיך להחליק! 🃏"
-          }
-        }
-      }
-    },
-    "notif.swipeLimitReset.body" : {
-      "extractionState" : "manual",
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Your daily swipes have refreshed!"
-          }
-        },
-        "he" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "המכסה היומית שלך התחדשה!"
           }
         }
       }
@@ -1260,7 +1263,7 @@
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "אנחנו צריכים גישה לגלריה שלך.\\nהכל נשאר על המכשיר בלבד 🔒"
+            "value" : "אנחנו צריכים גישה לגלריה שלך.\nהכל נשאר על המכשיר בלבד 🔒"
           }
         }
       }
@@ -1482,6 +1485,74 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "טעית?"
+          }
+        }
+      }
+    },
+    "onboarding.snooze.body" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "We will show it to you later, so you can keep swiping!"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "נחזיר אותה אליך מאוחר יותר, כדי שתוכל להמשיך להחליק!"
+          }
+        }
+      }
+    },
+    "onboarding.snooze.cta" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Next"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "הבא"
+          }
+        }
+      }
+    },
+    "onboarding.snooze.subtitle" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Swipe UP to snooze!"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "החלק למעלה להשהייה!"
+          }
+        }
+      }
+    },
+    "onboarding.snooze.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not Sure? No Problem"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "לא בטוח? אין בעיה"
           }
         }
       }

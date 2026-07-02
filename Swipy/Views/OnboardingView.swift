@@ -3,12 +3,14 @@
 //  OnboardingView.swift
 //  CleanSwipe
 //
-//  5-step onboarding flow shown only on first launch.
-//  Step 1: Visual Hook    — animated photo stack
-//  Step 2: Scan           — real PHAsset counts with animated counters
-//  Step 3: Swipe Demo     — interactive swipe tutorial
-//  Step 4: Permission     — pre-permission screen before iOS prompt
-//  Step 5: Quick Win      — transition into the app
+//  6-step onboarding flow shown only on first launch.
+//  Display order (case numbers differ — see switch statement):
+//  1. Visual Hook    — animated photo stack
+//  2. Permission     — pre-permission screen before iOS prompt
+//  3. Swipe Demo     — interactive swipe tutorial
+//  4. Snooze Intro   — explains swipe-up to snooze
+//  5. Scan           — real PHAsset counts with animated counters
+//  6. Quick Win      — transition into the app
 //
 
 import SwiftUI
@@ -34,7 +36,10 @@ struct OnboardingView: View {
     @State private var demoCardVisible = true
     @State private var demoLabel: String? = nil
 
-    private let totalSteps = 5
+    // Step 5 snooze intro state
+    @State private var snoozeAnimateArrow = false
+
+    private let totalSteps = 6
     private let haptic = UIImpactFeedbackGenerator(style: .medium)
     private let softHaptic = UIImpactFeedbackGenerator(style: .soft)
 
@@ -52,6 +57,7 @@ struct OnboardingView: View {
                 case 2: step3_SwipeDemo
                 case 3: step4_Permission
                 case 4: step5_QuickWin
+                case 5: step_SnoozeIntro
                 default: EmptyView()
                 }
             }
@@ -432,7 +438,7 @@ struct OnboardingView: View {
             Button {
                 haptic.impactOccurred()
                 withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
-                    currentStep = 1
+                    currentStep = 5
                 }
             } label: {
                 Text(String(localized: "onboarding.demo.cta"))
@@ -564,6 +570,100 @@ struct OnboardingView: View {
                 onComplete()
             } label: {
                 Text(String(localized: "onboarding.quickwin.cta"))
+                    .font(.headline)
+                    .foregroundColor(.black)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                    .background(
+                        Capsule()
+                            .fill(LinearGradient(
+                                colors: [Color(red: 1, green: 0.85, blue: 0.3),
+                                         Color(red: 1, green: 0.65, blue: 0.1)],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            ))
+                    )
+                    .shadow(color: Color(red: 1, green: 0.7, blue: 0.2).opacity(0.5),
+                            radius: 15, y: 5)
+            }
+            .padding(.horizontal, 32)
+            .padding(.bottom, 48)
+        }
+    }
+
+    // MARK: - Snooze Intro
+
+    private var step_SnoozeIntro: some View {
+        VStack(spacing: 32) {
+            Spacer()
+
+            VStack(spacing: 12) {
+                Text(String(localized: "onboarding.snooze.title"))
+                    .font(.system(size: 32, weight: .bold, design: .rounded))
+                    .foregroundColor(.white)
+                    .multilineTextAlignment(.center)
+                Text(String(localized: "onboarding.snooze.subtitle"))
+                    .font(.title3)
+                    .fontWeight(.bold)
+                    .foregroundColor(.swipeBlue)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 32)
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color(white: 0.18))
+                    .frame(width: 240, height: 300)
+                    .offset(y: 10)
+                    .scaleEffect(0.95)
+
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(
+                        LinearGradient(
+                            colors: [Color(white: 0.28), Color(white: 0.20)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 240, height: 300)
+                    .overlay {
+                        VStack(spacing: 20) {
+                            Text(verbatim: "🤔")
+                                .font(.system(size: 72))
+                            Image(systemName: "arrow.up.circle.fill")
+                                .font(.system(size: 38))
+                                .foregroundColor(.swipeBlue)
+                                .offset(y: snoozeAnimateArrow ? -10 : 0)
+                                .animation(
+                                    .easeInOut(duration: 0.7).repeatForever(autoreverses: true),
+                                    value: snoozeAnimateArrow
+                                )
+                        }
+                    }
+                    .shadow(color: .black.opacity(0.4), radius: 15, y: 8)
+            }
+            .frame(height: 320)
+            .task {
+                try? await Task.sleep(for: .milliseconds(150))
+                snoozeAnimateArrow = true
+            }
+
+            Text(String(localized: "onboarding.snooze.body"))
+                .font(.subheadline)
+                .foregroundColor(.gray)
+                .multilineTextAlignment(.center)
+                .lineSpacing(4)
+                .padding(.horizontal, 40)
+
+            Spacer()
+
+            Button {
+                haptic.impactOccurred()
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
+                    currentStep = 1
+                }
+            } label: {
+                Text(String(localized: "onboarding.snooze.cta"))
                     .font(.headline)
                     .foregroundColor(.black)
                     .frame(maxWidth: .infinity)
