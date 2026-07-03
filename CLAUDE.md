@@ -286,7 +286,7 @@ This project uses **zero third-party packages** (no CocoaPods, SPM, Carthage). U
 ## Key Behavioral Constraints
 
 - **Undo**: Shake gesture triggers undo of last swipe. The undo item must always be kept in NSCache — never evict it until a new swipe occurs.
-- **Review Bin**: Items are moved here on delete swipe. No photo is permanently deleted until the user confirms "Empty Trash" in the Review Bin.
+- **Review Bin**: Items are moved here on delete swipe. No photo is permanently deleted until the user confirms "Empty Trash" in the Review Bin. On every cold start, `restoreBinFromDisk()` reconciles `reviewBinIDs` against PHPhotoLibrary — IDs with no matching asset (deleted externally via Photos.app, or app crashed mid-`emptyTrash`) are silently dropped and the clean state is flushed to disk. This keeps the bin self-healing without any manual repair flow.
 - **Snooze ("Later")**: Swipe up defers the decision — the photo is hidden from the stack and re-injected at the front after N keep/delete swipes (50 → 150 → 500, exponential backoff per item). Snoozed items are persisted in `UserDefaults` and survive force-quit; they reappear immediately on the next cold start. Snooze does **not** count against the daily swipe limit. See `SNOOZE_FEATURE.md` for full details.
 - **Video safety**: Never delete a video from PHPhotoLibrary without first draining its AVPlayer from VideoPlayerPool — this prevents crashes.
 - **Notification quota**: Respect the 2/day cap. Check notification cap dates from `@AppStorage` before scheduling.
