@@ -460,6 +460,11 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         // Recompute from stored sizes so totalSpaceSaved is always derivable from bin contents.
         self.totalSpaceSaved = items.reduce(0) { $0 + $1.storedFileSize }
         items.forEach { processedAssetIDs.insert($0.id) }
+        // Reconcile: if any saved IDs are gone (deleted externally or app crash during emptyTrash),
+        // flush the clean state to disk so they don't reappear on the next launch.
+        if items.count < savedIDs.count {
+            saveBinToDisk()
+        }
     }
 
     /// Reconstructs the in-memory snooze queue from persisted SnoozedPhotoRecords.

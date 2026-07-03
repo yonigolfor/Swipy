@@ -61,11 +61,13 @@ struct ReviewBinView: View {
                         let savedText  = stackViewModel.spaceSavedText
                         let savedCount = stackViewModel.reviewBin.count
                         Task {
-                            try? await stackViewModel.emptyTrash()
-                            withAnimation {
-                                celebrationCount = savedCount
-                                celebrationSpace = savedText
-                            }
+                            do {
+                                try await stackViewModel.emptyTrash()
+                                withAnimation {
+                                    celebrationCount = savedCount
+                                    celebrationSpace = savedText
+                                }
+                            } catch {}
                         }
                     }
                 } message: {
