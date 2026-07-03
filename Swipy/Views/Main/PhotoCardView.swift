@@ -40,6 +40,7 @@ struct PhotoCardView: View {
     @State private var playerItemFailed = false
     @State private var timeControlObserver: NSKeyValueObservation?
     @State private var playerItemStatusObserver: NSKeyValueObservation?
+    @State private var videoEndObserver: (any NSObjectProtocol)?
     @State private var videoSpinnerTask: Task<Void, Never>?
     @State private var imageSpinnerTask: Task<Void, Never>?
 
@@ -373,6 +374,8 @@ struct PhotoCardView: View {
             playerItemFailed = false
             timeControlObserver = nil
             playerItemStatusObserver = nil
+            if let obs = videoEndObserver { NotificationCenter.default.removeObserver(obs) }
+            videoEndObserver = nil
         }
         .onChange(of: isTopCard) { _, nowTop in
             if nowTop {
@@ -543,7 +546,7 @@ struct PhotoCardView: View {
                 }
                 DispatchQueue.main.async {
                     let avPlayer = AVPlayer(playerItem: playerItem)
-                    NotificationCenter.default.addObserver(
+                    self.videoEndObserver = NotificationCenter.default.addObserver(
                         forName: .AVPlayerItemDidPlayToEndTime,
                         object: playerItem,
                         queue: .main

@@ -1221,7 +1221,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         batchSize: Int = 150,
         wrapAround: Bool = false
     ) async {
-        guard !isScanning else { isLoading = false; return }
+        guard !isScanning else { return }
         isScanning = true
         defer { isScanning = false }
         guard let fetchResult = photoService.fetchResult else { isLoading = false; return }

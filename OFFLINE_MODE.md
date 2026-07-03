@@ -261,7 +261,7 @@ while photoStack.count < targetCount:
 | `!isOfflineMode` | User exited offline mid-scan → break immediately |
 | `totalScanned >= total` | Full library visited, no more assets → break |
 | `offlineFetchCursor >= total` (no wrap) | Cursor past end → break |
-| `guard !isScanning` at entry | Concurrent call blocked → `isLoading = false` and return |
+| `guard !isScanning` at entry | Concurrent call blocked → return immediately, `isLoading` unchanged |
 
 ---
 
@@ -288,7 +288,7 @@ Reset to `false` in `deactivateOfflineMode()`.
 `performOfflineTransition(deactivating:)` manages the fly-out/land-in animation for both activation and deactivation.
 
 **Activation path (`deactivating: false`, default):**
-- `awaitingOfflineLanding = true` is set **synchronously** at the top of the function (before any async work) — this prevents the race condition where a fast-returning `scanLocalUniverse` (blocked by the `guard !isScanning` check) could flip `isLoading` before the flag was set, causing it to be stuck `true` permanently.
+- `awaitingOfflineLanding = true` is set **synchronously** at the top of the function (before any async work) — this ensures the flag is visible to `onChange(of: viewModel.isLoading)` before the scan completes and flips `isLoading` to `false`.
 - Cards fly out, then spring back immediately — the user sees the scanning state during the scan.
 - `onChange(of: viewModel.isLoading)` resets `awaitingOfflineLanding = false` when the scan completes.
 

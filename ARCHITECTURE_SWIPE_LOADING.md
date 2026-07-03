@@ -410,7 +410,7 @@ Thumbnail נעלם עם `animation(.easeIn(0.2))` ו-`thumbnailImage = nil` אח
 - **Buffering stall** — KVO על `AVPlayer.timeControlStatus == .waitingToPlayAtSpecifiedRate`; spinner מופיע מעל הפריים הקפוא. Change-detection guard מונע רינדור מיותר על כל שינוי status
 - **Error** — KVO על `AVPlayerItem.status == .failed`; אייקון `exclamationmark.triangle.fill` מוצג
 
-כל ה-task handles מבוטלים ב-`onDisappear`; ה-KVO observers מתאפסים ב-`onChange(of: player)`.
+כל ה-task handles מבוטלים ב-`onDisappear`; ה-KVO observers מתאפסים ב-`onChange(of: player)`; ה-`AVPlayerItemDidPlayToEndTime` block-observer נשמר ב-`videoEndObserver` ומוסר ב-`onDisappear`.
 
 ---
 
