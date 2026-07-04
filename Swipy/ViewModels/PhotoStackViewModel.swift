@@ -8,6 +8,7 @@
 import SwiftUI
 import Photos
 import Combine
+import LinkPresentation
 
 @MainActor
 class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLibraryChangeObserver {
@@ -1741,6 +1742,84 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// perform targeted eviction without enumerating the NSCache.
     private var activeCacheIDs: Set<String> = []
 
+    // MARK: - Share
+
+    /// Staging area for items passed to ActivityView — set synchronously before the sheet flag flips.
+    var shareItems: [Any] = []
+    @Published var isShowingShareSheet: Bool = false
+    /// Guards against concurrent share requests (e.g. two-finger tap on different cards).
+    private var isPreparingShareRequest = false
+    /// Held weakly — kept alive by shareItems; used only to drive cancel() from the HUD.
+    private weak var currentProvider: UIActivityItemProvider?
+    /// Pending Task that delays HUD appearance by 1.5s — cancelled if share completes first.
+    private var hudShowTask: Task<Void, Never>?
+
+    /// Opens the share sheet immediately. Asset download is deferred inside the provider
+    /// and only begins after the user picks a destination app.
+    func shareItem(_ item: PhotoItem, completion: @escaping () -> Void) {
+        guard !isPreparingShareRequest, !isShowingShareSheet else {
+            completion()
+            return
+        }
+        isPreparingShareRequest = true
+        let caption = String(localized: "share.caption")
+
+        let phaseHandler: (SharePhase) -> Void = { [weak self] phase in
+            guard let self else { return }
+            switch phase {
+            case .downloading(0):
+                // Pre-set phase so the ring shows the correct value when the window opens.
+                ShareHUDManager.shared.update(.downloading(0))
+                // Delay window creation — fast local assets complete in <200ms and
+                // should never cause a HUD flash. Window appears only if download
+                // is still in progress after 1.5s.
+                self.hudShowTask?.cancel()
+                self.hudShowTask = Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    try? await Task.sleep(for: .seconds(1.5))
+                    guard !Task.isCancelled else { return }
+                    ShareHUDManager.shared.show(onCancel: { [weak self] in self?.cancelShare() })
+                }
+            case .complete:
+                // Cancel pending show — download completed within 1.5s, HUD must not appear.
+                self.hudShowTask?.cancel()
+                self.hudShowTask = nil
+                HapticService.shared.success()
+                guard ShareHUDManager.shared.isVisible else {
+                    self.currentProvider = nil
+                    return
+                }
+                ShareHUDManager.shared.update(.complete)
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: .milliseconds(600))
+                    ShareHUDManager.shared.hide()
+                    self?.currentProvider = nil
+                }
+            default:
+                ShareHUDManager.shared.update(phase)
+            }
+        }
+
+        let provider: UIActivityItemProvider = item.isVideo
+            ? VideoItemProvider(asset: item.asset, onPhaseChange: phaseHandler)
+            : ImageItemProvider(asset: item.asset, onPhaseChange: phaseHandler)
+
+        currentProvider = provider
+        shareItems = [provider, caption]
+        isShowingShareSheet = true
+        isPreparingShareRequest = false
+        completion()
+    }
+
+    func cancelShare() {
+        hudShowTask?.cancel()
+        hudShowTask = nil
+        currentProvider?.cancel()
+        currentProvider = nil
+        ShareHUDManager.shared.hide()
+        isShowingShareSheet = false
+    }
+
     #if DEBUG
     private func debugLogBlurVariance(of image: UIImage, id: String, stackIndex: Int) {
         DispatchQueue.global(qos: .utility).async {
@@ -1751,4 +1830,192 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         }
     }
     #endif
+}
+
+// MARK: - Share Activity Item Providers
+// UIActivityItemProvider defers the actual asset fetch to the moment the user
+// picks a destination — the share sheet opens instantly regardless of iCloud status.
+// Both providers use PHAssetResourceManager.requestData which:
+//   • returns a PHAssetResourceDataRequestID enabling true cancellation via cancelDataRequest(_:)
+//   • reports progress via progressHandler (0→1)
+//   • writes to a /tmp path accessible cross-process by any share extension
+
+private final class ImageItemProvider: UIActivityItemProvider, @unchecked Sendable {
+    private let asset: PHAsset
+    private var exportedURL: URL?
+    private var thumbnail: UIImage?
+    private let onPhaseChange: (SharePhase) -> Void
+    private let semaphore = DispatchSemaphore(value: 0)
+    private var requestID: PHAssetResourceDataRequestID?
+
+    init(asset: PHAsset, onPhaseChange: @escaping (SharePhase) -> Void) {
+        self.asset = asset
+        self.onPhaseChange = onPhaseChange
+        super.init(placeholderItem: UIImage())
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let options = PHImageRequestOptions()
+            options.isSynchronous = true
+            options.deliveryMode = .fastFormat
+            options.isNetworkAccessAllowed = true
+            PHImageManager.default().requestImage(
+                for: self.asset, targetSize: CGSize(width: 300, height: 300),
+                contentMode: .aspectFill, options: options
+            ) { image, _ in self.thumbnail = image }
+        }
+    }
+
+    override func cancel() {
+        super.cancel()
+        if let id = requestID { PHAssetResourceManager.default().cancelDataRequest(id) }
+        semaphore.signal()
+    }
+
+    // Runs on UIKit's dedicated provider background thread — blocking is intentional.
+    override var item: Any {
+        guard !isCancelled else { return placeholderItem as Any }
+
+        let resources = PHAssetResource.assetResources(for: asset)
+        guard let resource = resources.first(where: { $0.type == .fullSizePhoto })
+                          ?? resources.first(where: { $0.type == .photo }) else { return UIImage() }
+
+        let ext = (resource.originalFilename as NSString).pathExtension
+        let tempURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("\(UUID().uuidString).\(ext.isEmpty ? "jpg" : ext)")
+        exportedURL = tempURL
+
+        FileManager.default.createFile(atPath: tempURL.path, contents: nil)
+        guard let fileHandle = try? FileHandle(forWritingTo: tempURL) else { return UIImage() }
+
+        var failed = false
+        let sem = semaphore
+
+        DispatchQueue.main.async { [weak self] in self?.onPhaseChange(.downloading(0)) }
+
+        let options = PHAssetResourceRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.progressHandler = { [weak self] progress in
+            DispatchQueue.main.async { self?.onPhaseChange(.downloading(progress)) }
+        }
+
+        requestID = PHAssetResourceManager.default().requestData(
+            for: resource, options: options,
+            dataReceivedHandler: { data in try? fileHandle.write(contentsOf: data) },
+            completionHandler: { [weak self] error in
+                try? fileHandle.synchronize()
+                fileHandle.closeFile()
+                if error != nil { failed = true }
+                if self?.isCancelled != true, !failed {
+                    DispatchQueue.main.async { self?.onPhaseChange(.processing) }
+                }
+                sem.signal()
+            }
+        )
+
+        sem.wait()
+        guard !isCancelled, !failed, let image = UIImage(contentsOfFile: tempURL.path) else {
+            return UIImage()
+        }
+        DispatchQueue.main.async { [weak self] in self?.onPhaseChange(.complete) }
+        return image
+    }
+
+    override func activityViewControllerLinkMetadata(_ activityViewController: UIActivityViewController) -> LPLinkMetadata? {
+        let metadata = LPLinkMetadata()
+        metadata.title = String(localized: "share.caption")
+        if let thumbnail { metadata.imageProvider = NSItemProvider(object: thumbnail) }
+        return metadata
+    }
+
+    deinit {
+        if let url = exportedURL { try? FileManager.default.removeItem(at: url) }
+    }
+}
+
+private final class VideoItemProvider: UIActivityItemProvider, @unchecked Sendable {
+    private let asset: PHAsset
+    private var exportedURL: URL?
+    private var thumbnail: UIImage?
+    private let onPhaseChange: (SharePhase) -> Void
+    private let semaphore = DispatchSemaphore(value: 0)
+    private var requestID: PHAssetResourceDataRequestID?
+
+    init(asset: PHAsset, onPhaseChange: @escaping (SharePhase) -> Void) {
+        self.asset = asset
+        self.onPhaseChange = onPhaseChange
+        super.init(placeholderItem: URL(fileURLWithPath: NSTemporaryDirectory() + "video.mov"))
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self else { return }
+            let options = PHImageRequestOptions()
+            options.isSynchronous = true
+            options.deliveryMode = .fastFormat
+            options.isNetworkAccessAllowed = true
+            PHImageManager.default().requestImage(
+                for: self.asset, targetSize: CGSize(width: 300, height: 300),
+                contentMode: .aspectFill, options: options
+            ) { image, _ in self.thumbnail = image }
+        }
+    }
+
+    override func cancel() {
+        super.cancel()
+        if let id = requestID { PHAssetResourceManager.default().cancelDataRequest(id) }
+        semaphore.signal()
+    }
+
+    // Runs on UIKit's dedicated provider background thread — blocking is intentional.
+    override var item: Any {
+        guard !isCancelled else { return placeholderItem as Any }
+        guard let resource = PHAssetResource.assetResources(for: asset)
+            .first(where: { $0.type == .video }) else { return URL(fileURLWithPath: "") as Any }
+
+        let ext = (resource.originalFilename as NSString).pathExtension
+        let tempURL = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("\(UUID().uuidString).\(ext.isEmpty ? "mov" : ext)")
+        exportedURL = tempURL
+
+        FileManager.default.createFile(atPath: tempURL.path, contents: nil)
+        guard let fileHandle = try? FileHandle(forWritingTo: tempURL) else { return URL(fileURLWithPath: "") as Any }
+
+        var failed = false
+        let sem = semaphore
+
+        DispatchQueue.main.async { [weak self] in self?.onPhaseChange(.downloading(0)) }
+
+        let options = PHAssetResourceRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.progressHandler = { [weak self] progress in
+            DispatchQueue.main.async { self?.onPhaseChange(.downloading(progress)) }
+        }
+
+        requestID = PHAssetResourceManager.default().requestData(
+            for: resource, options: options,
+            dataReceivedHandler: { data in try? fileHandle.write(contentsOf: data) },
+            completionHandler: { [weak self] error in
+                try? fileHandle.synchronize()
+                fileHandle.closeFile()
+                if error != nil { failed = true }
+                if self?.isCancelled != true, !failed {
+                    DispatchQueue.main.async { self?.onPhaseChange(.processing) }
+                }
+                sem.signal()
+            }
+        )
+
+        sem.wait()
+        guard !isCancelled, !failed else { return placeholderItem as Any }
+        DispatchQueue.main.async { [weak self] in self?.onPhaseChange(.complete) }
+        return tempURL as Any
+    }
+
+    override func activityViewControllerLinkMetadata(_ activityViewController: UIActivityViewController) -> LPLinkMetadata? {
+        let metadata = LPLinkMetadata()
+        metadata.title = String(localized: "share.caption")
+        if let thumbnail { metadata.imageProvider = NSItemProvider(object: thumbnail) }
+        return metadata
+    }
+
+    deinit {
+        if let url = exportedURL { try? FileManager.default.removeItem(at: url) }
+    }
 }

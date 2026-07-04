@@ -24,6 +24,7 @@ struct PhotoCardView: View {
 
     @State private var image: UIImage?
     @State private var isLoading: Bool
+    @State private var isSharing = false
     @State private var player: AVPlayer?
     @State private var isMuted = false
 
@@ -52,13 +53,16 @@ struct PhotoCardView: View {
     /// the reload dance and spinner entirely when this is set.
     let isCachedImageFinal: Bool
 
+    let onShare: ((@escaping () -> Void) -> Void)?
+
     /// Pass a pre-loaded image from the ViewModel cache to display it instantly,
     /// skipping the async load path entirely and preventing any ProgressView flash.
-    init(item: PhotoItem, isTopCard: Bool, cachedImage: UIImage? = nil, isCachedImageFinal: Bool = false, aestheticScore: Int? = nil) {
+    init(item: PhotoItem, isTopCard: Bool, cachedImage: UIImage? = nil, isCachedImageFinal: Bool = false, aestheticScore: Int? = nil, onShare: ((@escaping () -> Void) -> Void)? = nil) {
         self.item = item
         self.isTopCard = isTopCard
         self.isCachedImageFinal = isCachedImageFinal
         self.aestheticScore = aestheticScore
+        self.onShare = onShare
         _image = State(initialValue: cachedImage)
         // For images: skip loading if we already have the pixels.
         // For videos: pool check happens in loadVideoPlayer(), keep loading=true.
@@ -239,6 +243,29 @@ struct PhotoCardView: View {
                                     .padding(.vertical, 6)
                                     .background(Capsule().fill(Color.black.opacity(0.6)))
                             }
+                            Button {
+                                guard !isSharing else { return }
+                                HapticService.shared.selection()
+                                isSharing = true
+                                onShare? {
+                                    Task { @MainActor in isSharing = false }
+                                }
+                            } label: {
+                                ZStack {
+                                    if isSharing {
+                                        ProgressView().tint(.white).scaleEffect(0.7)
+                                    } else {
+                                        Image(systemName: "square.and.arrow.up")
+                                            .font(.caption)
+                                            .foregroundColor(.white)
+                                    }
+                                }
+                                .frame(width: 16, height: 16)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(Capsule().fill(Color.black.opacity(0.6)))
+                            }
+                            .buttonStyle(.plain)
                         }
                         // Aesthetic score badge — uncomment to re-enable
                         // if let score = aestheticScore {

@@ -118,7 +118,10 @@ struct SwipeStackView: View {
                                     isCachedImageFinal: viewModel.finalImageIDs.contains(item.id),
                                     aestheticScore: viewModel.loadedScoreIDs.contains(item.id)
                                         ? AestheticScoringService.shared.cachedScore(for: item.id)
-                                        : nil
+                                        : nil,
+                                    onShare: index == 0 ? { [weak viewModel] completion in
+                                        viewModel?.shareItem(item, completion: completion)
+                                    } : nil
                                 )
                                 .frame(width: cardW, height: cardH)
                                 .zIndex(Double(cardStackSize - index))
@@ -316,6 +319,10 @@ struct SwipeStackView: View {
         }
         .fullScreenCover(isPresented: $viewModel.shouldShowPaywall) {
             PaywallView()
+        }
+        .sheet(isPresented: $viewModel.isShowingShareSheet) {
+            ActivityView(items: viewModel.shareItems)
+                .presentationDetents([.medium, .large])
         }
         // Shuffle landing: fires when shuffleBatchID changes (activateShuffle / deactivateShuffle).
         .onChange(of: viewModel.shuffleBatchID) { _ in
@@ -1024,4 +1031,19 @@ struct SwipeStackView: View {
 #Preview {
     SwipeStackView(selectedTab: .constant(0))
         .environmentObject(PhotoStackViewModel())
+}
+
+// MARK: - Share Sheet Wrapper
+
+/// .sheet() presentation lets SwiftUI own the popover context — crash-safe on iPad.
+private struct ActivityView: UIViewControllerRepresentable {
+    let items: [Any]
+
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        let vc = UIActivityViewController(activityItems: items, applicationActivities: nil)
+        vc.completionWithItemsHandler = { _, _, _, _ in }
+        return vc
+    }
+
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
 }

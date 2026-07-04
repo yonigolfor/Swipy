@@ -96,7 +96,8 @@ Swipy/
 │       ├── TrashCelebrationView.swift
 │       ├── ParticleExplosionView.swift
 │       ├── EmptyStateView.swift
-│       └── VideoProgressBar.swift
+│       ├── VideoProgressBar.swift
+│       └── ShareHUDView.swift          # Floating progress HUD shown during share (hosted in ShareHUDManager's UIWindow)
 │
 ├── Services/
 │   ├── PhotoLibraryService.swift   # PHPhotoLibrary access + pagination
@@ -107,7 +108,8 @@ Swipy/
 │   ├── VideoPlayerPool.swift       # Singleton AVPlayer pool (max 3)
 │   ├── NotificationManager.swift   # UNUserNotificationCenter builder
 │   ├── NotificationScheduler.swift # 4 trigger types + 2/day quota
-│   └── NotificationDelegate.swift  # In-app notification handling
+│   ├── NotificationDelegate.swift  # In-app notification handling
+│   └── ShareHUDManager.swift       # UIWindow at .alert+1 hosting ShareHUDView during share operations
 │
 ├── Extensions/
 │   ├── View+Extensions.swift       # cardShadow, onShake, color helpers
@@ -330,3 +332,4 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
 - `NOTIFICATIONS.md` — notification triggers, background task setup, deep linking, known limitations
 - `SNOOZE_FEATURE.md` — snooze ("Later") algorithm, exponential backoff, persistence, flush scenarios
 - `HAPTICS.md` — full map of every haptic event: generators, intensities, timing, and the GB-milestone burst sequence
+- `SHARE_FEATURE.md` — share architecture: UIActivityItemProvider deferral, PHAssetResourceManager.requestData, HUD lifecycle, cancellation flow
