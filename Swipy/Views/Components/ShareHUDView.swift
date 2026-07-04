@@ -31,10 +31,12 @@ struct ShareHUDView: View {
                     .transition(.opacity)
                 }
             }
+            .frame(maxWidth: .infinity)
             .padding(.vertical, 24)
             .padding(.horizontal, 28)
             .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .shadow(color: .black.opacity(0.3), radius: 32, y: 10)
+            .padding(.horizontal, 40)
             .animation(.smooth, value: animationPhase)
         }
     }
@@ -97,10 +99,12 @@ struct ShareHUDView: View {
 
     private var phaseLabel: String {
         switch hud.phase {
-        case .downloading(let p) where p < 0.3:
+        case .downloading(let p) where p < 0.4:
             return String(localized: "share.hud.connecting")
-        case .downloading:
+        case .downloading(let p) where p < 0.75:
             return String(localized: "share.hud.downloading")
+        case .downloading:
+            return String(localized: "share.hud.processing")
         case .processing:
             return String(localized: "share.hud.processing")
         case .complete:

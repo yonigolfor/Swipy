@@ -1854,12 +1854,15 @@ private final class ImageItemProvider: UIActivityItemProvider, @unchecked Sendab
         super.init(placeholderItem: UIImage())
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
+            let scale = UIScreen.main.scale
+            let side = 300 * scale
             let options = PHImageRequestOptions()
             options.isSynchronous = true
-            options.deliveryMode = .fastFormat
+            options.deliveryMode = .highQualityFormat
+            options.resizeMode = .exact
             options.isNetworkAccessAllowed = true
             PHImageManager.default().requestImage(
-                for: self.asset, targetSize: CGSize(width: 300, height: 300),
+                for: self.asset, targetSize: CGSize(width: side, height: side),
                 contentMode: .aspectFill, options: options
             ) { image, _ in self.thumbnail = image }
         }
@@ -1946,12 +1949,15 @@ private final class VideoItemProvider: UIActivityItemProvider, @unchecked Sendab
         super.init(placeholderItem: URL(fileURLWithPath: NSTemporaryDirectory() + "video.mov"))
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self else { return }
+            let scale = UIScreen.main.scale
+            let side = 300 * scale
             let options = PHImageRequestOptions()
             options.isSynchronous = true
-            options.deliveryMode = .fastFormat
+            options.deliveryMode = .highQualityFormat
+            options.resizeMode = .exact
             options.isNetworkAccessAllowed = true
             PHImageManager.default().requestImage(
-                for: self.asset, targetSize: CGSize(width: 300, height: 300),
+                for: self.asset, targetSize: CGSize(width: side, height: side),
                 contentMode: .aspectFill, options: options
             ) { image, _ in self.thumbnail = image }
         }

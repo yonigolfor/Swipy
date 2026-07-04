@@ -66,10 +66,12 @@ A floating `UIWindow` at `.alert + 1` level sits above all other UI including th
 - Plain `UIWindow` (not a PassthroughWindow) — `Color.clear` areas return `nil` from `hitTest` automatically, so the cancel button receives taps correctly without any custom hit-testing
 
 ### ShareHUDView (Component)
-- Circular progress ring using `Circle().trim(from: 0, to: progressFraction)` 
+- Full-width card (`.frame(maxWidth: .infinity)`) with 40pt horizontal padding from screen edges, 28pt inner content padding
+- Circular progress ring using `Circle().trim(from: 0, to: progressFraction)` with glow pulse animation
 - `animationPhase: Int` (0–3) drives layout animations; raw progress ticks do NOT trigger layout re-renders (prevents `.animation` from refiring on every tiny progress update)
 - Ring → green checkmark transition on `.complete`
 - Cancel button styled as a `Capsule` (visually distinct as an interactive element)
+- Phase label thresholds: 0–40% → "Preparing media...", 41–75% → "Almost ready...", 76–100% → "Preparing..." (same key as `.processing`)
 
 ### Phase flow
 ```
@@ -82,14 +84,14 @@ UIActivityItemProvider.item starts
                                                                                → if HUD not yet visible: Task cancelled, no window ever created
 ```
 
-### HUD Debounce (1.5s threshold)
+### HUD Debounce (800ms threshold)
 
-Fast local assets complete in under 200ms — showing a HUD that immediately dismisses is jarring. The window is created only if the download is still in progress after 1.5 seconds:
+Fast local assets complete in under 200ms — showing a HUD that immediately dismisses is jarring. The window is created only if the download is still in progress after 800ms:
 
 - **< 800ms**: `.complete` fires → `hudShowTask.cancel()` → HUD never appears; success haptic fires silently
 - **≥ 800ms**: `hudShowTask` fires → `show()` is called with the current phase (already at live progress, not 0%) → normal HUD lifecycle
 
-The phase is pre-set to `.downloading(0)` immediately when the download starts (before the 1.5s delay) so the ring renders at the correct live progress value when the window opens, rather than jumping from 0%.
+The phase is pre-set to `.downloading(0)` immediately when the download starts (before the 800ms delay) so the ring renders at the correct live progress value when the window opens, rather than jumping from 0%.
 
 `hudShowTask` is cancelled in three places: `.complete` arriving early, `cancelShare()`, and at the start of any new `shareItem()` call (implicit via the `isShowingShareSheet` guard).
 
@@ -99,7 +101,13 @@ The phase is pre-set to `.downloading(0)` immediately when the download starts (
 
 `activityViewControllerLinkMetadata(_:)` is called on the **main thread** to populate the share sheet header (title + thumbnail). Any blocking work here deadlocks the UI.
 
-Both providers pre-load the thumbnail in `init` on `DispatchQueue.global(qos: .userInitiated)` using `PHImageManager` with `isSynchronous: true` and `deliveryMode: .fastFormat`. The thumbnail is stored as a property and returned synchronously from `activityViewControllerLinkMetadata`. This is safe because `init` completes before the share sheet first calls the method.
+Both providers pre-load the thumbnail in `init` on `DispatchQueue.global(qos: .userInitiated)` using `PHImageManager` with:
+- `isSynchronous: true` — blocks the background thread until delivery completes
+- `deliveryMode: .highQualityFormat` — ensures `resizeMode` and `contentMode` are honoured (`.fastFormat` ignores them and returns the nearest cached thumbnail at its native aspect ratio)
+- `resizeMode: .exact` + `contentMode: .aspectFill` — OS crops to a perfect square at the requested size
+- `targetSize: CGSize(width: 300 * UIScreen.main.scale, height: 300 * UIScreen.main.scale)` — retina-correct pixel dimensions so the share sheet preview is sharp
+
+The thumbnail is stored as a property and returned synchronously from `activityViewControllerLinkMetadata`. This is safe because `init` completes before the share sheet first calls the method.
 
 ---
 
@@ -130,4 +138,4 @@ func cancelShare()
 | `ViewModels/PhotoStackViewModel.swift` | `shareItem()`, `cancelShare()`, `ImageItemProvider`, `VideoItemProvider` |
 | `Views/Main/PhotoCardView.swift` | Share button (top card only) + `isSharing` spinner state |
 | `Views/Main/SwipeStackView.swift` | `ActivityView` wrapper + `.sheet(isPresented:)` presentation |
-| `Localizable.xcstrings` | `share.hud.cancel`, `share.hud.downloading`, `share.hud.processing`, `share.hud.complete`, `share.caption` |
+| `Localizable.xcstrings` | `share.hud.connecting` (0–40%), `share.hud.downloading` (41–75%), `share.hud.processing` (76–100% + `.processing`), `share.hud.complete`, `share.hud.cancel`, `share.caption` |

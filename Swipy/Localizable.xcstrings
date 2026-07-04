@@ -1854,13 +1854,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Connecting to iCloud..."
+            "value" : "Preparing media..."
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "מתחבר ל-iCloud..."
+            "value" : "מכין מדיה..."
           }
         }
       }
@@ -1871,13 +1871,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Downloading original..."
+            "value" : "Almost ready..."
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "מוריד קובץ מקורי..."
+            "value" : "כמעט מוכן..."
           }
         }
       }
