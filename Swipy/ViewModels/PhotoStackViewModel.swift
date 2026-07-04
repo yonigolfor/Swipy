@@ -1776,7 +1776,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 self.hudShowTask?.cancel()
                 self.hudShowTask = Task { @MainActor [weak self] in
                     guard let self else { return }
-                    try? await Task.sleep(for: .seconds(1.5))
+                    try? await Task.sleep(for: .milliseconds(800))
                     guard !Task.isCancelled else { return }
                     ShareHUDManager.shared.show(onCancel: { [weak self] in self?.cancelShare() })
                 }

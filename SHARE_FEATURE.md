@@ -86,8 +86,8 @@ UIActivityItemProvider.item starts
 
 Fast local assets complete in under 200ms — showing a HUD that immediately dismisses is jarring. The window is created only if the download is still in progress after 1.5 seconds:
 
-- **< 1.5s**: `.complete` fires → `hudShowTask.cancel()` → HUD never appears; success haptic fires silently
-- **≥ 1.5s**: `hudShowTask` fires → `show()` is called with the current phase (already at live progress, not 0%) → normal HUD lifecycle
+- **< 800ms**: `.complete` fires → `hudShowTask.cancel()` → HUD never appears; success haptic fires silently
+- **≥ 800ms**: `hudShowTask` fires → `show()` is called with the current phase (already at live progress, not 0%) → normal HUD lifecycle
 
 The phase is pre-set to `.downloading(0)` immediately when the download starts (before the 1.5s delay) so the ring renders at the correct live progress value when the window opens, rather than jumping from 0%.
 
