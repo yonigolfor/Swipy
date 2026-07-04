@@ -2,6 +2,7 @@ import SwiftUI
 
 struct ShareHUDView: View {
     @EnvironmentObject var hud: ShareHUDManager
+    @State private var glowPulse = false
 
     var body: some View {
         ZStack {
@@ -52,14 +53,18 @@ struct ShareHUDView: View {
                     Circle()
                         .trim(from: 0, to: progressFraction)
                         .stroke(.white, style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
+                        .shadow(color: .white.opacity(glowPulse ? 0.55 : 0.0), radius: glowPulse ? 6 : 1)
                         .rotationEffect(.degrees(-90))
-                        .animation(.linear(duration: 0.15), value: progressFraction)
+                        .animation(.linear(duration: 0.3), value: progressFraction)
+                        .animation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true), value: glowPulse)
                     Text(percentText)
                         .font(.system(size: 13, weight: .bold, design: .rounded))
                         .foregroundStyle(.white)
                         .contentTransition(.numericText())
                         .animation(.smooth, value: percentText)
                 }
+                .onAppear { glowPulse = true }
+                .onDisappear { glowPulse = false }
                 .transition(.opacity)
             }
         }
@@ -92,10 +97,16 @@ struct ShareHUDView: View {
 
     private var phaseLabel: String {
         switch hud.phase {
-        case .downloading: return String(localized: "share.hud.downloading")
-        case .processing:  return String(localized: "share.hud.processing")
-        case .complete:    return String(localized: "share.hud.complete")
-        case .idle:        return ""
+        case .downloading(let p) where p < 0.3:
+            return String(localized: "share.hud.connecting")
+        case .downloading:
+            return String(localized: "share.hud.downloading")
+        case .processing:
+            return String(localized: "share.hud.processing")
+        case .complete:
+            return String(localized: "share.hud.complete")
+        case .idle:
+            return ""
         }
     }
 }

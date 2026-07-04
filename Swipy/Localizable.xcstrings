@@ -1848,19 +1848,36 @@
         }
       }
     },
+    "share.hud.connecting" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connecting to iCloud..."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "מתחבר ל-iCloud..."
+          }
+        }
+      }
+    },
     "share.hud.downloading" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Downloading..."
+            "value" : "Downloading original..."
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "מוריד..."
+            "value" : "מוריד קובץ מקורי..."
           }
         }
       }
@@ -1871,13 +1888,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Processing..."
+            "value" : "Preparing..."
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "מעבד..."
+            "value" : "מכין לפתיחה..."
           }
         }
       }
