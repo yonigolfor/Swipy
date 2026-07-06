@@ -7,6 +7,9 @@
     "%lld/10" : {
 
     },
+    "×%lld" : {
+
+    },
     "⭐️" : {
 
     },
@@ -1966,12 +1969,6 @@
           }
         }
       }
-    },
-    "Snoozed" : {
-
-    },
-    "Snoozed ×%lld" : {
-
     },
     "Space Reclaimed! 🚀" : {
       "localizations" : {

@@ -121,18 +121,6 @@ struct PhotoCardView: View {
                                     player.isMuted = isMuted
                                     AudioSessionManager.shared.configure(muted: isMuted)
                                 }
-                                VStack {
-                                    HStack {
-                                        Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
-                                            .font(.caption)
-                                            .foregroundColor(.white)
-                                            .padding(6)
-                                            .background(Circle().fill(.black.opacity(0.6)))
-                                            .padding(8)
-                                        Spacer()
-                                    }
-                                    Spacer()
-                                }
                             }
                         }
                         .opacity(isVideoPlayerReady ? 1 : 0)
@@ -203,79 +191,79 @@ struct PhotoCardView: View {
                 }
             }
 
-            // ── File size + Favorite + Snooze badges (top-right) ──────
+            // ── Top badges row: speaker (left) · snooze · favorite · size · share (right) ──
             VStack {
-                HStack {
-                    Spacer()
-                    VStack(alignment: .trailing, spacing: 6) {
-                        HStack(spacing: 6) {
-                            if item.snoozeCount > 0 {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "clock.arrow.circlepath")
-                                        .font(.caption)
-                                    Text("×\(item.snoozeCount)")
-                                        .font(.caption)
-                                        .fontWeight(.semibold)
-                                }
-                                .foregroundColor(.orange)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(
-                                    Capsule()
-                                        .fill(.ultraThinMaterial)
-                                        .overlay(Capsule().fill(Color.orange.opacity(0.2)))
-                                )
-                            }
-                            if item.asset.isFavorite {
-                                Image(systemName: "heart.fill")
-                                    .font(.caption)
-                                    .foregroundColor(.pink)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(Capsule().fill(Color.black.opacity(0.6)))
-                            }
-                            if item.fileSize > 0 {
-                                Text(item.fileSizeString)
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
-                                    .foregroundColor(.white)
-                                    .padding(.horizontal, 10)
-                                    .padding(.vertical, 6)
-                                    .background(Capsule().fill(Color.black.opacity(0.6)))
-                            }
-                            Button {
-                                guard !isSharing else { return }
-                                HapticService.shared.selection()
-                                isSharing = true
-                                onShare? {
-                                    Task { @MainActor in isSharing = false }
-                                }
-                            } label: {
-                                ZStack {
-                                    if isSharing {
-                                        ProgressView().tint(.white).scaleEffect(0.7)
-                                    } else {
-                                        Image(systemName: "square.and.arrow.up")
-                                            .font(.caption)
-                                            .foregroundColor(.white)
-                                    }
-                                }
-                                .frame(width: 16, height: 16)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 6)
-                                .background(Capsule().fill(Color.black.opacity(0.6)))
-                            }
-                            .buttonStyle(.plain)
-                        }
-                        // Aesthetic score badge — uncomment to re-enable
-                        // if let score = aestheticScore {
-                        //     scoreBadgeView(score)
-                        //         .transition(.opacity.combined(with: .scale(scale: 0.85, anchor: .topTrailing)))
-                        // }
+                HStack(spacing: 6) {
+                    if player != nil {
+                        Image(systemName: isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                            .padding(6)
+                            .background(Circle().fill(.black.opacity(0.6)))
+                            .allowsHitTesting(false)
                     }
-                    .animation(.easeIn(duration: 0.3), value: aestheticScore != nil)
-                    .padding()
+                    Spacer()
+                    if item.snoozeCount > 0 {
+                        HStack(spacing: 4) {
+                            Image(systemName: "clock.arrow.circlepath")
+                                .font(.caption)
+                            Text("×\(item.snoozeCount)")
+                                .font(.caption)
+                                .fontWeight(.semibold)
+                        }
+                        .foregroundColor(.orange)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(.ultraThinMaterial)
+                                .overlay(Capsule().fill(Color.orange.opacity(0.2)))
+                        )
+                    }
+                    if item.asset.isFavorite {
+                        Image(systemName: "heart.fill")
+                            .font(.caption)
+                            .foregroundColor(.pink)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Capsule().fill(Color.black.opacity(0.6)))
+                    }
+                    if item.fileSize > 0 {
+                        Text(item.fileSizeString)
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 6)
+                            .background(Capsule().fill(Color.black.opacity(0.6)))
+                    }
+                    Button {
+                        guard !isSharing else { return }
+                        HapticService.shared.selection()
+                        isSharing = true
+                        onShare? {
+                            Task { @MainActor in isSharing = false }
+                        }
+                    } label: {
+                        ZStack {
+                            if isSharing {
+                                ProgressView().tint(.white).scaleEffect(0.7)
+                            } else {
+                                Image(systemName: "square.and.arrow.up")
+                                    .font(.caption)
+                                    .foregroundColor(.white)
+                            }
+                        }
+                        .frame(width: 16, height: 16)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .background(Capsule().fill(Color.black.opacity(0.6)))
+                    }
+                    .buttonStyle(.plain)
                 }
+                .animation(.easeIn(duration: 0.3), value: aestheticScore != nil)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 16)
                 Spacer()
             }
 
