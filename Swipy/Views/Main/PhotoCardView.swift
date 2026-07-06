@@ -213,7 +213,7 @@ struct PhotoCardView: View {
                                 HStack(spacing: 4) {
                                     Image(systemName: "clock.arrow.circlepath")
                                         .font(.caption)
-                                    Text(item.snoozeCount == 1 ? "Snoozed" : "Snoozed ×\(item.snoozeCount)")
+                                    Text("×\(item.snoozeCount)")
                                         .font(.caption)
                                         .fontWeight(.semibold)
                                 }
