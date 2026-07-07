@@ -225,7 +225,9 @@ struct SwipeStackView: View {
 
             // 6. FAB row — shuffle only (offline entry point moved to SmartFiltersView)
             // Force LTR so FAB stays on correct side in RTL locales (e.g. Hebrew).
-            if !viewModel.isOfflineMode {
+            // Hidden when VictoryView is shown (isLoading covers the in-flight shuffle state
+            // where photoStack is temporarily empty before the batch lands).
+            if !viewModel.isOfflineMode && (viewModel.isLoading || !viewModel.photoStack.isEmpty) {
                 VStack {
                     Spacer()
                     HStack {

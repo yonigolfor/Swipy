@@ -674,15 +674,34 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 shuffleBatchID = UUID()
                 if !photoStack.isEmpty { precacheNextImages() }
             } else {
-                let (items, nextIdx) = photoService.fetchPageOfAssets(
+                var (items, nextIdx) = photoService.fetchPageOfAssets(
                     for: currentFilter,
                     startIndex: randomStart,
                     pageSize: initialPageSize,
                     excluding: processedAssetIDs
                 )
+
+                // Wrap around if nothing was found near the random position.
+                if items.isEmpty && randomStart > 0 {
+                    (items, nextIdx) = photoService.fetchPageOfAssets(
+                        for: currentFilter,
+                        startIndex: 0,
+                        pageSize: initialPageSize,
+                        excluding: processedAssetIDs
+                    )
+                }
+
                 await MainActor.run {
-                    self.fetchCursor = nextIdx ?? self.photoService.totalAssetCount
-                    self.photoStack = items
+                    if items.isEmpty {
+                        // Still empty → no unprocessed items anywhere; exit shuffle gracefully.
+                        self.isShuffleModeActive = false
+                        self.photoStack = self.restoreLinearStack()
+                        self.fetchCursor = self.savedLinearCursor
+                        self.preShuffleStack = nil
+                    } else {
+                        self.fetchCursor = nextIdx ?? self.photoService.totalAssetCount
+                        self.photoStack = items
+                    }
                     self.stageSnoozedItemsIfReady()
                     self.isLoading = false
                     self.shuffleBatchID = UUID()
