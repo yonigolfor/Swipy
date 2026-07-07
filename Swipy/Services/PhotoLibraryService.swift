@@ -24,11 +24,11 @@ class PhotoLibraryService: ObservableObject {
     // MARK: - Card Image Cache (service-owned; ViewModel stays stateless for images)
 
     /// In-memory store for card images.
-    /// Online: countLimit=6 (top-5 visible + 1 undo slot). NSCache evicts under memory pressure.
+    /// Online: countLimit=10 (top-8 visible + 1 undo slot + 1 safety). NSCache evicts under memory pressure.
     /// Offline: expanded to 30 via setOfflineCacheLimit(true) — all pre-loaded items stay warm.
     private let cardCache: NSCache<NSString, UIImage> = {
         let c = NSCache<NSString, UIImage>()
-        c.countLimit = 6
+        c.countLimit = 10
         return c
     }()
 
@@ -36,7 +36,7 @@ class PhotoLibraryService: ObservableObject {
     /// Offline pre-loads every visible item before showing cards; a larger limit
     /// prevents NSCache from evicting images before the user reaches them.
     func setOfflineCacheLimit(_ offline: Bool) {
-        cardCache.countLimit = offline ? 30 : 6
+        cardCache.countLimit = offline ? 30 : 10
     }
 
     /// Screen-pixel dimensions for card images. Computed once on first access.

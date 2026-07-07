@@ -184,7 +184,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     private let nextPageSize = 30
 
     /// When the stack drops to this many items, prefetch the next page.
-    private let lowWatermark = 12
+    private let lowWatermark = 15
 
     // MARK: - Services
 
@@ -1606,13 +1606,13 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         }
     }
 
-    /// Early warm-up called at the 80 pt drag threshold in SwipeStackView.
-    /// Starts loading the *next* cards (index 1…5) into NSCache while the user
+    /// Early warm-up called at the 30 pt drag threshold in SwipeStackView.
+    /// Starts loading the *next* cards (index 1…8) into NSCache while the user
     /// is still mid-drag, giving us the full remaining gesture duration as
     /// headstart before the new top card hits the screen.
     func prepareUpcomingCards() {
         // index 0 is the card being dragged away — skip it.
-        let upcomingItems = Array(photoStack.dropFirst().prefix(5))
+        let upcomingItems = Array(photoStack.dropFirst().prefix(8))
         guard !upcomingItems.isEmpty else { return }
 
         photoService.warmUpCache(for: upcomingItems)
@@ -1649,11 +1649,13 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     }
 
     private func precacheNextImages() {
-        let nextItems = Array(photoStack.prefix(5))
+        let nextItems = Array(photoStack.prefix(8))
         guard !nextItems.isEmpty else { return }
         print("[AestheticScoring] precacheNextImages — \(nextItems.count) items, personaReady=\(AestheticScoringService.shared.isPersonaReady)")
 
-        photoService.warmUpCache(for: nextItems)
+        // OS hint: give PHCachingImageManager 20 items to pre-decode in the background;
+        // zero NSCache cost — iOS evicts the pipeline buffer under memory pressure automatically.
+        photoService.warmUpCache(for: Array(photoStack.prefix(20)))
 
         let nextAssets = nextItems.map { $0.asset }
         Task { await VideoPlayerPool.shared.warmUp(for: nextAssets) }

@@ -890,11 +890,11 @@ struct SwipeStackView: View {
                 dragOffset = value.translation
                 dragRotation = Double(value.translation.width / 20)
 
-                // Fire early pre-load once the drag clears 80 pt.
-                // This gives us the remainder of the gesture (~200-400 ms) to
+                // Fire early pre-load once the drag clears 30 pt.
+                // This gives us the remainder of the gesture (~300-500 ms) to
                 // pull the next card's image into NSCache before it hits screen.
                 if !hasFiredEarlyPrecache,
-                   abs(value.translation.width) > 80 || abs(value.translation.height) > 80 {
+                   abs(value.translation.width) > 30 || abs(value.translation.height) > 30 {
                     hasFiredEarlyPrecache = true
                     viewModel.prepareUpcomingCards()
                 }

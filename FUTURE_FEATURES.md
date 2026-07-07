@@ -241,4 +241,157 @@ func applyOfflineModeFilter() {
 
 ---
 
+---
+
+## "מידע מיושן" Smart Filter (Real-World Informational Clutter)
+
+**Status:** Planned  
+**Difficulty:** ⭐⭐⭐☆☆ (Medium — 3/5)  
+**Marketing angle:** "Stop hoarding photos of menus you'll never visit again."
+
+---
+
+### The Real Problem
+
+Users accumulate hundreds of photos of physical documents, restaurant menus, receipts, whiteboards, and street signs — captured for immediate utility and forgotten the next day. These are not memories. They are noise. No existing filter targets them because they require pixel-level analysis (text density) rather than metadata alone.
+
+---
+
+### Product Vision
+
+> A dedicated filter that surfaces only **real-world camera captures of informational content** — menus, receipts, whiteboards, signage, documents. One swipe session clears months of accidental clutter.
+
+---
+
+### Inclusion / Exclusion Criteria
+
+**Included:**
+- Photos of restaurant menus, store opening hours, parking zone maps, flight boards
+- Photos of physical receipts, invoices, contracts, printed forms
+- Photos of whiteboards, presentation slides, school blackboards
+- Photos of street signs and informational signage (without scenic composition)
+
+**Excluded (critical for false-positive prevention):**
+- Any photo containing a detectable face — portraits and group shots, even with background text
+- Aesthetic photos of landmarks or street scenes (high aesthetic score signals artistic intent)
+- Screenshots — excluded at `PHFetchRequest` level via `mediaSubtype != .photoScreenshot`
+- Art, book covers, album art — typography as design, not information
+
+---
+
+### Detection Pipeline (3 Signals)
+
+All signals run on a 300×300 thumbnail via Vision framework. Signals run in parallel via `withTaskGroup`.
+
+| Signal | Tool | Conservative Threshold | Role |
+|---|---|---|---|
+| Text coverage | `VNDetectTextRectanglesRequest` → covered area / total area | `> 30%` | Primary include signal |
+| Face detection | `VNDetectFaceRectanglesRequest` | Any face → exclude | Hard exclude gate |
+| Aesthetic score | `AestheticScoringService.cachedScore(for:)` | `≥ 7` → exclude | Soft exclude gate (optional) |
+
+The aesthetic score gate is **optional**: if the persona is not yet ready, the filter proceeds on text + face signals alone. When the cached score is available and ≥ 7, the item is excluded to protect artistic street photography and scenic shots that happen to contain signage.
+
+**Combined rule:** include only when `textCoverage > 30% AND noFacesDetected AND (scoreUnavailable OR score < 7)`.
+
+---
+
+### Architecture Notes
+
+- **PHFetchRequest filter:** `mediaSubtype != .photoScreenshot` and `mediaType == .image` — applied before any pixel analysis.
+- **Phase structure:** Phase 1 count is unavailable (no metadata signal for text). The category shows a shimmer immediately and streams results from Phase 2 only — same pattern as `blurryPhotos`.
+- **Threading:** `VNDetectTextRectanglesRequest` and `VNDetectFaceRectanglesRequest` are synchronous Vision calls — must run on `DispatchQueue.global`, not `Task.detached`, to avoid cooperative thread pool blocking.
+- **False-positive rate target:** < 5%. The 30% text-coverage threshold is intentionally conservative. Portraits are hard-excluded via face detection regardless of text presence.
+- **`FilterCategory` addition:** `.outdatedInfo` case with `.teal` color and `doc.text.magnifyingglass` SF Symbol.
+
+---
+
+### Files to Create / Modify
+
+| File | Action | Notes |
+|---|---|---|
+| `FilterCategory.swift` | **Modify** | Add `.outdatedInfo` case, color, icon, localized strings |
+| `PhotoLibraryService.swift` | **Modify** | Add `fetchOutdatedInfoPhotos()` with PHFetchRequest filtering out screenshots |
+| `PhotoStackViewModel.swift` | **Modify** | Add Phase 2 streaming for `.outdatedInfo` using VNDetectTextRectanglesRequest + VNDetectFaceRectanglesRequest |
+| `SmartFiltersView.swift` | **Modify** | Add tile for new category |
+| `Localizable.xcstrings` | **Modify** | Add `filter.outdated_info`, `filter.outdated_info.desc` |
+
+---
+
+### Implementation Difficulty Breakdown
+
+| Sub-task | Difficulty |
+|---|---|
+| `FilterCategory` enum + UI tile | Easy |
+| PHFetchRequest with screenshot exclusion | Easy |
+| `VNDetectTextRectanglesRequest` text coverage ratio | Medium |
+| `VNDetectFaceRectanglesRequest` hard-exclude gate | Easy |
+| Aesthetic score optional gate integration | Easy |
+| Phase 2 streaming + `withTaskGroup` parallelism | Medium |
+| Threshold calibration on real photo libraries | Hard |
+
+**Overall: 3/5** — Individual pieces are straightforward. The hard part is calibrating the 30% text-coverage threshold against real libraries with diverse photo types. A threshold too low captures street scenes; too high misses sparse receipts. Calibration requires testing on 500+ real-world photos across categories.
+
+---
+
+---
+
+## TikTok-Level Image Prefetch Buffer
+
+**Status:** Done ✅  
+**Difficulty:** ⭐⭐☆☆☆ (Easy — 2/5)  
+**Impact:** Eliminates all visible loading states during rapid swiping.
+
+---
+
+### The Real Problem
+
+The current architecture is solid but conservatively sized. Under normal swiping (one card every 1–2 seconds) it's imperceptible. Under rapid swiping (3–5 cards in quick succession), items at stack positions 6+ are not yet in NSCache, producing a brief spinner before the card renders. The goal is to guarantee zero loading state regardless of swipe speed.
+
+---
+
+### What Changes
+
+Four targeted constant changes across two files — no architectural modifications:
+
+| Parameter | Current | Target | Rationale |
+|---|---|---|---|
+| `NSCache countLimit` | 6 (top-5 + undo) | 10 (top-8 + undo + safety) | Covers rapid 8-card burst; each retina card ≈ 2–3 MB → 10 cards ≈ 30 MB (negligible) |
+| `precacheNextImages` depth | `prefix(5)` | `prefix(8)` | Matches the deeper NSCache; ensures `finalImageIDs` is populated for 8 cards ahead |
+| `startCachingImages` hint depth | 5 items | 20 items | OS decode pipeline hint — zero memory cost in our cache; iOS pre-decodes in background |
+| Early drag trigger | 80pt | 30pt | Fires ~200ms earlier per gesture; gives more runway for background loads to complete |
+| Pagination watermark | 12 items | 15 items | Phase 2 streaming categories (blurry, burst) trickle items slowly — 3 extra cards of buffer covers the gap without any pixel-loading overhead (watermark controls metadata fetch only) |
+
+---
+
+### Memory Impact
+
+| Scenario | NSCache footprint |
+|---|---|
+| Current (6 slots) | ≈ 12–18 MB |
+| After change (10 slots) | ≈ 20–30 MB |
+| NSCache behavior | Auto-evicts under memory pressure — no leak risk |
+
+The increase is safe. NSCache's OS-managed eviction means the footprint drops automatically on any memory pressure event.
+
+---
+
+### Files to Modify
+
+| File | Change |
+|---|---|
+| `PhotoLibraryService.swift` | `countLimit`: 6 → 10 |
+| `PhotoStackViewModel.swift` | `precacheNextImages` prefix: 5 → 8; `startCachingImages` hint: 5 → 20; drag trigger: 80 → 30 |
+
+---
+
+### Implementation Difficulty Breakdown
+
+| Sub-task | Difficulty |
+|---|---|
+| Constant changes in two files | Trivial |
+| Verifying eviction policy still correct at depth 8 | Easy |
+| Smoke-test rapid swiping on device | Easy |
+
+**Overall: 2/5** — Pure constant tuning. Risk is near-zero because NSCache handles memory pressure automatically and the eviction logic (`evictStaleCacheEntries(keeping:)`) already operates on whatever `prefix(N)` is passed to it.
+
 <!-- Add future features below this line in the same format -->
