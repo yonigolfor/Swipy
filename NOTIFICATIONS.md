@@ -44,8 +44,9 @@ NotificationScheduler.checkBurstFromLibraryChange(insertedCount:)
     ↓ currentCount - burstSessionBaseCount >= 50
 נוטיפיקציה מתוזמנת לעוד שעה
 ```
-- `burstSessionBaseCount` מאופס בכל כניסה לפורגראונד (`scenePhase == .active`)
+- `burstSessionBaseCount` מאופס בכל כניסה לפורגראונד (`resetBurstBaseline()`, `scenePhase == .active`)
 - הbaseline מתעדכן אחרי כל גילוי כדי שהבאה יצטרך עוד 50
+- **`resetBurstBaseline()` נוגע רק ב-`burstSessionBaseCount`** — היא לא אמורה לגעת ב-`lastKnownPhotoCount` בכלל (ראו הערה למטה)
 
 #### App סגורה (Background) — מאוחר
 ```
@@ -56,7 +57,11 @@ checkPhotoBurstTrigger()
 נוטיפיקציה מתוזמנת לעוד שעה
 ```
 
-**חשוב — הbaseline מתקדם רק עם שליחה:** `lastKnownPhotoCount` מתעדכן לערך הנוכחי **רק** כשנשלחת נוטיפיקציה. אם ה-diff עדיין מתחת ל-50, הbaseline נשאר על ערכו ה"ישן" — כך ההפרש מצטבר על פני מספר ריצות background עד שחוצה את הסף. בעבר הbaseline התעדכן בכל ריצה וגרם לכך שהפרשים של 30+30 מעולם לא הגיעו ל-50.
+**חשוב — הbaseline מתקדם רק עם שליחה:** `lastKnownPhotoCount` מתעדכן לערך הנוכחי **רק** כשנשלחת נוטיפיקציה. אם ה-diff עדיין מתחת ל-50, הbaseline נשאר על ערכו ה"ישן" — כך ההפרש מצטבר על פני מספר ריצות background עד שחוצה את הסף.
+
+**באג שחזר וקיבל תיקון סופי:** `resetBurstBaseline()` (המסלול הראשון, foreground) היה **גם** מאפס את `lastKnownPhotoCount` בכל פתיחת אפליקציה — זה בדיוק ה-anti-pattern שהפסקה למעלה מזהירה ממנו, ומשתמש שפותח את האפליקציה מדי פעם מעולם לא היה מצטבר ל-50 לפני שה-baseline מתאפס שוב. `resetBurstBaseline()` נוגע היום **רק** ב-`burstSessionBaseCount` — שני המסלולים בלתי-תלויים לחלוטין.
+
+**Edge case — התקנה חדשה, לפני הרשאה:** ה"first run" guard ב-`checkPhotoBurstTrigger()` (שקובע את ה-baseline הראשוני בפעם שהמפתח לא קיים ב-UserDefaults) עלול לרוץ **לפני** ש-onboarding בכלל מבקש הרשאת גלריה (`evaluateAndScheduleNotifications()` נקרא מ-`scenePhase == .active` כבר בלאנץ' הקר). ללא בדיקת הרשאה, `PHAsset.fetchAssets(...).count` היה מחזיר `0` באותו רגע (לא בגלל ברירת מחדל של UserDefaults — כי אין עדיין גישה לספרייה בפועל), וה-0 הזה היה נשמר לצמיתות כ-baseline. אחרי שהמשתמש מאשר גישה בפועל (נניח לספרייה שלו יש 3000 תמונות), ה-background task הראשון היה מחשב `3000 - 0 = 3000` ושולח נוטיפיקציית "פרץ תמונות" שקרית. הguard כיום דורש `authorizationStatus == .authorized || .limited` לפני ששומר את ה-baseline הראשוני — אם אין הרשאה עדיין, הבדיקה פשוט מדלגת ומנסה שוב בפעם הבאה (foreground או background) עד שיש גישה אמיתית.
 
 **תנאים:**
 - לא נשלחה נוטיפיקציה burst ב-24 השעות האחרונות

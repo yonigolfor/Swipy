@@ -124,8 +124,13 @@ class NotificationScheduler {
 
         let previousKey = "lastKnownPhotoCount"
 
-        // First run: baseline without notifying
+        // First run: baseline without notifying. Requires real Photos access first —
+        // this can fire before onboarding ever requests permission (scenePhase fires
+        // on cold launch), where `current` would read 0 and get persisted forever,
+        // causing a false "burst" the moment access is later granted.
         guard let previous = UserDefaults.standard.object(forKey: previousKey) as? Int else {
+            let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+            guard status == .authorized || status == .limited else { return }
             UserDefaults.standard.set(current, forKey: previousKey)
             return
         }
@@ -163,14 +168,20 @@ class NotificationScheduler {
 
     // MARK: - Foreground session burst tracking
 
-    /// Call when the app enters foreground — sets the baseline for this session.
+    /// Call when the app enters foreground — sets the baseline for this session's
+    /// live PHPhotoLibraryChangeObserver burst detection (`checkBurstFromLibraryChange`).
+    ///
+    /// Deliberately does NOT touch `lastKnownPhotoCount` — that's a separate,
+    /// cross-session accumulator owned by `checkPhotoBurstTrigger()`, which must
+    /// only move when a burst notification actually fires (see its own comment).
+    /// Resetting it here on every foreground silently capped the diff at whatever
+    /// was added between two app opens, so a user who checks the app periodically
+    /// would never accumulate the 50 photos needed to trigger the notification.
     func resetBurstBaseline() {
         let fetchOptions = PHFetchOptions()
         fetchOptions.includeAssetSourceTypes = [.typeUserLibrary]
         let count = PHAsset.fetchAssets(with: fetchOptions).count
         UserDefaults.standard.set(count, forKey: "burstSessionBaseCount")
-        // Also keep lastKnownPhotoCount in sync for the background task path
-        UserDefaults.standard.set(count, forKey: "lastKnownPhotoCount")
     }
 
     /// Call from PHPhotoLibraryChangeObserver when new photos are inserted.
