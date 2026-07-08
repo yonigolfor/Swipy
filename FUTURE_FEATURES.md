@@ -394,4 +394,81 @@ The increase is safe. NSCache's OS-managed eviction means the footprint drops au
 
 **Overall: 2/5** — Pure constant tuning. Risk is near-zero because NSCache handles memory pressure automatically and the eviction logic (`evictStaleCacheEntries(keeping:)`) already operates on whatever `prefix(N)` is passed to it.
 
+---
+---
+
+# Technical Debt / Architecture Refactor
+
+Items in this section are not user-facing features — they're internal architecture cleanups identified during code review. Scheduled for **post-launch**, once the app is shipped and stable.
+
+---
+
+## Per-Card Drag State (Eliminate Shared `dragOffset` + `asyncAfter` Stack Mutation Delay)
+
+**Status:** Planned — Post-Launch  
+**Difficulty:** ⭐⭐⭐☆☆ (Medium Epic — 3/5)  
+**Category:** Architecture / Native-First cleanup
+
+---
+
+### The Real Problem
+
+`SwipeStackView` currently drives the swipe-away animation with a **single shared `@State private var dragOffset`**, applied only to whichever card sits at `index == 0` in the `ZStack` (`SwipeStackView.swift:129-130`). This forces an awkward two-step choreography on every swipe:
+
+1. `onEnded` animates `dragOffset` to `±500` (spring, card flies off-screen).
+2. A `DispatchQueue.main.asyncAfter(deadline: .now() + 0.3)` (`SwipeStackView.swift:947`) waits ~0.3s — roughly until the exit animation is visually done — before mutating `photoStack` (removing the swiped card) and resetting `dragOffset = .zero` **without animation**.
+
+The delay exists purely to prevent the *next* card (which shifts into `index == 0` the instant the array mutates) from momentarily inheriting the outgoing `±500` offset and visibly flashing off-screen before springing back.
+
+This is a manual workaround for something SwiftUI already does natively: animate a collection mutation via `withAnimation { array.remove(...) }` + `.transition()` on each row, where the departing view keeps its own identity and offset during removal instead of borrowing a shared value from whichever view happens to occupy a array position.
+
+The `asyncAfter` gap is also exactly the architectural seam that caused the shake-to-undo race bug (fixed by binding `performAction` to the specific captured `PhotoItem` instead of `photoStack.first`). The fix holds regardless of timing, but the underlying "data mutation trails visual state by ~300ms" pattern remains a standing risk for any *future* logic added inside that window.
+
+---
+
+### Product Vision
+
+Each card in the stack owns its own drag offset (scoped to its own view identity, keyed by `PhotoItem.id`), so:
+- Data mutation (`photoStack.remove(...)`) can happen **immediately** in `onEnded` — no `asyncAfter` scaffolding.
+- The departing card animates its own exit via a `.transition()` tied to its own state; no other card is ever at risk of inheriting a stale offset.
+- The `asyncAfter(0.3)` block, and the "capture item before delay" pattern introduced in the undo-race fix, both become unnecessary — the code gets **simpler**, not just safer.
+
+---
+
+### Architecture Notes
+
+- Move `dragOffset` (and the gesture that drives it) from `SwipeStackView` down into `PhotoCardView` (or a thin wrapper), scoped per-card via `@State`, keyed by `ForEach`'s existing `PhotoItem.id` identity.
+- Replace the manual `±500` exit offset + delayed removal with `withAnimation(.spring(...)) { photoStack.removeAll { $0.id == swipedItem.id } }` combined with `.transition(.move(edge:))` (or a custom asymmetric transition per direction: left/right/up) on the card view — SwiftUI animates the removal natively.
+- **Also touches, and must be re-homed per-card:**
+  - Pinch-to-zoom state (`pinchScale`, `pinchOffset`, `pinchAnchor` — currently also gated on `index == 0`, `SwipeStackView.swift:132-136`).
+  - `swipeIndicatorOverlay`, which currently reads the shared `dragOffset` directly — needs to bind to whichever card is actively being dragged instead.
+  - The `NotificationCenter.stopCurrentVideo` post (`SwipeStackView.swift:946`) and the shake-hint-toast counter, both currently sequenced off the same `asyncAfter` block — need an equivalent hook off the new transition's completion (or off the `withAnimation` call directly, since the data mutation itself is no longer delayed).
+- Not urgent: the undo-race fix already removed the correctness risk from the current design. This is a cleanliness/native-first refactor, not a bug fix — do not rush it alongside unrelated feature work.
+
+---
+
+### Files to Create / Modify
+
+| File | Action | Notes |
+|---|---|---|
+| `PhotoCardView.swift` | **Modify** | Own per-card `@State private var dragOffset`, drag gesture, exit transition |
+| `SwipeStackView.swift` | **Modify** | Remove shared `dragOffset`/`asyncAfter` scaffolding; re-home pinch state and `swipeIndicatorOverlay` per-card |
+| `PhotoStackViewModel.swift` | **Modify** | `performAction`/`keepPhoto`/`deletePhoto`/`snoozePhoto` likely unchanged (already item-based post undo-race fix) — verify call sites still make sense with immediate (non-delayed) invocation |
+| `ARCHITECTURE_SWIPE_LOADING.md` | **Modify** | Update Swipe Flow diagram once implemented — current diagram documents the `asyncAfter` scaffolding this refactor removes |
+
+---
+
+### Implementation Difficulty Breakdown
+
+| Sub-task | Difficulty |
+|---|---|
+| Move `dragOffset` + drag gesture to per-card scope | Medium |
+| Directional exit `.transition()` per swipe direction (left/right/up) | Medium |
+| Re-home pinch-to-zoom state per-card | Medium |
+| Re-wire `swipeIndicatorOverlay` to the actively-dragged card | Easy |
+| Re-sequence video-stop notification + shake-hint counter off immediate mutation | Easy |
+| Regression testing: swipe, undo, pinch-zoom, video autoplay, rapid multi-swipe | Hard |
+
+**Overall: 3/5** — No single piece is individually hard, but the blast radius touches four interlocking pieces of gesture state (drag, pinch, indicator, video) that all currently assume "one shared state per visible top card." The risk is regressions in the pinch-zoom/video interplay, not the core drag-and-remove logic itself. Worth a dedicated pass with full manual regression testing on-device, not a drive-by change.
+
 <!-- Add future features below this line in the same format -->

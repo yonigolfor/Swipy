@@ -11,19 +11,22 @@ struct EmptyStateView: View {
     let title: String
     let message: String
     let icon: String
+    var iconTint: Color? = nil
     var actionTitle: String?
     var action: (() -> Void)?
-    
+
     var body: some View {
         VStack(spacing: 20) {
             // Icon
             Image(systemName: icon)
                 .font(.system(size: 80))
                 .foregroundStyle(
-                    LinearGradient(
-                        colors: [.blue, .purple],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+                    iconTint.map(AnyShapeStyle.init) ?? AnyShapeStyle(
+                        LinearGradient(
+                            colors: [.blue, .purple],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
                 )
                 .padding(.bottom, 10)
@@ -92,6 +95,17 @@ extension EmptyStateView {
             title: "No \(category.rawValue)",
             message: "No items found in this category.",
             icon: category.icon
+        )
+    }
+
+    static func galleryAccessDenied(onOpenSettings: @escaping () -> Void) -> EmptyStateView {
+        EmptyStateView(
+            title: String(localized: "permission.denied.title"),
+            message: String(localized: "permission.denied.message"),
+            icon: "photo.badge.exclamationmark",
+            iconTint: Color.swipeRed.opacity(0.6),
+            actionTitle: String(localized: "permission.denied.cta"),
+            action: onOpenSettings
         )
     }
 }

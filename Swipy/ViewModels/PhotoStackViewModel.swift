@@ -851,15 +851,19 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     // MARK: - Swipe Actions
 
     /// Swipe Right — Keep
-    func keepPhoto() {
-        guard let topCard = photoStack.first else { return }
+    /// Removes `item` by identity rather than assuming it's still `photoStack.first` —
+    /// a shake-to-undo (or another swipe) can reorder the stack while this swipe's
+    /// exit-animation delay is still pending, so the front of the stack may no longer
+    /// be the card the user actually swiped.
+    func keepPhoto(_ item: PhotoItem) {
+        guard let index = photoStack.firstIndex(where: { $0.id == item.id }) else { return }
+        let topCard = photoStack.remove(at: index)
         lastSwipedImage = photoService.cachedImage(for: topCard.id)
         if let reqID = activeRequests.removeValue(forKey: topCard.id) { photoService.cancelRequest(reqID) }
         processedAssetIDs.insert(topCard.id)
         persistence.saveKeptID(topCard.id)
         persistence.clearSnoozedID(topCard.id)
         self.lastAction = (topCard, .keep)
-        photoStack.removeFirst()
         hasPendingCountUpdate = true
         OfflineCacheService.shared.evict(for: topCard.id)
         DailyLimitService.shared.recordSwipe()
@@ -872,9 +876,9 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     }
 
     /// Swipe Left — Delete (moves to Review Bin)
-    func deletePhoto() {
-        guard !photoStack.isEmpty else { return }
-        var topCard = photoStack.removeFirst()
+    func deletePhoto(_ item: PhotoItem) {
+        guard let index = photoStack.firstIndex(where: { $0.id == item.id }) else { return }
+        var topCard = photoStack.remove(at: index)
         lastSwipedImage = photoService.cachedImage(for: topCard.id)
         if let reqID = activeRequests.removeValue(forKey: topCard.id) { photoService.cancelRequest(reqID) }
         processedAssetIDs.insert(topCard.id)
@@ -904,15 +908,15 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     /// Swipe Up — Snooze (re-inserts into stack after N keep/delete swipes, exponential backoff).
     /// Uses an absolute targetMilestone so the delay survives force-quit and app relaunches.
-    func snoozePhoto() {
-        guard let topCard = photoStack.first else { return }
+    func snoozePhoto(_ item: PhotoItem) {
+        guard let index = photoStack.firstIndex(where: { $0.id == item.id }) else { return }
+        let topCard = photoStack.remove(at: index)
         lastSwipedImage = photoService.cachedImage(for: topCard.id)
         if let reqID = activeRequests.removeValue(forKey: topCard.id) { photoService.cancelRequest(reqID) }
         // Block from pagination until the staging milestone is reached (removed by
         // stageSnoozedItemsIfReady on staging, or by undoLastAction on undo).
         processedAssetIDs.insert(topCard.id)
         self.lastAction = (topCard, .snooze)
-        photoStack.removeFirst()
         hasPendingCountUpdate = true
         OfflineCacheService.shared.evict(for: topCard.id)
 
@@ -1003,8 +1007,8 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         // Drain the video pool BEFORE deleting assets — AVPlayerItems hold
         // strong references to PHAssets and will crash if accessed after deletion.
         VideoPlayerPool.shared.drainAll()
-        hapticService.emptyTrash()
         try await photoService.deleteAssets(assetsToDelete)
+        hapticService.emptyTrash()
 
         // Permanently-deleted IDs stay in processedAssetIDs — they can never
         // come back from the library anyway.
@@ -1028,11 +1032,11 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     // MARK: - Dispatch Helper
 
-    func performAction(_ action: SwipeAction) {
+    func performAction(_ action: SwipeAction, for item: PhotoItem) {
         switch action {
-        case .keep:   keepPhoto()
-        case .delete: deletePhoto()
-        case .snooze: snoozePhoto()
+        case .keep:   keepPhoto(item)
+        case .delete: deletePhoto(item)
+        case .snooze: snoozePhoto(item)
         case .undo:   undoLastAction()
         }
     }
@@ -1793,7 +1797,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 ShareHUDManager.shared.update(.downloading(0))
                 // Delay window creation — fast local assets complete in <200ms and
                 // should never cause a HUD flash. Window appears only if download
-                // is still in progress after 1.5s.
+                // is still in progress after 800ms.
                 self.hudShowTask?.cancel()
                 self.hudShowTask = Task { @MainActor [weak self] in
                     guard let self else { return }

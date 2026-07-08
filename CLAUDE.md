@@ -44,7 +44,7 @@ PHPhotoLibrary
               └─ VideoPlayerPool   # singleton, max 3 AVPlayers
 
 PhotoLibraryService (service-owned):
-              ├─ NSCache<NSString, UIImage>  # 6 images, OS-managed eviction (retina-pixel dimensions)
+              ├─ NSCache<NSString, UIImage>  # 10 images online / 30 offline, OS-managed eviction (retina-pixel dimensions)
               └─ requestCardImage()  # .opportunistic online / .fastFormat offline (always isDegraded=false)
 ```
 
@@ -202,10 +202,10 @@ The tab bar is the native iOS `TabView` — on iOS 18 it renders automatically a
 
 - **Initial load**: 50 items (200 for blurry, 500 for burst — needed for VNFeaturePrint chain analysis)
 - **Page size**: 30 items per subsequent page
-- **Watermark**: next page loads when ≤ 12 items remain in `photoStack`
+- **Watermark**: next page loads when ≤ 15 items remain in `photoStack`
 - **PHFetchResult** is treated as a lazy index — never fully enumerate it
-- **NSCache**: `countLimit = 8`, `totalCostLimit = 8MB`; entries keyed by asset `localIdentifier`
-- **Precaching**: After each swipe, top-5 images are loaded into NSCache via `precacheNextImages()`
+- **NSCache**: `countLimit = 10` online / `30` offline; no `totalCostLimit` — OS evicts under memory pressure; entries keyed by asset `localIdentifier`
+- **Precaching**: After each swipe, top-8 images are loaded into NSCache via `precacheNextImages()`; `warmUpCache()` hints the OS decode pipeline 20 items ahead
 - **VideoPlayerPool**: max 3 `AVPlayer` instances; stale eviction via `warmUp()`; players are **paused (not released)** on tab switch so video resumes instantly on return; `drainAll()` only before PHPhotoLibrary deletion
 
 ---
@@ -226,7 +226,7 @@ Views show a shimmer/loading indicator while Phase 2 is in progress. Never block
 3. **Scoring input**: Downscale to 299×299 before `VNClassifyImageRequest` — full-resolution images (1080p+) make Vision take 10+ seconds per frame.
 4. **Concurrent counting**: Use `withTaskGroup` for parallel category counts.
 5. **Video pool drain**: Call `VideoPlayerPool.shared.drainAll()` before any PHPhotoLibrary deletion. On tab switch use `pauseAll()` — never `release()` from `onDisappear`, or the pool will be cold on return.
-6. **Cache eviction**: Keep only top-5 stack images + the undo item in NSCache; evict everything else.
+6. **Cache eviction**: Keep only top-8 stack images + the undo item in NSCache; evict everything else.
 7. **Background tasks**: All heavy computation must be in `Task.detached` or `withTaskGroup`; results published via `await MainActor.run`.
 8. **Streaming results**: Blurry/burst detection must stream one-by-one into the stack — do not wait for full batch.
 9. **Animation bleed**: Never wrap `@Published` set insertions in `withAnimation` at the ViewModel level — the ambient transaction bleeds into the card stack and causes cards to animate from wrong positions. Instead, use `.animation(_:value:)` on the specific view subtree that should animate.
@@ -292,6 +292,7 @@ This project uses **zero third-party packages** (no CocoaPods, SPM, Carthage). U
 - **Snooze ("Later")**: Swipe up defers the decision — the photo is hidden from the stack and re-injected at the front after N keep/delete swipes (50 → 150 → 500, exponential backoff per item). Snoozed items are persisted in `UserDefaults` and survive force-quit; they reappear immediately on the next cold start. Snooze does **not** count against the daily swipe limit. See `SNOOZE_FEATURE.md` for full details.
 - **Video safety**: Never delete a video from PHPhotoLibrary without first draining its AVPlayer from VideoPlayerPool — this prevents crashes.
 - **Notification quota**: Respect the 2/day cap. Check notification cap dates from `@AppStorage` before scheduling.
+- **Photos permission denied/restricted**: Never a dead end. `OnboardingView` swaps its CTA to a Settings deep link instead of re-prompting; `SwipeStackView` shows a dedicated `EmptyStateView.galleryAccessDenied` instead of `VictoryView` whenever `PHPhotoLibrary.authorizationStatus(for: .readWrite)` is `.denied`/`.restricted`. Both views observe `@Environment(\.scenePhase)` and silently re-check authorization on `.active` — if the user granted access from Settings, the app recovers automatically (advances onboarding / reloads the stack) with no extra tap.
 
 ---
 

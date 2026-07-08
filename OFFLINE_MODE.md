@@ -212,7 +212,7 @@ In offline mode every card must be ready to display the instant it appears — n
 
 **Videos:** `VideoPlayerPool.warmUp()` is called immediately for each batch of found video assets. Items are appended to `photoStack` right away (the pool loads async in background; by the time the user swipes to the card the player is warm).
 
-**NSCache:** Expanded from countLimit=6 → 30 while offline mode is active (`setOfflineCacheLimit(true)` on `activateOfflineMode`, reversed on deactivate). This keeps the pre-loaded batch warm across all visible cards, not just top-5. Manual eviction (`evictStaleCacheEntries`) is skipped in offline mode — NSCache handles pressure eviction on its own.
+**NSCache:** Expanded from countLimit=10 → 30 while offline mode is active (`setOfflineCacheLimit(true)` on `activateOfflineMode`, reversed on deactivate). This keeps the pre-loaded batch warm across all visible cards, not just top-8. Manual eviction (`evictStaleCacheEntries`) is skipped in offline mode — NSCache handles pressure eviction on its own.
 
 **Result:** `isCachedImageFinal=true` for every image card before it's visible → `PhotoCardView` skips the reload dance and spinner entirely. Zero observable loading time.
 
@@ -305,7 +305,7 @@ Reset to `false` in `deactivateOfflineMode()`.
 
 Pagination is **proactive** — it fires before the stack is empty.
 
-- **Watermark:** `lowWatermark = 12`. Every swipe calls `loadNextPageIfNeeded()`. When `photoStack.count <= 12`, a new `scanLocalUniverse(targetCount: photoStack.count + 30)` starts in the background.
+- **Watermark:** `lowWatermark = 15`. Every swipe calls `loadNextPageIfNeeded()`. When `photoStack.count <= 15`, a new `scanLocalUniverse(targetCount: photoStack.count + 30)` starts in the background.
 - **Guard:** pagination does not fire when `photoStack.isEmpty` (the scan was already triggered at count = 1).
 - **Result:** if the scan finds more local photos before the user swipes the last card, the stack refills silently. If the user swipes everything before the scan completes, the scanning state appears briefly, then either cards or VictoryView.
 

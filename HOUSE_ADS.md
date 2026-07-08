@@ -168,10 +168,10 @@ func dismissTopAd() {
 
 ```swift
 // לפני:
-let nextItems = Array(photoStack.prefix(5))
+let nextItems = Array(photoStack.prefix(8))
 
 // אחרי:
-let nextItems = cardStack.prefix(5).compactMap { $0.photoItem }
+let nextItems = cardStack.prefix(8).compactMap { $0.photoItem }
 ```
 זה מדלג על פרסומות אוטומטית — אין להן asset.
 
@@ -303,7 +303,7 @@ ForEach(
 
 ### dragGesture — טיפול בפרסומת
 
-בתוך `.onEnded`, לפני הקריאה ל-`viewModel.performAction(action)`:
+בתוך `.onEnded`, לפני הקריאה ל-`viewModel.performAction(action, for: swipedItem)`:
 
 ```swift
 // אם הקלף העליון הוא פרסומת — כל swipe סוגר אותה, ללא לוגיקת keep/delete/snooze

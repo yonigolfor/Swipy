@@ -61,6 +61,19 @@ Fired in `ReviewGridItemView` at the exact moment the cell transitions from `.po
 
 ---
 
+## Permissions — Photos Access Denied
+
+Fired the moment Photos access is detected as `.denied` (not `.restricted` — that's a parental-control/MDM state, not a user refusal, so no error framing).
+
+| Trigger | Where | Method | Generator | Pattern |
+|---------|-------|--------|-----------|---------|
+| System dialog result is `.denied` | `OnboardingView.requestPermission()` | `error()` | notification | `.error` |
+| Access revoked via Settings mid-session (returning to `SwipeStackView` with foreground/`scenePhase` re-check) | `SwipeStackView`'s `scenePhase` handler | `error()` | notification | `.error` |
+
+Both fire once per transition **into** `.denied` — not on every check, and not repeatedly while already denied. See `CLAUDE.md`'s "Photos permission denied/restricted" behavioral constraint for the full recovery flow (Settings deep link + silent `scenePhase` re-check on return).
+
+---
+
 ## Review Bin — Empty Trash
 
 Fired in `PhotoStackViewModel.emptyTrash()` via `HapticService.emptyTrash()`.

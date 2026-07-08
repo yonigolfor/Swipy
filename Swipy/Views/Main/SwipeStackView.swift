@@ -12,8 +12,14 @@ struct SwipeStackView: View {
     // Use the shared VM passed from ContentView — fixes the ReviewBin empty bug
     @EnvironmentObject private var viewModel: PhotoStackViewModel
     @Binding var selectedTab: Int
+    @Environment(\.scenePhase) private var scenePhase
     @State private var dragOffset: CGSize = .zero
     @State private var dragRotation: Double = 0
+
+    /// Tracks the Photos permission status across app foreground/background — lets the
+    /// scenePhase hook detect a denied→authorized transition (e.g. user just came back
+    /// from Settings) without reloading on every ordinary foreground.
+    @State private var lastKnownAuthStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
 
     // Particle explosion state
     @State private var showParticles = false
@@ -77,7 +83,9 @@ struct SwipeStackView: View {
                     let cardW = min(geometry.size.width - 40, geometry.size.height * 9.0 / 16.0)
                     let cardH = cardW * 16.0 / 9.0
                     ZStack {
-                        if viewModel.isOfflineMode && viewModel.isScanning && viewModel.photoStack.isEmpty {
+                        if [.denied, .restricted].contains(PHPhotoLibrary.authorizationStatus(for: .readWrite)) {
+                            EmptyStateView.galleryAccessDenied(onOpenSettings: UIApplication.shared.openSettings)
+                        } else if viewModel.isOfflineMode && viewModel.isScanning && viewModel.photoStack.isEmpty {
                             offlineScanningView
                         } else if viewModel.isLoading {
                             VStack(spacing: 16) {
@@ -90,11 +98,8 @@ struct SwipeStackView: View {
                         } else if viewModel.photoStack.isEmpty {
                             VictoryView(
                                 onEmptyBin: { selectedTab = 2 },
-                                onImportPhotos: PHPhotoLibrary.authorizationStatus(for: .readWrite) == .limited ? {
-                                    guard let url = URL(string: UIApplication.openSettingsURLString),
-                                          UIApplication.shared.canOpenURL(url) else { return }
-                                    UIApplication.shared.open(url)
-                                } : nil,
+                                onImportPhotos: PHPhotoLibrary.authorizationStatus(for: .readWrite) == .limited
+                                    ? UIApplication.shared.openSettings : nil,
                                 onReviewSnoozed: viewModel.pendingSnoozedCount > 0 ? { viewModel.flushSnoozedItemsNow() } : nil,
                                 onExitOfflineMode: viewModel.isOfflineMode ? {
                                     performOfflineTransition(deactivating: true) { viewModel.deactivateOfflineMode() }
@@ -162,6 +167,11 @@ struct SwipeStackView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .onAppear { cardSize = CGSize(width: cardW, height: cardH) }
                     .animation(.easeInOut(duration: 0.35), value: viewModel.isScanning)
+                    // Covers the denied/restricted → loading → cards handoff (scenePhase
+                    // recovery below never wraps the ViewModel reload in withAnimation —
+                    // per the "no withAnimation on @Published mutations" rule, the crossfade
+                    // is scoped here instead, on the container that actually swaps branches).
+                    .animation(.easeInOut(duration: 0.35), value: viewModel.isLoading)
                     // Shuffle / offline transition modifiers — applied to the whole card area
                     .offset(y: cardStackOffset)
                     .scaleEffect(cardStackScale)
@@ -355,6 +365,22 @@ struct SwipeStackView: View {
             triggerOfflineIndicator(entering: viewModel.isOfflineMode)
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
                 HapticService.shared.shuffleLand()
+            }
+        }
+        // Silent re-check when returning from Settings — only reloads if access was
+        // actually blocked before and was just granted, never on an ordinary foreground.
+        .onChange(of: scenePhase) { newPhase in
+            guard newPhase == .active else { return }
+            let currentStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+            defer { lastKnownAuthStatus = currentStatus }
+            let wasBlocked = lastKnownAuthStatus == .denied || lastKnownAuthStatus == .restricted
+            let nowAllowed = currentStatus == .authorized || currentStatus == .limited
+            if wasBlocked, nowAllowed {
+                viewModel.loadPhotos(filter: viewModel.currentFilter)
+            } else if currentStatus == .denied, lastKnownAuthStatus != .denied {
+                // User just revoked access via Settings mid-session (not caught at
+                // onboarding, which only fires once, on first request).
+                HapticService.shared.error()
             }
         }
     }
@@ -913,7 +939,7 @@ struct SwipeStackView: View {
                 // because .left/.right are already correct in RTL context.
                 let direction = SwipeDirection.from(offset: value.translation)
 
-                if let action = direction.action {
+                if let action = direction.action, let swipedItem = viewModel.topCard {
                     // Block keep/delete swipes when free daily limit is exhausted
                     if (action == .keep || action == .delete), !viewModel.canSwipe {
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.52)) {
@@ -945,10 +971,10 @@ struct SwipeStackView: View {
                     // incoming card never inherits the ±500 offset and slides in.
                     NotificationCenter.default.post(name: .stopCurrentVideo, object: nil)
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        // Capture top card BEFORE performing action (it removes it from stack)
-                        let topCard = viewModel.topCard
-
-                        viewModel.performAction(action)
+                        // swipedItem was captured at gesture-end, not re-read here — the
+                        // stack's front can change in the meantime (e.g. shake-to-undo),
+                        // so the action must stay bound to the exact card the user swiped.
+                        viewModel.performAction(action, for: swipedItem)
                         dragOffset = .zero
                         dragRotation = 0
 
@@ -963,8 +989,7 @@ struct SwipeStackView: View {
 
                         // Trigger particle explosion if this was a delete of a large file
                         if action == .delete,
-                           let card = topCard,
-                           card.fileSize >= largeFileSizeThreshold {
+                           swipedItem.fileSize >= largeFileSizeThreshold {
                             // Particles spawn from the left edge where the card exits
                             particleOrigin = CGPoint(
                                 x: 0,

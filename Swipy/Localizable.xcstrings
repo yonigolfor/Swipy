@@ -2315,6 +2315,57 @@
           }
         }
       }
+    },
+    "permission.denied.title" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "We don't have access to your gallery"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "אין לנו גישה לגלריה שלך"
+          }
+        }
+      }
+    },
+    "permission.denied.message" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "To start decluttering, allow access in Settings"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "כדי להתחיל לנקות, יש לאשר גישה בהגדרות"
+          }
+        }
+      }
+    },
+    "permission.denied.cta" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Settings"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "פתח הגדרות מערכת"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

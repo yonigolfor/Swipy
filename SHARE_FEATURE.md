@@ -76,7 +76,7 @@ A floating `UIWindow` at `.alert + 1` level sits above all other UI including th
 ### Phase flow
 ```
 UIActivityItemProvider.item starts
-  → onPhaseChange(.downloading(0))   → phase pre-set; 1.5s HUD-show Task starts
+  → onPhaseChange(.downloading(0))   → phase pre-set; 800ms HUD-show Task starts
   → progressHandler fires             → onPhaseChange(.downloading(0.0...1.0)) → phase updates (window may not exist yet)
   → completionHandler fires           → onPhaseChange(.processing)              → "Processing..."
   → item returns the asset            → onPhaseChange(.complete)               → success haptic; HUD cancel task

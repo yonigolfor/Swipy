@@ -22,7 +22,12 @@ struct OnboardingView: View {
     /// Called when onboarding completes — parent should show ContentView.
     let onComplete: () -> Void
 
+    @Environment(\.scenePhase) private var scenePhase
+
     @State private var currentStep = 0
+    /// True after the user denies (or is restricted from) Photos access — swaps the
+    /// permission screen's CTA to a Settings deep link instead of re-prompting iOS.
+    @State private var isPermissionDenied = false
 
     // Animated display values for the scan screen — driven by .onAppear / .onChange
     // so the count-up animation plays exactly when the user arrives at that step.
@@ -73,6 +78,18 @@ struct OnboardingView: View {
             .id(currentStep) // Forces transition on step change
         }
         .onAppear { haptic.prepare(); softHaptic.prepare() }
+        .onChange(of: scenePhase) { newPhase in
+            // Silent re-check when returning from Settings — only acts if the user was
+            // actually stuck on the denied screen and access was just granted there.
+            guard newPhase == .active, isPermissionDenied else { return }
+            let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+            guard status == .authorized || status == .limited else { return }
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
+                isPermissionDenied = false
+                currentStep = 2
+            }
+            viewModel.startOnboardingScan()
+        }
     }
 
     // MARK: - Step 1: Visual Hook
@@ -494,11 +511,13 @@ struct OnboardingView: View {
                     .foregroundColor(.white)
                     .multilineTextAlignment(.center)
                 
-                Text(String(localized: "onboarding.permission.subtitle"))
+                Text(String(localized: isPermissionDenied ? "permission.denied.message" : "onboarding.permission.subtitle"))
                     .font(.body)
                     .foregroundColor(.gray)
                     .multilineTextAlignment(.center)
                     .lineSpacing(4)
+                    .contentTransition(.opacity)
+                    .animation(.easeInOut(duration: 0.3), value: isPermissionDenied)
             }
             .padding(.horizontal, 32)
 
@@ -514,13 +533,19 @@ struct OnboardingView: View {
 
             Button {
                 haptic.impactOccurred()
-                requestPermission()
+                if isPermissionDenied {
+                    UIApplication.shared.openSettings()
+                } else {
+                    requestPermission()
+                }
             } label: {
-                Text(String(localized: "onboarding.permission.cta"))
+                Text(String(localized: isPermissionDenied ? "permission.denied.cta" : "onboarding.permission.cta"))
                     .font(.headline)
                     .foregroundColor(.black)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 18)
+                    .contentTransition(.opacity)
+                    .animation(.easeInOut(duration: 0.3), value: isPermissionDenied)
                     .background(
                         Capsule()
                             .fill(LinearGradient(
@@ -816,18 +841,35 @@ struct OnboardingView: View {
         }
     }
 
-    /// Requests photo library permission then advances to step 5.
+    /// Requests photo library permission. Advances to the Swipe Demo on success;
+    /// on denial/restriction, stays on this screen and swaps the CTA to a Settings deep link.
     private func requestPermission() {
         Task {
             let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
             await MainActor.run {
-                // Immediately show Swipe Demo while scan runs in background
-                withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
-                    currentStep = 2
+                switch status {
+                case .authorized, .limited:
+                    // Immediately show Swipe Demo while scan runs in background
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
+                        currentStep = 2
+                    }
+                    // Start scan in background — numbers will be ready by the time
+                    // user finishes the demo and reaches the Scan screen
+                    viewModel.startOnboardingScan()
+                case .denied:
+                    HapticService.shared.error()
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        isPermissionDenied = true
+                    }
+                case .restricted:
+                    withAnimation(.easeInOut(duration: 0.3)) {
+                        isPermissionDenied = true
+                    }
+                case .notDetermined:
+                    break
+                @unknown default:
+                    break
                 }
-                // Start scan in background — numbers will be ready by the time
-                // user finishes the demo and reaches the Scan screen
-                viewModel.startOnboardingScan()
             }
         }
     }

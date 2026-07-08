@@ -91,7 +91,7 @@ let cardH = cardW * 16.0 / 9.0
 
 ### הגדרות
 ```swift
-cache.countLimit = 6          // top-5 stack + 1 undo slot
+cache.countLimit = 10         // top-8 stack + 1 undo slot + 1 safety (30 offline — see setOfflineCacheLimit)
 // totalCostLimit: לא מוגדר — iOS מנהל eviction אוטומטית לפי memory pressure
 ```
 `cardTargetSize` = `(screenWidth − 40) × screenScale` × `(screenHeight × 0.65) × screenScale`
@@ -102,24 +102,24 @@ cache.countLimit = 6          // top-5 stack + 1 undo slot
 ```
 precacheNextImages() נקרא אחרי כל swipe (וגם בטעינה ראשונית)
         │
-        ├── startCaching() → רמז ל-PHCachingImageManager
+        ├── startCaching() → רמז ל-PHCachingImageManager (top-20, ראה warmUpCache)
         ├── VideoPlayerPool.warmUp() → מכין AVPlayers לוידאו
-        └── loadImage() עבור top-5 images → מכניס ל-NSCache + מסמן loadedImageIDs
+        └── loadImage() עבור top-8 images → מכניס ל-NSCache + מסמן loadedImageIDs
                 │
                 ▼
         evictStaleCacheEntries()
-          → מסיר keys שאינם ב-top-5 ואינם lastAction.item
+          → מסיר keys שאינם ב-top-8 ואינם lastAction.item
           → Index-0 immunity: photoStack.first לעולם לא מוסר בזמן drag
 ```
 
 ### Eviction Policy
 **נשמר ב-cache בכל נקודה:**
-- top-5 פריטים ב-`photoStack`
+- top-8 פריטים ב-`photoStack`
 - הפריט האחרון שנעשה עליו swipe (`lastSwipedImage`) — לצורך shake-to-undo
 - הקלף שב-index 0 (top card) — protected מ-eviction גם אם נקראת precache בזמן drag
 
 **מוסר מ-cache:**
-- כל פריט שאינו ב-top-5 ואינו ה-undo item
+- כל פריט שאינו ב-top-8 ואינו ה-undo item
 
 ### Synchronous Handshake
 ```
@@ -251,17 +251,17 @@ Fallback: variance = ∞ (CIEdges נכשל)  →  raw ×= 0.6
 מנגנון חדש שמפחית מסכים שחורים בהחלקה מהירה.
 
 ```
-DragGesture.onChanged (offset > 80pt, פעם אחת per gesture)
+DragGesture.onChanged (offset > 30pt, פעם אחת per gesture)
   → viewModel.prepareUpcomingCards()
         │
-        ├── photoStack.dropFirst().prefix(5)  ← דולג על index 0 (עוזב)
-        ├── startCaching() עבור index 1-5
+        ├── photoStack.dropFirst().prefix(8)  ← דולג על index 0 (עוזב)
+        ├── startCaching() עבור index 1-8
         ├── VideoPlayerPool.warmUp(protectedID: topCard.localIdentifier)
         │     └── top card מוגן מ-eviction כל עוד הgesture לא הסתיים
-        └── loadImage() עבור index 1-5 → NSCache + loadedImageIDs
+        └── loadImage() עבור index 1-8 → NSCache + loadedImageIDs
 ```
 
-**מה זה נותן**: מהרגע שהמשתמש חוצה 80pt ועד שהswipe מסתיים (~200-400ms), כל הקלפים הבאים נטענים ל-NSCache. כשהקלף החדש מגיע למסך — `cachedImage != nil` ו-`isCachedImageFinal == true` → ללא flash, ללא spinner.
+**מה זה נותן**: מהרגע שהמשתמש חוצה 30pt ועד שהswipe מסתיים (~200-400ms), כל הקלפים הבאים נטענים ל-NSCache. כשהקלף החדש מגיע למסך — `cachedImage != nil` ו-`isCachedImageFinal == true` → ללא flash, ללא spinner.
 
 **Video Pool Protection**: `warmUp(protectedID:)` מבטיח שה-AVPlayer של הקלף הנוכחי לא יפונה בזמן שהמשתמש עדיין מחזיק אותו. ללא ההגנה הזו, `replaceCurrentItem(nil)` היה גורם לוידאו להיהפך לשחור גם אם המשתמש מחזיר את הקלף למרכז.
 
@@ -324,19 +324,31 @@ Pool entries **אינם** מתפנים ב-`onDisappear` של `PhotoCardView`. ה
 ## 6. Swipe Flow
 
 ```
-DragGesture.onChanged (offset > 80pt — פעם אחת)
+DragGesture.onChanged (offset > 30pt — פעם אחת)
   → prepareUpcomingCards()   ← Early warm-up (ראה סעיף 4)
 
 DragGesture.onEnded (swipe מושלם)
+  → swipedItem = viewModel.topCard   ← נתפס מיד, לפני האנימציה/העיכוב
   → animate card off-screen (±500pt, 0.4s spring)
   → DispatchQueue.main.asyncAfter(0.3s):
-      ├── lastSwipedImage = imageCache[topCard.id]   ← שומר לundo
-      ├── viewModel.performAction()
+      ├── viewModel.performAction(action, for: swipedItem)
+      │     ├── lastSwipedImage = imageCache[swipedItem.id]   ← שומר לundo
+      │     ├── photoStack.remove(at: index of swipedItem.id) ← לא removeFirst()!
+      │     │     (מוצא לפי id, לא לפי מיקום — ראה הערה למטה)
       │     ├── processedAssetIDs.insert(id)
-      │     ├── photoStack.removeFirst()
       │     ├── precacheNextImages()                  ← cache + pool + eviction
-      │     └── loadNextPageIfNeeded()                ← אם stack ≤ 12
+      │     └── loadNextPageIfNeeded()                ← אם stack ≤ 15
       └── dragOffset = .zero
+```
+
+**קריטי — race עם undo:** `swipedItem` נתפס ב-`onEnded` (סינכרוני), *לפני* ה-0.3s delay,
+ומועבר במפורש ל-`performAction`. `keepPhoto`/`deletePhoto`/`snoozePhoto` מסירים אותו לפי
+**התאמת `id`**, לא `photoStack.first`/`removeFirst()`. הסיבה: אם המשתמש מנער לביטול
+(undo) בדיוק בתוך אותם 0.3 שניות — `undoLastAction()` עלול להכניס פריט קודם בחזרה
+לראש הערימה (`insert(at: 0)`) *לפני* שהעיכוב הזה מסתיים. בלי הקישור המפורש ל-item,
+הפעולה הממתינה הייתה נופלת על מי שנמצא כרגע בראש (הפריט שהוחזר ע"י undo) במקום על
+הקלף שבאמת swipe-קו.
+```
 
 DragGesture.onEnded (swipe בוטל — חזר למרכז)
   → resetCardPosition()

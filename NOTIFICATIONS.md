@@ -174,7 +174,9 @@ checkPhotoBurstTrigger()
 ```
 AppDelegate.didFinishLaunching
     ├── registerBackgroundTasks()       ← סינכרוני, חייב לרוץ ראשון
-    ├── NotificationDelegate.setupInApp()
+    └── NotificationDelegate.setupInApp()
+
+ContentView.onAppear   ← נחיתה במסך הראשי, אחרי onboarding (או משתמש חוזר)
     └── requestAuthorization { granted in
             ├── scheduleWeeklyCleanupIfNeeded()
             ├── scheduleBackgroundTask()
@@ -187,6 +189,8 @@ scenePhase → .active
     ├── resetBurstBaseline()
     └── evaluateAndScheduleNotifications()
 ```
+
+**למה לא ב-`didFinishLaunching`:** לבקש הרשאת התראות בהפעלה קרה ראשונה — לפני שהמשתמש בכלל ראה את onboarding — סותר את ה-HIG של Apple (לבקש הרשאה בהקשר, אחרי שהערך של האפליקציה כבר הודגם). `requestAuthorization` הוא idempotent — אם המשתמש כבר החליט (אישר/דחה), iOS לא מציג דיאלוג נוסף, כך שקריאה מ-`ContentView.onAppear` בטוחה גם למשתמשים חוזרים בכל הפעלה.
 
 ---
 

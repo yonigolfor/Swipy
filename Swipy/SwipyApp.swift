@@ -33,13 +33,6 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 
         NotificationDelegate.shared.setupInApp()
 
-        NotificationManager.shared.requestAuthorization { granted in
-            guard granted else { return }
-            NotificationScheduler.shared.scheduleWeeklyCleanupIfNeeded()
-            NotificationScheduler.shared.scheduleBackgroundTask()
-            NotificationScheduler.shared.evaluateAndScheduleNotifications()
-        }
-
         return true
     }
 }

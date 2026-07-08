@@ -78,6 +78,15 @@ extension Color {
     static let dimmedBackground = Color.black.opacity(0.3)
 }
 
+// MARK: - UIApplication Extensions
+extension UIApplication {
+    /// פותח את מסך ההגדרות של האפליקציה — למשל אחרי דחיית הרשאת גלריה/התראות.
+    func openSettings() {
+        guard let url = URL(string: Self.openSettingsURLString), canOpenURL(url) else { return }
+        open(url)
+    }
+}
+
 // MARK: - CGSize Extensions
 extension CGSize {
     static func * (lhs: CGSize, rhs: CGFloat) -> CGSize {

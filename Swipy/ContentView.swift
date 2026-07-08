@@ -37,7 +37,10 @@ struct ContentView: View {
                 .badge(stackViewModel.reviewBin.count)
                 .tag(2)
         }
-        .onAppear { checkPhotoLibraryAuthorization() }
+        .onAppear {
+            checkPhotoLibraryAuthorization()
+            requestNotificationAuthorizationIfNeeded()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .notificationNavigate)) { note in
             if let tab = note.object as? Int {
                 withAnimation { selectedTab = tab }
@@ -56,6 +59,18 @@ struct ContentView: View {
 
     private func checkPhotoLibraryAuthorization() {
         photoService.checkAuthorization()
+    }
+
+    /// Asked here (main screen, post-onboarding) rather than at cold launch — HIG discourages
+    /// prompting for notification permission before the user has seen any app value.
+    /// Safe to call on every appearance: requestAuthorization no-ops once the user has decided.
+    private func requestNotificationAuthorizationIfNeeded() {
+        NotificationManager.shared.requestAuthorization { granted in
+            guard granted else { return }
+            NotificationScheduler.shared.scheduleWeeklyCleanupIfNeeded()
+            NotificationScheduler.shared.scheduleBackgroundTask()
+            NotificationScheduler.shared.evaluateAndScheduleNotifications()
+        }
     }
 }
 

@@ -68,8 +68,14 @@ Step changes always use `.spring(response: 0.4, dampingFraction: 0.75)`.
   - `trash.slash.fill` — you're in control
 - **CTA:** calls `requestPermission()` which:
   1. Calls `PHPhotoLibrary.requestAuthorization(for: .readWrite)`
-  2. Immediately advances to `currentStep = 2` (SwipeDemo)
-  3. Calls `viewModel.startOnboardingScan()` in background — scan runs while user goes through demo
+  2. `.authorized` / `.limited` → advances to `currentStep = 2` (SwipeDemo) and calls `viewModel.startOnboardingScan()` in background — scan runs while user goes through demo
+  3. `.denied` / `.restricted` → **stays on this screen**, sets `isPermissionDenied = true`
+
+**Denied state (`isPermissionDenied == true`):** the screen doesn't navigate away — it swaps in place instead:
+- Subtitle text switches from `onboarding.permission.subtitle` to `permission.denied.message`
+- The gold CTA capsule (same visual weight — this is still the only path forward) switches from `onboarding.permission.cta` to `permission.denied.cta` ("Open Settings"), and its action switches from `requestPermission()` to `UIApplication.shared.openSettings()` (shared helper in `View+Extensions.swift`, deep link via `UIApplication.openSettingsURLString`) — the same helper `SwipeStackView`'s denied-state and `.limited` VictoryView paths use
+
+**Silent recovery (`scenePhase`):** `OnboardingView` observes `@Environment(\.scenePhase)`. When the app returns to `.active` while `isPermissionDenied == true`, it re-checks `PHPhotoLibrary.authorizationStatus(for: .readWrite)` silently. If the user granted access from Settings, it clears `isPermissionDenied` and auto-advances exactly like a successful in-app grant (no extra tap needed) — this is the same code path as step 2 above, just triggered by the scene transition instead of the button.
 
 ---
 
