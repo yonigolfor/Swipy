@@ -417,9 +417,12 @@ class PhotoLibraryService: ObservableObject {
     /// for grid/Memories display. Only genuinely preview-less assets reach for network,
     /// and even then just for a small proxy, not the full-size original.
     ///
-    /// The request is cancelled right after the first callback so the opportunistic
-    /// follow-up (a full-quality delivery we don't need for analysis) never fires — the
-    /// display path (PhotoCardView) already loads full quality completely separately.
+    /// `.opportunistic` can invoke its callback twice (fast/degraded, then full-quality).
+    /// `resumed` guarantees `completion` fires exactly once — the caller feeds this
+    /// straight into `withCheckedContinuation`, and a second call would be a fatal
+    /// double-resume crash. The cancel below is only a best-effort attempt to stop the
+    /// unneeded follow-up download; correctness comes from the `resumed` guard, not from
+    /// the cancel actually taking effect in time.
     @discardableResult
     func requestScanThumbnail(
         for asset: PHAsset,
@@ -428,10 +431,11 @@ class PhotoLibraryService: ObservableObject {
     ) -> PHImageRequestID {
         let options = PHImageRequestOptions()
         options.deliveryMode = .opportunistic
-        options.isNetworkAccessAllowed = true
+        options.isNetworkAccessAllowed = !isOfflineMode
         options.resizeMode = .fast
         options.isSynchronous = false
 
+        var resumed = false
         var requestID = PHInvalidImageRequestID
         requestID = imageManager.requestImage(
             for: asset,
@@ -439,6 +443,8 @@ class PhotoLibraryService: ObservableObject {
             contentMode: .aspectFill,
             options: options
         ) { [weak self] image, _ in
+            guard !resumed else { return }
+            resumed = true
             completion(image)
             self?.imageManager.cancelImageRequest(requestID)
         }
