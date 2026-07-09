@@ -186,6 +186,11 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// When the stack drops to this many items, prefetch the next page.
     private let lowWatermark = 15
 
+    /// Max concurrent PHImageManager requests during blur/burst bulk scanning.
+    /// Bounds how many iCloud round-trips can be in flight at once — high enough to
+    /// parallelize network latency, low enough to avoid flooding the network/memory.
+    private let scanConcurrencyLimit = 6
+
     // MARK: - Services
 
     private let photoService = PhotoLibraryService.shared
@@ -1365,39 +1370,6 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         isLoading = false
     }
 
-    /// Scans items for blur and returns only blurry ones.
-    /// Processes images concurrently for maximum speed.
-    private func filterBlurry(_ items: [PhotoItem]) async -> [PhotoItem] {
-        await withCheckedContinuation { continuation in
-            Task.detached(priority: .userInitiated) {
-                var result: [PhotoItem] = []
-                let group = DispatchGroup()
-                let lock = NSLock()
-
-                for item in items {
-                    guard !item.isVideo else { continue }
-                    group.enter()
-                    PhotoLibraryService.shared.loadImage(
-                        for: item.asset,
-                        targetSize: CGSize(width: 200, height: 200)
-                    ) { image in
-                        defer { group.leave() }
-                        guard let image else { return }
-                        if BlurDetector.shared.isBlurry(image) {
-                            lock.lock()
-                            result.append(item)
-                            lock.unlock()
-                        }
-                    }
-                }
-
-                group.notify(queue: .main) {
-                    continuation.resume(returning: result)
-                }
-            }
-        }
-    }
-
     /// Continuously scans the library until it finds at least `targetCount`
     /// items matching the filter, or exhausts the entire library.
     /// This powers the "refill mechanism" — the user never sees an empty
@@ -1429,30 +1401,40 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             await MainActor.run { self.fetchCursor = newCursor }
 
             if filter == .blurryPhotos {
-                // Stream: push each blurry image to UI as soon as it is found.
-                // User sees cards appear one by one instead of waiting for batch.
-                for item in rawItems {
-                    guard !item.isVideo else { continue }
-                    let result = await withCheckedContinuation { (cont: CheckedContinuation<PhotoItem?, Never>) in
-                        PhotoLibraryService.shared.loadImage(
-                            for: item.asset,
-                            targetSize: CGSize(width: 200, height: 200)
-                        ) { image in
-                            guard let image else { cont.resume(returning: nil); return }
-                            let isBlurry = BlurDetector.shared.isBlurry(image)
-                            cont.resume(returning: isBlurry ? item : nil)
+                // Bounded concurrency: keep scanConcurrencyLimit requests in flight so
+                // network latency for iCloud-only assets is parallelized instead of
+                // serialized. Results stream to the stack as soon as each completes —
+                // order may not match rawItems order, which is fine for a match-scan.
+                await withTaskGroup(of: PhotoItem?.self) { group in
+                    var iterator = rawItems.makeIterator()
+                    func launchNext() {
+                        guard let item = iterator.next() else { return }
+                        group.addTask {
+                            await withCheckedContinuation { (cont: CheckedContinuation<PhotoItem?, Never>) in
+                                PhotoLibraryService.shared.requestScanThumbnail(
+                                    for: item.asset,
+                                    targetSize: CGSize(width: 200, height: 200)
+                                ) { image in
+                                    guard let image else { cont.resume(returning: nil); return }
+                                    cont.resume(returning: BlurDetector.shared.isBlurry(image) ? item : nil)
+                                }
+                            }
                         }
                     }
-                    if let found = result {
-                        await MainActor.run {
-                            self.photoStack.append(found)
-                            self.photoService.startCaching(
-                                for: [found],
-                                targetSize: photoService.cardTargetSize
-                            )
-                            // Hide loading indicator as soon as first result arrives
-                            if self.isLoading { self.isLoading = false }
+                    for _ in 0..<scanConcurrencyLimit { launchNext() }
+                    for await result in group {
+                        if let found = result {
+                            await MainActor.run {
+                                self.photoStack.append(found)
+                                self.photoService.startCaching(
+                                    for: [found],
+                                    targetSize: photoService.cardTargetSize
+                                )
+                                // Hide loading indicator as soon as first result arrives
+                                if self.isLoading { self.isLoading = false }
+                            }
                         }
+                        launchNext()
                     }
                 }
             } else if filter == .burstPhotos {

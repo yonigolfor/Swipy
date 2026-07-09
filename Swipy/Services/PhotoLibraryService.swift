@@ -407,6 +407,44 @@ class PhotoLibraryService: ObservableObject {
         }
     }
 
+    // MARK: - Bulk Scan (blur/burst analysis)
+
+    /// Requests a small analysis thumbnail for bulk scanning (blur detection, etc).
+    ///
+    /// Uses `.opportunistic`: iOS prefers an already-local low-res representation and
+    /// delivers it immediately (no network) whenever one exists — which is the case for
+    /// almost every asset, even iCloud-only ones, since Photos keeps a local preview
+    /// for grid/Memories display. Only genuinely preview-less assets reach for network,
+    /// and even then just for a small proxy, not the full-size original.
+    ///
+    /// The request is cancelled right after the first callback so the opportunistic
+    /// follow-up (a full-quality delivery we don't need for analysis) never fires — the
+    /// display path (PhotoCardView) already loads full quality completely separately.
+    @discardableResult
+    func requestScanThumbnail(
+        for asset: PHAsset,
+        targetSize: CGSize,
+        completion: @escaping (UIImage?) -> Void
+    ) -> PHImageRequestID {
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .opportunistic
+        options.isNetworkAccessAllowed = true
+        options.resizeMode = .fast
+        options.isSynchronous = false
+
+        var requestID = PHInvalidImageRequestID
+        requestID = imageManager.requestImage(
+            for: asset,
+            targetSize: targetSize,
+            contentMode: .aspectFill,
+            options: options
+        ) { [weak self] image, _ in
+            completion(image)
+            self?.imageManager.cancelImageRequest(requestID)
+        }
+        return requestID
+    }
+
     // MARK: - Image Loading
 
     /// Loads an image for a given asset asynchronously.

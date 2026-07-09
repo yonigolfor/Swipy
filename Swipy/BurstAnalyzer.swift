@@ -13,11 +13,18 @@ class BurstAnalyzer {
     private let timeGapThreshold: TimeInterval = 30.0
     private let visualDistanceThreshold: Float = 0.85
     private let minGroupSize = 5
+    /// Max concurrent feature-print fetches during the prefetch pass below.
+    private let scanConcurrencyLimit = 6
 
     /// Groups photos into burst clusters using native burstIdentifier or
     /// (gap ≤ 30s AND visual similarity via VNFeaturePrint).
     /// Chain comparison: each new photo is compared to the last added,
     /// which handles gradual scene drift in long shooting sessions.
+    ///
+    /// Two-pass: first fetch every feature print the chain comparison below could
+    /// possibly need, concurrently and bounded (see `prefetchFeaturePrints`); then run
+    /// the grouping decision purely in-memory. This keeps the only I/O-bound step
+    /// parallelized while the sequential grouping logic stays a fast, simple pass.
     func analyze(_ items: [PhotoItem]) async -> [PhotoItem] {
         guard items.count >= minGroupSize else { return [] }
 
@@ -25,10 +32,12 @@ class BurstAnalyzer {
             ($0.asset.creationDate ?? .distantPast) < ($1.asset.creationDate ?? .distantPast)
         }
 
+        let prints = await prefetchFeaturePrints(for: sorted)
+
         var groups: [[PhotoItem]] = []
         var currentGroup: [PhotoItem] = [sorted[0]]
         // Feature print of the last item added to the current group
-        var lastPrint: VNFeaturePrintObservation? = await featurePrint(for: sorted[0].asset)
+        var lastPrint: VNFeaturePrintObservation? = prints[0]
 
         for i in 1..<sorted.count {
             let prev = sorted[i - 1]
@@ -39,14 +48,12 @@ class BurstAnalyzer {
                 && prev.asset.burstIdentifier == curr.asset.burstIdentifier
 
             var shouldGroup = false
-            var currPrint: VNFeaturePrintObservation? = nil
+            let currPrint = prints[i]
 
             if sameBurstID {
                 // Native iOS burst — no need for visual check
                 shouldGroup = true
             } else if gap <= timeGapThreshold {
-                // Only compute feature print when time gate passes
-                currPrint = await featurePrint(for: curr.asset)
                 if let p1 = lastPrint, let p2 = currPrint {
                     var distance: Float = 0
                     try? p1.computeDistance(&distance, to: p2)
@@ -64,12 +71,8 @@ class BurstAnalyzer {
             } else {
                 if currentGroup.count >= minGroupSize { groups.append(currentGroup) }
                 currentGroup = [curr]
-                // Reuse already-computed print for the new group's anchor
-                if let p = currPrint {
-                    lastPrint = p
-                } else {
-                    lastPrint = await featurePrint(for: curr.asset)
-                }
+                // Anchor for the new group — already prefetched (see prefetchFeaturePrints).
+                lastPrint = currPrint
             }
         }
         if currentGroup.count >= minGroupSize { groups.append(currentGroup) }
@@ -89,6 +92,43 @@ class BurstAnalyzer {
     }
 
     // MARK: - Private
+
+    /// Fetches feature prints for every index the chain comparison in `analyze` could
+    /// possibly read: index 0 (initial anchor), every index whose gap from its
+    /// predecessor is within the time gate and not already same-burst (needs a print
+    /// to compare), and each such index's predecessor (serves as its anchor). Every
+    /// other index is never read by the grouping pass, so skipping it changes nothing.
+    /// Runs the actual fetches concurrently, bounded to scanConcurrencyLimit at a time.
+    private func prefetchFeaturePrints(for sorted: [PhotoItem]) async -> [VNFeaturePrintObservation?] {
+        var neededIndices: Set<Int> = [0]
+        for i in 1..<sorted.count {
+            let prev = sorted[i - 1]
+            let curr = sorted[i]
+            let sameBurstID = prev.asset.burstIdentifier != nil
+                && prev.asset.burstIdentifier == curr.asset.burstIdentifier
+            if !sameBurstID && timeDelta(prev, curr) <= timeGapThreshold {
+                neededIndices.insert(i)
+                neededIndices.insert(i - 1)
+            }
+        }
+
+        var results = [VNFeaturePrintObservation?](repeating: nil, count: sorted.count)
+
+        await withTaskGroup(of: (Int, VNFeaturePrintObservation?).self) { group in
+            var iterator = neededIndices.sorted().makeIterator()
+            func launchNext() {
+                guard let idx = iterator.next() else { return }
+                let asset = sorted[idx].asset
+                group.addTask { (idx, await self.featurePrint(for: asset)) }
+            }
+            for _ in 0..<scanConcurrencyLimit { launchNext() }
+            for await (idx, print) in group {
+                results[idx] = print
+                launchNext()
+            }
+        }
+        return results
+    }
 
     private func featurePrint(for asset: PHAsset) async -> VNFeaturePrintObservation? {
         await withCheckedContinuation { continuation in
