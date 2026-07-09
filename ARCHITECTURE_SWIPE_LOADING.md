@@ -74,10 +74,13 @@ let cardH = cardW * 16.0 / 9.0
 | פרמטר | ערך |
 |--------|-----|
 | Initial page (ברירת מחדל) | 50 items |
-| Initial page (blurry) | 200 items |
-| Initial page (burst) | 500 items — נדרש ל-VNFeaturePrint chain analysis |
 | Next page | 30 items |
 | Low watermark (trigger לדף הבא) | 12 items |
+
+**blurry / burst — אין "initial page" נפרד.** `scanUntilFull()` (סעיף 6a) סורק ישירות
+מ-`fetchCursor = 0` בבאצ'ים של 300, בלי fetch מקדים שנזרק. בעבר הייתה קריאה נפרדת
+שהביאה 200 (blurry) / 500 (burst) פריטים רק כדי לחשב את ה-cursor הבא — ה-items עצמם
+מעולם לא נשלחו לניתוח, כך שהבאצ' הראשון של הטווח המסונן לא נסרק בכלל. הוסר.
 
 ---
 

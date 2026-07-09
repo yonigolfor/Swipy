@@ -145,9 +145,11 @@ class PhotoLibraryService: ObservableObject {
                 }
 
             case .burstPhotos:
-                // BurstAnalyzer needs a full pool; handled via fetchPageOfAssets
-                // with a larger page in the ViewModel.
-                collected.append(PhotoItem(asset: asset))
+                // Only images can be part of a burst — video/screenshots/recordings
+                // would otherwise enter BurstAnalyzer's VNFeaturePrint chain for nothing.
+                if asset.mediaType == .image && !asset.isScreenshot && !asset.isScreenRecording {
+                    collected.append(PhotoItem(asset: asset))
+                }
 
             case .blurryPhotos:
                 // Only images, not screenshots; blur check done in ViewModel.

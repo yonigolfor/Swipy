@@ -566,22 +566,10 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 return
             }
 
-            let pageSize: Int
-            switch filter {
-            case .burstPhotos:  pageSize = 500
-            case .blurryPhotos: pageSize = 200
-            default:            pageSize = initialPageSize
-            }
-
-            let (rawItems, nextIdx) = photoService.fetchPageOfAssets(
-                for: filter,
-                startIndex: 0,
-                pageSize: pageSize,
-                excluding: processedAssetIDs
-            )
-
-            self.fetchCursor = nextIdx ?? photoService.totalAssetCount
-
+            // blurryPhotos / burstPhotos: scanUntilFull batches directly from fetchCursor
+            // (already 0 — see top of resetAndLoad). No upfront fetch here: fetching a
+            // 200/500-item page just to discard it and jump the cursor past it meant the
+            // very first batch of the filtered range was never scanned for matches at all.
             if filter == .blurryPhotos || filter == .burstPhotos {
                 await MainActor.run {
                     self.photoStack = []
@@ -595,6 +583,15 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 if self.categoryCounts.isEmpty { self.refreshCategoryCounts() }
                 return
             }
+
+            let (rawItems, nextIdx) = photoService.fetchPageOfAssets(
+                for: filter,
+                startIndex: 0,
+                pageSize: initialPageSize,
+                excluding: processedAssetIDs
+            )
+
+            self.fetchCursor = nextIdx ?? photoService.totalAssetCount
 
             print("📸 initial page: \(rawItems.count) items, cursor: \(self.fetchCursor)/\(self.photoService.totalAssetCount)")
 
