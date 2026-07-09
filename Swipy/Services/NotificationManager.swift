@@ -30,6 +30,11 @@ class NotificationManager {
     static let inactivityNotif      = "com.swipy.inactivity"
     static let swipeLimitResetNotif = "com.swipy.swipeLimitReset"
 
+    /// How long after items land in the Review Bin the reminder fires. Also the window
+    /// NotificationScheduler uses to decide whether a pending reminder can just be
+    /// refreshed in place — the two must stay equal, so both reference this one constant.
+    static let reviewBinReminderDelay: TimeInterval = 8 * 3600
+
     private init() {}
 
     // MARK: - Authorization
@@ -88,23 +93,32 @@ class NotificationManager {
     // MARK: - Review Bin Reminder
 
     func scheduleReviewBinReminder(itemCount: Int, spaceSavedBytes: Int64) {
+        let variant = randomVariant([
+            (String(localized: "notif.reviewBin.title"), String(localized: "notif.reviewBin.body")),
+            (String(localized: "notif.reviewBin.title.2"), String(localized: "notif.reviewBin.body.2")),
+            (String(localized: "notif.reviewBin.title.3"), String(localized: "notif.reviewBin.body.3"))
+        ])
         let content = UNMutableNotificationContent()
-        content.title = String(localized: "notif.reviewBin.title")
-        content.body = String(format: String(localized: "notif.reviewBin.body"), formatBytes(spaceSavedBytes))
+        content.title = variant.title
+        content.body = String(format: variant.body, formatBytes(spaceSavedBytes))
         content.categoryIdentifier = Self.reviewBinCategory
         content.sound = .default
         content.userInfo = ["destination": "reviewBin", "itemCount": itemCount]
 
-        schedule(identifier: Self.reviewBinNotif, content: content, delay: 24 * 3600)
+        schedule(identifier: Self.reviewBinNotif, content: content, delay: Self.reviewBinReminderDelay)
         UserDefaults.standard.set(Date(), forKey: "lastReviewBinNotifScheduled")
     }
 
     // MARK: - Photo Burst
 
     func schedulePhotoBurstNotification(newPhotoCount: Int, latestAsset: PHAsset?) {
+        let variant = randomVariant([
+            (String(localized: "notif.burst.title"), String(localized: "notif.burst.body")),
+            (String(localized: "notif.burst.title.2"), String(localized: "notif.burst.body.2"))
+        ])
         let content = UNMutableNotificationContent()
-        content.title = String(localized: "notif.burst.title")
-        content.body = String(format: String(localized: "notif.burst.body"), newPhotoCount)
+        content.title = variant.title
+        content.body = String(format: variant.body, newPhotoCount)
         content.categoryIdentifier = Self.photoBurstCategory
         content.sound = .default
         content.userInfo = ["destination": "swipe", "photoCount": newPhotoCount]
@@ -137,9 +151,13 @@ class NotificationManager {
     /// Only call when a free user has just exhausted their daily swipe allowance.
     /// Replaces any previously scheduled reset notification (same identifier = atomic swap).
     func scheduleSwipeLimitResetNotification() {
+        let variant = randomVariant([
+            (String(localized: "notif.swipeLimitReset.title"), String(localized: "notif.swipeLimitReset.body")),
+            (String(localized: "notif.swipeLimitReset.title.2"), String(localized: "notif.swipeLimitReset.body.2"))
+        ])
         let content = UNMutableNotificationContent()
-        content.title = String(localized: "notif.swipeLimitReset.title")
-        content.body = String(localized: "notif.swipeLimitReset.body")
+        content.title = variant.title
+        content.body = variant.body
         content.categoryIdentifier = Self.swipeLimitResetCategory
         content.sound = .default
         content.userInfo = ["destination": "swipe"]
@@ -159,9 +177,13 @@ class NotificationManager {
     // MARK: - Weekly Cleanup
 
     func scheduleWeeklyCleanup() {
+        let variant = randomVariant([
+            (String(localized: "notif.weekly.title"), String(localized: "notif.weekly.body")),
+            (String(localized: "notif.weekly.title.2"), String(localized: "notif.weekly.body.2"))
+        ])
         let content = UNMutableNotificationContent()
-        content.title = String(localized: "notif.weekly.title")
-        content.body = String(localized: "notif.weekly.body")
+        content.title = variant.title
+        content.body = variant.body
         content.categoryIdentifier = Self.weeklyCategory
         content.sound = .default
         content.userInfo = ["destination": "swipe"]
@@ -177,9 +199,9 @@ class NotificationManager {
         UNUserNotificationCenter.current().add(request)
     }
 
-    // MARK: - Inactivity Reminder (72 h since last foreground)
+    // MARK: - Inactivity Reminder (30 h since last foreground)
 
-    /// Cancel any pending inactivity notification and reschedule for 72 hours from now.
+    /// Cancel any pending inactivity notification and reschedule for 30 hours from now.
     /// Call every time the app enters foreground — effectively resets the clock.
     func rescheduleInactivityReminder() {
         let content = UNMutableNotificationContent()
@@ -191,10 +213,17 @@ class NotificationManager {
 
         UNUserNotificationCenter.current()
             .removePendingNotificationRequests(withIdentifiers: [Self.inactivityNotif])
-        schedule(identifier: Self.inactivityNotif, content: content, delay: 72 * 3600)
+        schedule(identifier: Self.inactivityNotif, content: content, delay: 30 * 3600)
     }
 
     // MARK: - Helpers
+
+    /// Picks one (title, body) copy variant at random from the given localized pairs.
+    /// Each notification type has 2-3 flavor variants of the same underlying message —
+    /// this keeps repeat notifications from feeling identical over time.
+    private func randomVariant(_ pairs: [(title: String, body: String)]) -> (title: String, body: String) {
+        pairs.randomElement()!
+    }
 
     private func schedule(identifier: String, content: UNMutableNotificationContent, delay: TimeInterval) {
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(delay, 1), repeats: false)

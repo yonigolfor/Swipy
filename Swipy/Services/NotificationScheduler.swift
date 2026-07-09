@@ -83,7 +83,7 @@ class NotificationScheduler {
         checkMilestoneTrigger()
     }
 
-    // MARK: - Trigger 1: Review Bin (fires 24h after items are left pending)
+    // MARK: - Trigger 1: Review Bin (fires 8h after items are left pending)
 
     private func checkReviewBinTrigger() {
         guard !persistence.reviewBinIDs.isEmpty else {
@@ -92,11 +92,11 @@ class NotificationScheduler {
             return
         }
 
-        // If there's a pending notification that hasn't fired yet (scheduled < 24h ago),
+        // If there's a pending notification that hasn't fired yet (scheduled < 8h ago),
         // replace it with fresh data. The same identifier means iOS atomically swaps
         // the pending one — not an additional notification, so no daily cap hit.
         let lastScheduled = UserDefaults.standard.object(forKey: "lastReviewBinNotifScheduled") as? Date
-        let hasPendingNotif = lastScheduled.map { Date().timeIntervalSince($0) < 24 * 3600 } ?? false
+        let hasPendingNotif = lastScheduled.map { Date().timeIntervalSince($0) < NotificationManager.reviewBinReminderDelay } ?? false
 
         if !hasPendingNotif {
             guard currentDayCount() < 2 else { return }
@@ -226,7 +226,7 @@ class NotificationScheduler {
         UserDefaults.standard.set(true, forKey: key)
     }
 
-    /// Cancel any pending inactivity notification and arm a new 72-hour one.
+    /// Cancel any pending inactivity notification and arm a new 30-hour one.
     /// Must be called every time the app enters foreground.
     func rescheduleInactivityReminder() {
         manager.rescheduleInactivityReminder()

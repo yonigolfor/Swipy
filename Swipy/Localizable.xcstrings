@@ -771,6 +771,23 @@
         }
       }
     },
+    "notif.burst.body.2" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Come keep the one where you look great, and clear out the others that look exactly the same."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "כנס ונשמור את האחת שבה יצאת פוטוגני, ונפנה מהזיכרון את האחרות שנראות בדיוק אותו דבר."
+          }
+        }
+      }
+    },
     "notif.burst.title" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -784,6 +801,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "איזה יום פוטוגני! 📸"
+          }
+        }
+      }
+    },
+    "notif.burst.title.2" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Careful, paparazzi! 📸"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "זהירות, פפראצי! 📸"
           }
         }
       }
@@ -873,6 +907,40 @@
         }
       }
     },
+    "notif.reviewBin.body.2" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ of junk is already bagged up and waiting by the door in your Review Bin. One tap and your iPhone breathes easy."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ של זבל כבר ארוזים בשקיות ומחכים ליד הדלת ב'סל המחזור'. לחיצה אחת והאייפון שלך נושם לרווחה."
+          }
+        }
+      }
+    },
+    "notif.reviewBin.body.3" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Final stretch: %@ waiting for final delete confirmation. Come feel the satisfaction!"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "הפיניש האחרון: %@ מחכים לאישור מחיקה סופי. כנס ותרגיש את הסיפוק!"
+          }
+        }
+      }
+    },
     "notif.reviewBin.title" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -886,6 +954,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "העבודה הקשה כמעט הסתיימה! 🏁"
+          }
+        }
+      }
+    },
+    "notif.reviewBin.title.2" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Don't leave us hanging ⏳"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "אל תשאיר אותנו תלויים באוויר ⏳"
+          }
+        }
+      }
+    },
+    "notif.reviewBin.title.3" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The big finale is here! 🏁"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "הפינאלה הגדול הגיע! 🏁"
           }
         }
       }
@@ -924,6 +1026,40 @@
         }
       }
     },
+    "notif.swipeLimitReset.title.2" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Back in the game 🎮"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "חזרנו למשחק 🎮"
+          }
+        }
+      }
+    },
+    "notif.swipeLimitReset.body.2" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Come see what surprises are waiting for you in today's stack."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "כנס לראות אילו הפתעות מחכות לך בערימה היום."
+          }
+        }
+      }
+    },
     "notif.weekly.body" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -954,6 +1090,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "ניקיון יום ראשון 🧹"
+          }
+        }
+      }
+    },
+    "notif.weekly.title.2" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start the week with a clean slate 🍃"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "פותחים את השבוע בדף נקי 🍃"
+          }
+        }
+      }
+    },
+    "notif.weekly.body.2" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "5 minutes of swiping, and all the blurry photos from your weekend night out will disappear!"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "5 דקות של החלקות, וכל התמונות המטושטשות מהיציאה בסופ״ש ייעלמו!"
           }
         }
       }
