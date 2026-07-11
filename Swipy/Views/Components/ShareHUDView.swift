@@ -34,7 +34,13 @@ struct ShareHUDView: View {
             .frame(maxWidth: .infinity)
             .padding(.vertical, 24)
             .padding(.horizontal, 28)
-            .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+            // Fixed color, not .ultraThinMaterial: this card lives in a non-key auxiliary
+            // UIWindow (ShareHUDManager) so it can float above a third-party share extension
+            // (WhatsApp, etc.) without stealing focus. Live backdrop materials can fail to
+            // establish a backdrop connection in a window that's never key, rendering as
+            // solid black instead of translucent — which visually looked like the extension
+            // itself going black. A flat color has no such dependency.
+            .background(Color.black.opacity(0.6), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
             .shadow(color: .black.opacity(0.3), radius: 32, y: 10)
             .padding(.horizontal, 40)
             .animation(.smooth, value: animationPhase)

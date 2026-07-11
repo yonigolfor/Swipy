@@ -340,10 +340,13 @@ struct SwipeStackView: View {
             PaywallView()
         }
         .sheet(isPresented: $viewModel.isShowingShareSheet) {
-            // No .presentationDetents — UIActivityViewController manages its own
-            // sizing; wrapping it in a SwiftUI resizable-detent sheet is a known
-            // trigger for third-party share extensions dismissing themselves early.
+            // .presentationDetents were previously suspected as the cause of third-party
+            // share extensions (WhatsApp, etc.) flash-dismissing themselves; the real cause
+            // was ShareHUDManager's floating HUD window rendering solid black over the
+            // extension (see ShareHUDView's background comment). Confirmed fixed with
+            // detents restored.
             ActivityView(items: viewModel.shareItems)
+                .presentationDetents([.medium, .large])
         }
         // Shuffle landing: fires when shuffleBatchID changes (activateShuffle / deactivateShuffle).
         .onChange(of: viewModel.shuffleBatchID) { _ in

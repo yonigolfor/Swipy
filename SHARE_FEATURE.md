@@ -6,9 +6,9 @@ Swipy supports sharing any photo or video directly from the swipe card stack. Ta
 
 ---
 
-## Presentation: plain `.sheet`, no `.presentationDetents`
+## Presentation: `.sheet` with `.presentationDetents([.medium, .large])`
 
-`ActivityView` (a thin `UIViewControllerRepresentable` over `UIActivityViewController`) is presented via a plain SwiftUI `.sheet(isPresented:)` with **no** `.presentationDetents` applied. `UIActivityViewController` already manages its own sizing natively — wrapping it in a resizable-detent sheet is a known trigger for third-party share extensions (WhatsApp, Instagram, etc.) flashing open for ~1s and dismissing themselves, since the extension's presentation context doesn't correctly inherit through a detent-based parent sheet.
+`ActivityView` (a thin `UIViewControllerRepresentable` over `UIActivityViewController`) is presented via a plain SwiftUI `.sheet(isPresented:)`. `.presentationDetents` were suspected of causing third-party share extensions (WhatsApp, Instagram, etc.) to flash open for ~1s and dismiss themselves, but that was a red herring — the real cause was `ShareHUDManager`'s floating HUD window (see below). Detents are confirmed safe once that's fixed.
 
 ---
 
@@ -74,6 +74,7 @@ A floating `UIWindow` at `.alert + 1` level sits above all other UI including th
 
 ### ShareHUDView (Component)
 - Full-width card (`.frame(maxWidth: .infinity)`) with 40pt horizontal padding from screen edges, 28pt inner content padding
+- Background is a **flat `Color.black.opacity(0.6)`, not `.ultraThinMaterial`**: live backdrop materials can fail to establish a backdrop connection in a window that's never key (see above), rendering solid black instead of translucent — this was the actual cause of the WhatsApp flash-dismiss bug (the black card, sitting above the extension at `.alert + 1`, was mistaken for the extension itself going black). A flat color has no such dependency.
 - Circular progress ring using `Circle().trim(from: 0, to: progressFraction)` with glow pulse animation
 - `animationPhase: Int` (0–3) drives layout animations; raw progress ticks do NOT trigger layout re-renders (prevents `.animation` from refiring on every tiny progress update)
 - Ring → green checkmark transition on `.complete`
