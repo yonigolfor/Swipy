@@ -76,6 +76,9 @@ extension Color {
     static let swipeBlue = Color(red: 0.25, green: 0.55, blue: 0.95)
     static let cardBackground = Color(UIColor.systemBackground)
     static let dimmedBackground = Color.black.opacity(0.3)
+    // Shuffle mode accent gradient — FAB, capsule glow border, mode badge.
+    static let shuffleAccentStart = Color(red: 0.2, green: 0.5, blue: 1.0)
+    static let shuffleAccentEnd = Color(red: 0.5, green: 0.2, blue: 0.9)
 }
 
 // MARK: - UIApplication Extensions

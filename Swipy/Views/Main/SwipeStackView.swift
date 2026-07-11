@@ -252,23 +252,18 @@ struct SwipeStackView: View {
             if !viewModel.isOfflineMode && (viewModel.isLoading || !viewModel.photoStack.isEmpty) {
                 VStack {
                     Spacer()
-                    HStack {
-                        shuffleFAB
-                            .overlay(alignment: .top) {
-                                if viewModel.isShuffleModeActive {
-                                    resetToTodayButton
-                                        .offset(y: -(48 + 10))
-                                        .transition(.asymmetric(
-                                            insertion: .move(edge: .bottom).combined(with: .opacity),
-                                            removal:   .move(edge: .bottom).combined(with: .opacity)
-                                        ))
-                                }
-                            }
-                            .animation(.spring(response: 0.4, dampingFraction: 0.75), value: viewModel.isShuffleModeActive)
-                        Spacer()
+                    VStack(alignment: .leading, spacing: 24) {
+                        HStack {
+                            shuffleCapsule
+                            Spacer()
+                        }
+                        HStack {
+                            undoButton
+                            Spacer()
+                        }
                     }
                     .padding(.horizontal, 24)
-                    // Extra clearance when the top card is a video so the FAB
+                    // Extra clearance when the top card is a video so the row
                     // doesn't sit on top of the VideoProgressBar.
                     .padding(.bottom, 140)
                 }
@@ -397,68 +392,115 @@ struct SwipeStackView: View {
         }
     }
 
-    // MARK: - Shuffle FAB
+    // MARK: - Shuffle Capsule (toggle + exit, unified glassmorphic container)
 
-    private var resetToTodayButton: some View {
+    /// Icon-only tap target — no background of its own, the parent capsule
+    /// supplies the single shared glass surface (avoids blur-on-blur).
+    private var shuffleToggleButton: some View {
+        Button {
+            performShuffleTransition { viewModel.activateShuffle() }
+        } label: {
+            Image(systemName: "shuffle")
+                .font(.system(size: 19, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(width: 44, height: 44)
+                .rotationEffect(viewModel.isShuffleModeActive ? .degrees(180) : .zero)
+                .animation(.spring(response: 0.4, dampingFraction: 0.65), value: viewModel.isShuffleModeActive)
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// "Exit shuffle" — plain xmark (not xmark.circle.fill, which shuffleBadge already
+    /// uses for the same action) so the two controls never look identical.
+    private var exitShuffleButton: some View {
         Button {
             performShuffleTransition { viewModel.deactivateShuffle() }
         } label: {
+            Image(systemName: "xmark")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(.white)
+                .frame(width: 44, height: 44)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var shuffleCapsule: some View {
+        HStack(spacing: 2) {
+            shuffleToggleButton
+            if viewModel.isShuffleModeActive {
+                exitShuffleButton
+                    .transition(.asymmetric(
+                        insertion: .scale(scale: 0.4, anchor: .leading).combined(with: .opacity),
+                        removal:   .scale(scale: 0.4, anchor: .leading).combined(with: .opacity)
+                    ))
+            }
+        }
+        .padding(6)
+        .background(
+            Capsule()
+                .fill(.ultraThinMaterial)
+                .overlay(
+                    Capsule().fill(
+                        viewModel.isShuffleModeActive
+                            ? LinearGradient(
+                                colors: [.shuffleAccentStart, .shuffleAccentEnd],
+                                startPoint: .topLeading, endPoint: .bottomTrailing)
+                            : LinearGradient(
+                                colors: [Color.white.opacity(0.2), Color.white.opacity(0.05)],
+                                startPoint: .topLeading, endPoint: .bottomTrailing)
+                    )
+                )
+                .overlay(
+                    Capsule()
+                        .strokeBorder(
+                            viewModel.isShuffleModeActive
+                                ? AnyShapeStyle(AngularGradient(
+                                    colors: [.shuffleAccentStart, .shuffleAccentEnd, .shuffleAccentStart],
+                                    center: .center))
+                                : AnyShapeStyle(Color.white.opacity(0.12)),
+                            lineWidth: viewModel.isShuffleModeActive ? 1.5 : 1
+                        )
+                )
+                .shadow(
+                    color: viewModel.isShuffleModeActive ? Color.shuffleAccentStart.opacity(0.5) : .black.opacity(0.18),
+                    radius: 14, y: 5
+                )
+        )
+        .scaleEffect(awaitingShuffleLanding ? 0.9 : 1.0)
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: viewModel.isShuffleModeActive)
+        .animation(.spring(response: 0.3), value: awaitingShuffleLanding)
+    }
+
+    // MARK: - Undo Button
+
+    /// Same deterministic pipeline as shake-to-undo — calls the identical
+    /// `performUndo()` so shake and tap share one source of truth.
+    private var undoButton: some View {
+        let isDisabled = !viewModel.canUndo || isUndoAnimating
+        return Button(action: performUndo) {
             ZStack {
                 Circle()
                     .fill(.ultraThinMaterial)
                     .overlay(
                         Circle().fill(
                             LinearGradient(
-                                colors: [Color.white.opacity(0.25), Color.white.opacity(0.08)],
+                                colors: [Color.white.opacity(0.2), Color.white.opacity(0.05)],
                                 startPoint: .topLeading, endPoint: .bottomTrailing)
                         )
                     )
-                    .frame(width: 48, height: 48)
-                    .shadow(color: .black.opacity(0.2), radius: 10, y: 4)
+                    .overlay(Circle().strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
+                    .frame(width: 44, height: 44)
+                    .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
 
                 Image(systemName: "arrow.uturn.backward")
-                    .font(.system(size: 17, weight: .semibold))
+                    .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(.white)
             }
         }
         .buttonStyle(.plain)
-    }
-
-    private var shuffleFAB: some View {
-        Button {
-            performShuffleTransition { viewModel.activateShuffle() }
-        } label: {
-            ZStack {
-                Circle()
-                    .fill(.ultraThinMaterial)
-                    .overlay(
-                        Circle().fill(
-                            viewModel.isShuffleModeActive
-                                ? LinearGradient(
-                                    colors: [Color(red: 0.2, green: 0.5, blue: 1.0),
-                                             Color(red: 0.5, green: 0.2, blue: 0.9)],
-                                    startPoint: .topLeading, endPoint: .bottomTrailing)
-                                : LinearGradient(
-                                    colors: [Color.white.opacity(0.2), Color.white.opacity(0.05)],
-                                    startPoint: .topLeading, endPoint: .bottomTrailing)
-                        )
-                    )
-                    .frame(width: 56, height: 56)
-                    .shadow(
-                        color: viewModel.isShuffleModeActive ? Color(red: 0.2, green: 0.5, blue: 1.0).opacity(0.5) : .black.opacity(0.18),
-                        radius: 14, y: 5
-                    )
-
-                Image(systemName: "shuffle")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundColor(.white)
-                    .rotationEffect(viewModel.isShuffleModeActive ? .degrees(180) : .zero)
-                    .animation(.spring(response: 0.4, dampingFraction: 0.65), value: viewModel.isShuffleModeActive)
-            }
-        }
-        .buttonStyle(.plain)
-        .scaleEffect(awaitingShuffleLanding ? 0.9 : 1.0)
-        .animation(.spring(response: 0.3), value: awaitingShuffleLanding)
+        .disabled(isDisabled)
+        .opacity(isDisabled ? 0.7 : 1)
+        .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isDisabled)
     }
 
     // MARK: - Shuffle Mode Badge
@@ -487,8 +529,8 @@ struct SwipeStackView: View {
                 .overlay(
                     Capsule().fill(
                         LinearGradient(
-                            colors: [Color(red: 0.2, green: 0.5, blue: 1.0).opacity(0.55),
-                                     Color(red: 0.5, green: 0.2, blue: 0.9).opacity(0.45)],
+                            colors: [Color.shuffleAccentStart.opacity(0.55),
+                                     Color.shuffleAccentEnd.opacity(0.45)],
                             startPoint: .leading, endPoint: .trailing
                         )
                     )

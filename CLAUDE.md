@@ -144,6 +144,14 @@ static let swipeYellow = Color(red: 1.0,  green: 0.8,  blue: 0.2)   // #FFCC33 �
 .burstPhotos:       .cyan
 ```
 
+### Shuffle Accent Gradient
+```swift
+// View+Extensions.swift
+static let shuffleAccentStart = Color(red: 0.2, green: 0.5, blue: 1.0)
+static let shuffleAccentEnd   = Color(red: 0.5, green: 0.2, blue: 0.9)
+// Used by: shuffleCapsule (FAB fill + active glow border), shuffleBadge
+```
+
 ### Surfaces
 ```swift
 // Dark background (splash, onboarding)
@@ -287,7 +295,9 @@ This project uses **zero third-party packages** (no CocoaPods, SPM, Carthage). U
 
 ## Key Behavioral Constraints
 
-- **Undo**: Shake gesture triggers undo of last swipe. The undo item must always be kept in NSCache — never evict it until a new swipe occurs. The restored card re-enters with a reverse animation — off-screen from the same edge and tilt the original swipe exited through, then an underdamped spring (`response: 0.45, dampingFraction: 0.75`) carries it back to center with a slight overshoot ("deck-landing" feel). The drag gesture is blocked (`isUndoAnimating`) for the duration so a finger grabbing the card mid-flight can't fight the spring. See `ARCHITECTURE_SWIPE_LOADING.md` §6 for the full sequence.
+- **Undo**: Triggered either by the shake gesture or by tapping the dedicated Undo button (below the Shuffle capsule, `arrow.uturn.backward`) — both call the same `performUndo()` in `SwipeStackView`, so there is one deterministic pipeline regardless of trigger. The undo item must always be kept in NSCache — never evict it until a new swipe occurs. The restored card re-enters with a reverse animation — off-screen from the same edge and tilt the original swipe exited through, then an underdamped spring (`response: 0.45, dampingFraction: 0.75`) carries it back to center with a slight overshoot ("deck-landing" feel). The drag gesture is blocked (`isUndoAnimating`) for the duration so a finger grabbing the card mid-flight can't fight the spring. See `ARCHITECTURE_SWIPE_LOADING.md` §6 for the full sequence.
+  Only a single step of undo is supported: `PhotoStackViewModel.canUndo` (`@Published`, mirrors `lastAction != nil` via a `didSet`) drives the button's enabled/disabled and dimmed (`opacity(0.7)`) state, and is invalidated (`invalidatePendingUndo()`) whenever the stack is wholesale-replaced — filter change, shuffle toggle, or offline-mode toggle — so a stale undo can never target the wrong stack context.
+- **Shuffle Controls**: The Shuffle toggle and "Exit Shuffle" (`xmark`) buttons live together in one glassmorphic `Capsule` (`shuffleCapsule` in `SwipeStackView.swift`) that expands to show the exit button only while shuffle is active, with an animated border — subtle white stroke when inactive, an animated neon `AngularGradient` (using the shuffle accent colors, see Color Palette) when active. Both buttons share the capsule's single `.ultraThinMaterial` background rather than each having their own, to avoid blur-on-blur.
 - **Review Bin**: Items are moved here on delete swipe. No photo is permanently deleted until the user confirms "Empty Trash" in the Review Bin. On every cold start, `restoreBinFromDisk()` reconciles `reviewBinIDs` against PHPhotoLibrary — IDs with no matching asset (deleted externally via Photos.app, or app crashed mid-`emptyTrash`) are silently dropped and the clean state is flushed to disk. This keeps the bin self-healing without any manual repair flow.
 - **Snooze ("Later")**: Swipe up defers the decision — the photo is hidden from the stack and re-injected at the front after N keep/delete swipes (50 → 150 → 500, exponential backoff per item). Snoozed items are persisted in `UserDefaults` and survive force-quit; they reappear immediately on the next cold start. Snooze does **not** count against the daily swipe limit. See `SNOOZE_FEATURE.md` for full details.
 - **Video safety**: Never delete a video from PHPhotoLibrary without first draining its AVPlayer from VideoPlayerPool — this prevents crashes.

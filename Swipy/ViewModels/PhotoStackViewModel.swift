@@ -146,7 +146,13 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// (their IDs can never come back anyway), or when the user explicitly
     /// undoes an action via restoreFromBin.
     private(set) var processedAssetIDs: Set<String> = []
-    private var lastAction: (item: PhotoItem, action: SwipeAction)?
+    /// `didSet` keeps `canUndo` in sync with every write site automatically —
+    /// a new caller can never forget to toggle the published flag separately.
+    private var lastAction: (item: PhotoItem, action: SwipeAction)? {
+        didSet { canUndo = lastAction != nil }
+    }
+    /// Drives the Undo button's enabled/disabled + dimmed appearance.
+    @Published private(set) var canUndo = false
     /// Holds the cached image of the last swiped item so undo (shake) can
     /// restore it to the top card without a reload flash.
     private var lastSwipedImage: UIImage?
@@ -529,6 +535,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         isShuffleModeActive = false
         savedLinearCursor = 0
         preShuffleStack = nil
+        invalidatePendingUndo()
 
         // Build aesthetic persona once — no-op when already ready or in-flight.
         // After it completes, score any cards that were already cached while it was building.
@@ -633,6 +640,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         isShuffleModeActive = true
         isLoading = true
         isFetchingNextPage = false
+        invalidatePendingUndo()
 
         let total = photoService.totalAssetCount
         let randomStart = Int.random(in: 0..<total)
@@ -715,6 +723,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     func deactivateShuffle() {
         isShuffleModeActive = false
         isFetchingNextPage = false
+        invalidatePendingUndo()
 
         let restored = restoreLinearStack()
         photoStack = restored
@@ -948,6 +957,13 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         loadNextPageIfNeeded()
     }
 
+    /// Call whenever `photoStack` is about to be wholesale-replaced (filter change,
+    /// shuffle toggle, offline toggle) — a pending undo would otherwise target the
+    /// stack context it no longer belongs to.
+    private func invalidatePendingUndo() {
+        lastAction = nil
+    }
+
     /// Undo — restores the last deleted photo back to the top of the stack.
     /// Returns the action that was undone so the view can orient the card's
     /// re-entry animation (e.g. a `.keep` undo re-enters from the right).
@@ -1062,6 +1078,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         // If shuffle was active, reset it cleanly — shuffle and offline are mutually exclusive.
         isShuffleModeActive = false
         preShuffleStack = nil
+        invalidatePendingUndo()
         // Scan the full library for locally-available assets — owns its own universe.
         Task {
             photoStack = []
