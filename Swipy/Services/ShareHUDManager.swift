@@ -45,7 +45,12 @@ final class ShareHUDManager: ObservableObject {
         w.backgroundColor = .clear
         w.rootViewController = host
         w.alpha = 0
-        w.makeKeyAndVisible()
+        // Deliberately NOT makeKeyAndVisible(): stealing key-window status while a
+        // third-party share extension (WhatsApp, Instagram, etc.) is being presented
+        // in the same scene causes iOS to tear down the extension almost immediately.
+        // Touch delivery is hit-test/z-order based, not key-status based, so the
+        // Cancel button still works without this window ever becoming key.
+        w.isHidden = false
         window = w
         isVisible = true
         UIView.animate(withDuration: 0.2) { w.alpha = 1 }

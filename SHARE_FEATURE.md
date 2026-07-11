@@ -6,6 +6,12 @@ Swipy supports sharing any photo or video directly from the swipe card stack. Ta
 
 ---
 
+## Presentation: plain `.sheet`, no `.presentationDetents`
+
+`ActivityView` (a thin `UIViewControllerRepresentable` over `UIActivityViewController`) is presented via a plain SwiftUI `.sheet(isPresented:)` with **no** `.presentationDetents` applied. `UIActivityViewController` already manages its own sizing natively — wrapping it in a resizable-detent sheet is a known trigger for third-party share extensions (WhatsApp, Instagram, etc.) flashing open for ~1s and dismissing themselves, since the extension's presentation context doesn't correctly inherit through a detent-based parent sheet.
+
+---
+
 ## Core Design: Deferred Download via UIActivityItemProvider
 
 The share sheet opens instantly — no waiting for iCloud downloads.
@@ -64,6 +70,7 @@ A floating `UIWindow` at `.alert + 1` level sits above all other UI including th
 - Creates a `UIHostingController<ShareHUDView>` as the window's root VC
 - Background is `UIColor.clear`; `ShareHUDView` renders `.ultraThinMaterial` only for the card itself
 - Plain `UIWindow` (not a PassthroughWindow) — `Color.clear` areas return `nil` from `hitTest` automatically, so the cancel button receives taps correctly without any custom hit-testing
+- **Never calls `makeKeyAndVisible()`** — only `isHidden = false`. The window must become visible without becoming *key*: if a third-party share extension (WhatsApp, Instagram, etc.) is being presented in the same `UIWindowScene` when the 800ms debounce fires, forcibly re-keying a new window tears down the extension's presentation almost immediately (~1s flash-and-dismiss). Touch delivery to the cancel button is hit-test/z-order based, not key-status based, so this doesn't affect interactivity.
 
 ### ShareHUDView (Component)
 - Full-width card (`.frame(maxWidth: .infinity)`) with 40pt horizontal padding from screen edges, 28pt inner content padding

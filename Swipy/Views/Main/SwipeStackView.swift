@@ -340,8 +340,10 @@ struct SwipeStackView: View {
             PaywallView()
         }
         .sheet(isPresented: $viewModel.isShowingShareSheet) {
+            // No .presentationDetents — UIActivityViewController manages its own
+            // sizing; wrapping it in a SwiftUI resizable-detent sheet is a known
+            // trigger for third-party share extensions dismissing themselves early.
             ActivityView(items: viewModel.shareItems)
-                .presentationDetents([.medium, .large])
         }
         // Shuffle landing: fires when shuffleBatchID changes (activateShuffle / deactivateShuffle).
         .onChange(of: viewModel.shuffleBatchID) { _ in
@@ -479,6 +481,9 @@ struct SwipeStackView: View {
         let isDisabled = !viewModel.canUndo || isUndoAnimating
         return Button(action: performUndo) {
             ZStack {
+                // 56pt matches shuffleCapsule's inactive-state visible circle
+                // (44pt inner button + 6pt padding on each side) — keeps the two
+                // FAB rows the same size.
                 Circle()
                     .fill(.ultraThinMaterial)
                     .overlay(
@@ -489,7 +494,7 @@ struct SwipeStackView: View {
                         )
                     )
                     .overlay(Circle().strokeBorder(Color.white.opacity(0.10), lineWidth: 1))
-                    .frame(width: 44, height: 44)
+                    .frame(width: 56, height: 56)
                     .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
 
                 Image(systemName: "arrow.uturn.backward")
