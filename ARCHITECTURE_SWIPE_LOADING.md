@@ -357,11 +357,29 @@ DragGesture.onEnded (swipe בוטל — חזר למרכז)
 
 **Undo (shake)**:
 ```
-undoLastAction()
-  → photoService.cacheImage(lastSwipedImage)  ← מחזיר תמונה ל-cache
-  → loadedImageIDs.insert(item.id)            ← מסמן כ-ready
-  → finalImageIDs.insert(item.id)             ← קלף ה-undo הוא תמיד סופי (full-res)
-  → photoStack.insert(item, at: 0)            ← קלף מופיע מיידית ללא flash ולא spinner
+SwipeStackView.performUndo()
+  → guard !isDragging, !isPinching else return         ← שייק תוך כדי גרירה/pinch חי מתעלם,
+                                                          לא חוטף dragOffset/dragRotation/pinchScale/pinchOffset
+  → action = viewModel.undoLastAction()   ← מחזיר את הפעולה שבוטלה (keep/delete/snooze)
+  │     ├── photoService.cacheImage(lastSwipedImage)  ← מחזיר תמונה ל-cache
+  │     ├── loadedImageIDs.insert(item.id)            ← מסמן כ-ready
+  │     ├── finalImageIDs.insert(item.id)             ← קלף ה-undo הוא תמיד סופי (full-res)
+  │     └── photoStack.insert(item, at: 0)            ← קלף מופיע מיידית ללא flash ולא spinner
+  → isUndoAnimating = true, undoGeneration += 1        ← חוסם dragGesture וגם מנתק את pinchGesture
+                                                          (`index == 0 && !isUndoAnimating ? pinchGesture : nil`)
+                                                          עד הנחיתה; generation נלכד ב-let מקומי
+  → dragOffset/dragRotation = off-screen, בכיוון ובזווית של ה-swipe שבוטל
+        (keep→ימין +25°, delete→שמאל -25°, snooze→למעלה 0°)
+        קלף חדש בערימה לא מונפש בהופעתו הראשונה — אז זה מצטייר מיידית, בלי הבהוב
+  → DispatchQueue.main.asyncAfter(0.03s):              ← מאפשר לפריים הזה להיכתב
+      withAnimation(spring 0.45/0.75, completionCriteria: .logicallyComplete):
+        dragOffset/dragRotation → 0                    ← קפיצה underdamped, "נחיתה" בחפיסה
+      completion: if undoGeneration == generation { isUndoAnimating = false }
+  → DispatchQueue.main.asyncAfter(1.0s):
+        if undoGeneration == generation { isUndoAnimating = false }
+        ← רשת ביטחון idempotent + generation-gated — משחררת את הגרירה גם אם
+          ה-completion לעיל לא נורה (למשל האפליקציה עברה לרקע), אבל לעולם לא
+          מאפסת isUndoAnimating ששייך לסבב undo מאוחר יותר (שייק כפול מהיר)
 ```
 
 ---

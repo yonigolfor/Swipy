@@ -15,6 +15,18 @@ struct SwipeStackView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var dragOffset: CGSize = .zero
     @State private var dragRotation: Double = 0
+    /// True from shake-to-undo until the restored card lands back at center —
+    /// blocks the drag gesture so a finger grabbing the card mid-flight can't
+    /// fight the return spring.
+    @State private var isUndoAnimating = false
+    /// Bumped on every performUndo() call — lets a stale completion/fallback
+    /// from an earlier undo recognize it's no longer current and skip clearing
+    /// isUndoAnimating out from under a newer undo's in-flight animation.
+    @State private var undoGeneration = 0
+    /// Off-screen distance (pt) a card travels on exit fling / undo re-entry.
+    private let cardFlingDistance: CGFloat = 500
+    /// Divisor mapping horizontal drag translation to rotation degrees.
+    private let cardRotationDivisor: CGFloat = 20
 
     /// Tracks the Photos permission status across app foreground/background — lets the
     /// scenePhase hook detect a denied→authorized transition (e.g. user just came back
@@ -157,9 +169,9 @@ struct SwipeStackView: View {
                                     value: pinchOffset
                                 )
                                 .gesture(index == 0 ? dragGesture : nil)
-                                .simultaneousGesture(index == 0 ? pinchGesture : nil)
+                                .simultaneousGesture(index == 0 && !isUndoAnimating ? pinchGesture : nil)
                                 .overlay {
-                                    if index == 0 { swipeIndicatorOverlay }
+                                    if index == 0 && isDragging { swipeIndicatorOverlay }
                                 }
                             }
                         }
@@ -303,7 +315,7 @@ struct SwipeStackView: View {
             }
         }
         .onShake {
-            viewModel.undoLastAction()
+            performUndo()
         }
         .toolbarBackground(.visible, for: .tabBar)
         .onAppear {
@@ -908,13 +920,13 @@ struct SwipeStackView: View {
                 // Pan is handled exclusively by pinchGesture's inner DragGesture.
                 // If this 1-finger recognizer fires during a 2-finger pinch its
                 // translation comes from the wrong touch point and corrupts pinchOffset.
-                guard !isPinching else { return }
+                guard !isPinching, !isUndoAnimating else { return }
                 if !isDragging {
                     isDragging = true
                     viewModel.cancelPrefetch()
                 }
                 dragOffset = value.translation
-                dragRotation = Double(value.translation.width / 20)
+                dragRotation = Double(value.translation.width / cardRotationDivisor)
 
                 // Fire early pre-load once the drag clears 30 pt.
                 // This gives us the remainder of the gesture (~300-500 ms) to
@@ -926,6 +938,7 @@ struct SwipeStackView: View {
                 }
             }
             .onEnded { value in
+                guard !isUndoAnimating else { return }
                 isDragging = false
                 hasFiredEarlyPrecache = false
                 // If a pinch is active or scale hasn't fully reset, discard swipe.
@@ -956,11 +969,11 @@ struct SwipeStackView: View {
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
                         switch direction {
                         case .left:
-                            dragOffset = CGSize(width: -500, height: value.translation.height)
+                            dragOffset = CGSize(width: -cardFlingDistance, height: value.translation.height)
                         case .right:
-                            dragOffset = CGSize(width: 500, height: value.translation.height)
+                            dragOffset = CGSize(width: cardFlingDistance, height: value.translation.height)
                         case .up:
-                            dragOffset = CGSize(width: value.translation.width, height: -500)
+                            dragOffset = CGSize(width: value.translation.width, height: -cardFlingDistance)
                         case .none:
                             break
                         }
@@ -1052,6 +1065,61 @@ struct SwipeStackView: View {
         // Re-sync the top card's video in case the early warm-up interrupted
         // playback during the drag (safety net on top of the pool protection).
         NotificationCenter.default.post(name: .resumeTopCardVideo, object: nil)
+    }
+
+    /// Shake-to-undo: re-enters the restored card from the same edge it exited
+    /// through, tilted the same way it was mid-swipe. The card's first frame is
+    /// rendered off-screen (a freshly-inserted card never animates its initial
+    /// appearance), then a queue hop lets that frame actually commit before the
+    /// spring pulls it back to center — the underdamped spring naturally
+    /// overshoots a few degrees past 0° before settling, giving it real
+    /// deck-landing inertia instead of a flat snap-back. The drag gesture is
+    /// blocked for the duration (isUndoAnimating) so a finger grabbing the
+    /// card mid-flight can't fight the return spring.
+    private func performUndo() {
+        // Ignore the shake while the user has an active gesture on the top card —
+        // inserting the restored item would shift that card to index 1 out from
+        // under their finger/fingers and hijack dragOffset/dragRotation or
+        // pinchScale/pinchOffset mid-gesture.
+        guard !isDragging, !isPinching else { return }
+        guard let action = viewModel.undoLastAction() else { return }
+        isUndoAnimating = true
+        undoGeneration += 1
+        let generation = undoGeneration
+
+        let entryRotation = Double(cardFlingDistance / cardRotationDivisor)
+        switch action {
+        case .delete:
+            dragOffset = CGSize(width: -cardFlingDistance, height: 0)
+            dragRotation = -entryRotation
+        case .keep:
+            dragOffset = CGSize(width: cardFlingDistance, height: 0)
+            dragRotation = entryRotation
+        case .snooze:
+            dragOffset = CGSize(width: 0, height: -cardFlingDistance)
+            dragRotation = 0
+        case .undo:
+            break
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
+            withAnimation(
+                .spring(response: 0.45, dampingFraction: 0.75),
+                completionCriteria: .logicallyComplete
+            ) {
+                dragOffset = .zero
+                dragRotation = 0
+            } completion: {
+                if undoGeneration == generation { isUndoAnimating = false }
+            }
+        }
+        // Safety net: guarantees the gesture unblocks even if the animation's
+        // completion handler never fires (e.g. app backgrounded mid-flight).
+        // Generation-gated so a stale timer from an earlier undo can't clear
+        // isUndoAnimating while a newer undo's animation is still in flight.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+            if undoGeneration == generation { isUndoAnimating = false }
+        }
     }
 }
 

@@ -948,9 +948,12 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         loadNextPageIfNeeded()
     }
 
-    /// Undo — restores the last deleted photo back to the top of the stack
-    func undoLastAction() {
-        guard let last = lastAction else { return }
+    /// Undo — restores the last deleted photo back to the top of the stack.
+    /// Returns the action that was undone so the view can orient the card's
+    /// re-entry animation (e.g. a `.keep` undo re-enters from the right).
+    @discardableResult
+    func undoLastAction() -> SwipeAction? {
+        guard let last = lastAction else { return nil }
         lastAction = nil
         let item = last.item
 
@@ -984,6 +987,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         }
 
         hapticService.undo()
+        return last.action
     }
 
     // MARK: - Review Bin Actions
