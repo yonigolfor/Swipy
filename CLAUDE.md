@@ -302,6 +302,11 @@ This project uses **zero third-party packages** (no CocoaPods, SPM, Carthage). U
 - Real-time library observation (PHPhotoLibraryChangeObserver) to detect new bursts while the app is backgrounded
 - Smart Filters UI: replace shimmer with skeleton loaders during Phase 2
 - Low Power Mode detection: gracefully degrade background scanning (skip Phase 2, skip video pre-warming)
+- **Gallery Share Extension — jump to context**: let a user who's browsing an old photo in the native Photos app (e.g. from 01/01/2024, while the app is at 2026) tap the native Share Sheet, pick Swipy, and land directly in `SwipeStackView` with the stack starting at that photo's chronological position — instead of always starting from the default queue.
+  - New **Share Extension** target reads the shared item's `PHAsset.localIdentifier` and `creationDate` via the Photos framework.
+  - Deep link via custom URL scheme (`swipy://swipe?assetId=<localIdentifier>` or `?startDate=<timestamp>`), following the same pattern already used for notifications: extension posts the payload → `NotificationDelegate`-style handling → `NotificationCenter.default.post(name: .notificationNavigate)` → `ContentView .onReceive` sets `selectedTab = 1`.
+  - `PhotoStackViewModel` intercepts the payload and rebuilds `photoStack` anchored at the target asset's `creationDate` (sorted fetch, same as `loadPhotos(filter:)` but seeded with a start anchor instead of a `FilterCategory`), then pages forward 30 at a time per the existing pagination rules.
+  - Photos permission must already be authorized for the extension to resolve the asset — if not, fall back to opening the app at the default queue rather than a dead end (same philosophy as the existing permission-denied handling).
 
 ---
 
