@@ -42,6 +42,25 @@ extension View {
     func onShake(perform action: @escaping () -> Void) -> some View {
         self.modifier(DeviceShakeViewModifier(action: action))
     }
+
+    /// Gold gradient fill + glow shadow — premium CTA / selected paywall pricing tier.
+    func premiumGoldBackground(cornerRadius: CGFloat) -> some View {
+        self.background(
+            RoundedRectangle(cornerRadius: cornerRadius)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 1.0, green: 0.86, blue: 0.3),
+                            Color(red: 0.95, green: 0.63, blue: 0.10),
+                            Color(red: 0.82, green: 0.50, blue: 0.02),
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+                .shadow(color: Color(red: 1.0, green: 0.75, blue: 0.15).opacity(0.55), radius: 22, y: 8)
+        )
+    }
 }
 
 // MARK: - Shake Support Internal

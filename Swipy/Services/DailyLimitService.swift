@@ -5,7 +5,7 @@ class DailyLimitService: ObservableObject {
     static let shared = DailyLimitService()
 
     // TODO: tune this once we have retention data — current value is a temporary ceiling
-    let dailyLimit = 500
+    let dailyLimit = 120
     private let swipesKey      = "dailySwipesCount"
     private let dateKey        = "dailySwipesDate"
     private let bonusKey       = "dailyBonusSwipes"

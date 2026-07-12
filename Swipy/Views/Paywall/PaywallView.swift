@@ -6,30 +6,51 @@ struct PaywallView: View {
     @ObservedObject private var premiumManager = PremiumManager.shared
     @ObservedObject private var dailyLimit = DailyLimitService.shared
 
+    // Decided once per presentation, before first render — avoids a post-layout flash.
+    @State private var headerVariant: Bool = Bool.random()
+    @State private var selectedTier: PremiumTier = .yearly
+    // Starts nil (not `.yearly.id`) so the `.task` below is a genuine transition —
+    // `.scrollPosition(id:)` only drives a scroll-to when the bound value actually
+    // changes, so seeding it with the same value it already holds is a no-op.
+    @State private var scrollPosition: PremiumTier.ID?
+
     @State private var shimmerPhase: CGFloat = -1.0
     @State private var crownGlow: Double = 0.5
     @State private var appeared = false
     @State private var showShareSheet = false
     @State private var showBonusToast = false
 
+    private let bottomFadeColor = Color(red: 0.03, green: 0.02, blue: 0.10)
+
     var body: some View {
         ZStack {
             background
 
-            // Animated main content
-            VStack(spacing: 0) {
-                Spacer()
-                headerSection
-                    .padding(.bottom, 36)
-                benefitsCard
-                    .padding(.bottom, 32)
-                ctaSection
-                // Reserve space so the CTA doesn't drift too low
-                Spacer().frame(height: 80)
+            ScrollView(showsIndicators: false) {
+                VStack(spacing: 0) {
+                    headerSection
+                        .padding(.bottom, 36)
+                    benefitsCard
+                        .padding(.bottom, 32)
+                    pricingRow
+                        .padding(.bottom, 16)
+
+                    if !dailyLimit.hasSharedToday {
+                        shareButton
+                            .padding(.bottom, 16)
+                    }
+
+                    restoreButton
+                }
+                .padding(.horizontal, 28)
+                .padding(.top, 76)
+                .padding(.bottom, 24)
             }
-            .padding(.horizontal, 28)
             .opacity(appeared ? 1 : 0)
             .offset(y: appeared ? 0 : 30)
+            .safeAreaInset(edge: .bottom) {
+                bottomCTASection
+            }
 
             // X dismiss button — static, not animated
             VStack {
@@ -71,13 +92,6 @@ struct PaywallView: View {
             }
             #endif
 
-            // Restore Purchases — static at the bottom, never animated
-            VStack {
-                Spacer()
-                restoreButton
-                    .padding(.bottom, 48)
-            }
-
             // Bonus toast — appears after a successful share
             if showBonusToast {
                 VStack {
@@ -92,7 +106,7 @@ struct PaywallView: View {
                                 .fill(Color(red: 0.2, green: 0.8, blue: 0.4).opacity(0.92))
                                 .shadow(color: .black.opacity(0.25), radius: 12, y: 4)
                         )
-                        .padding(.bottom, 110)
+                        .padding(.bottom, 160)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
@@ -129,7 +143,7 @@ struct PaywallView: View {
                 colors: [
                     Color(red: 0.04, green: 0.04, blue: 0.12),
                     Color(red: 0.08, green: 0.06, blue: 0.20),
-                    Color(red: 0.03, green: 0.02, blue: 0.10),
+                    bottomFadeColor,
                 ],
                 startPoint: .topLeading,
                 endPoint: .bottomTrailing
@@ -173,21 +187,23 @@ struct PaywallView: View {
                     )
 
                 Image(systemName: "crown.fill")
-                    .font(.system(size: 38, weight: .semibold))
+                    .font(.system(size: 32, weight: .semibold))
                     .foregroundStyle(.white)
             }
 
             VStack(spacing: 10) {
-                Text(String(localized: "paywall.title"))
+                Text(String(localized: headerVariant ? "paywall.title.a" : "paywall.title.b"))
                     .font(.system(size: 30, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
 
-                Text(String(format: String(localized: "paywall.subtitle"), dailyLimit.dailyLimit))
+                Text(String(localized: "paywall.subtitle"))
                     .font(.system(size: 16, weight: .regular, design: .rounded))
                     .foregroundStyle(.white.opacity(0.60))
                     .multilineTextAlignment(.center)
                     .lineSpacing(5)
+                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -229,43 +245,174 @@ struct PaywallView: View {
             Text(text)
                 .font(.system(size: 16, weight: .medium, design: .rounded))
                 .foregroundStyle(.white.opacity(0.88))
+                .fixedSize(horizontal: false, vertical: true)
 
             Spacer()
         }
     }
 
-    // MARK: - CTA
+    // MARK: - Pricing
 
-    private var ctaSection: some View {
+    private struct PricingCardView: View {
+        let tier: PremiumTier
+        let product: Product?
+        let isSelected: Bool
+        let isPurchasing: Bool
+        let onTap: () -> Void
+
+        var body: some View {
+            Button(action: onTap) {
+                VStack(spacing: 10) {
+                    if tier == .yearly {
+                        Text(String(localized: "paywall.tier.bestValue"))
+                            .font(.system(size: 12, weight: .bold, design: .rounded))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 5)
+                            .background(Capsule().fill(.black.opacity(0.25)))
+                            .foregroundStyle(
+                                isSelected
+                                    ? Color.black.opacity(0.75)
+                                    : Color(red: 1.0, green: 0.86, blue: 0.3)
+                            )
+                    }
+
+                    Text(tier.displayName)
+                        .font(.system(size: 17, weight: .semibold, design: .rounded))
+
+                    Text(product?.displayPrice ?? "—")
+                        .font(.system(size: 24, weight: .bold, design: .rounded))
+
+                    if tier == .yearly {
+                        Text(String(localized: "paywall.tier.savings"))
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                    }
+                }
+                .foregroundStyle(.white)
+                .frame(width: 148, height: 148)
+                .background(
+                    Group {
+                        if isSelected {
+                            Color.clear.premiumGoldBackground(cornerRadius: 20)
+                        } else {
+                            RoundedRectangle(cornerRadius: 20)
+                                .fill(.white.opacity(0.055))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 20)
+                                        .stroke(.white.opacity(0.10), lineWidth: 1)
+                                )
+                        }
+                    }
+                )
+                .animation(.spring(response: 0.35, dampingFraction: 0.8), value: isSelected)
+            }
+            .disabled(isPurchasing)
+        }
+    }
+
+    private var pricingRow: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                ForEach(PremiumTier.allCases) { tier in
+                    PricingCardView(
+                        tier: tier,
+                        product: premiumManager.products[tier],
+                        isSelected: selectedTier == tier,
+                        isPurchasing: premiumManager.isPurchasing,
+                        onTap: { selectedTier = tier }
+                    )
+                }
+            }
+            .padding(.horizontal, 28)
+            .scrollTargetLayout()
+        }
+        .scrollTargetBehavior(.viewAligned)
+        .scrollPosition(id: $scrollPosition, anchor: .center)
+        .padding(.horizontal, -28)
+        // Re-assert the centered position once layout has settled — the initial
+        // @State value alone doesn't reliably stick for a ScrollView nested inside
+        // another ScrollView inside a fullScreenCover. Content is still opacity 0
+        // at this point (see `appeared`), so the correction is invisible.
+        .task { scrollPosition = selectedTier.id }
+        .onChange(of: selectedTier) { _, newTier in
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
+                scrollPosition = newTier.id
+            }
+        }
+    }
+
+    // MARK: - Share
+
+    private var shareButton: some View {
+        Button {
+            showShareSheet = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "square.and.arrow.up")
+                    .font(.system(size: 15, weight: .semibold))
+                Text(String(localized: "paywall.share.button"))
+                    .font(.system(size: 16, weight: .semibold, design: .rounded))
+            }
+            .foregroundStyle(.white.opacity(0.80))
+            .frame(maxWidth: .infinity)
+            .frame(height: 50)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(.ultraThinMaterial.opacity(0.4))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 16)
+                            .stroke(.white.opacity(0.25), lineWidth: 1.25)
+                    )
+            )
+        }
+    }
+
+    // MARK: - Floating Bottom CTA
+
+    /// Dynamic label: falls back to the plain tier name while the product hasn't
+    /// resolved yet (card stays selectable, but the CTA can't show a price).
+    /// Recurring tiers show a per-period price ("$4.99/month"), not "total" —
+    /// only Lifetime is an actual one-time total charge.
+    private var ctaTitle: String {
+        guard let product = premiumManager.products[selectedTier] else {
+            return String(localized: selectedTier == .lifetime ? "paywall.cta.lifetime" : "paywall.cta.subscribe")
+        }
+        switch selectedTier {
+        case .monthly:
+            return String(format: String(localized: "paywall.cta.subscribe.monthly.withPrice"), product.displayPrice)
+        case .yearly:
+            return String(format: String(localized: "paywall.cta.subscribe.yearly.withPrice"), product.displayPrice)
+        case .lifetime:
+            return String(format: String(localized: "paywall.cta.lifetime.withPrice"), product.displayPrice)
+        }
+    }
+
+    private var bottomCTASection: some View {
         VStack(spacing: 10) {
-            if let product = premiumManager.product {
-                Text(product.displayPrice)
-                    .font(.system(size: 13, weight: .medium, design: .rounded))
-                    .foregroundStyle(.white.opacity(0.42))
+            if let error = premiumManager.errorMessage {
+                Text(error)
+                    .font(.system(size: 12, design: .rounded))
+                    .foregroundStyle(Color.swipeRed)
+                    .multilineTextAlignment(.center)
+            }
+
+            if selectedTier == .lifetime && premiumManager.hasActiveSubscription {
+                Text(String(localized: "paywall.tier.lifetime.doubleBillingNote"))
+                    .font(.system(size: 12, design: .rounded))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .multilineTextAlignment(.center)
             }
 
             Button {
-                Task { await premiumManager.purchase() }
+                guard let product = premiumManager.products[selectedTier] else { return }
+                Task { await premiumManager.purchase(product) }
             } label: {
                 ZStack {
                     RoundedRectangle(cornerRadius: 18)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 1.0, green: 0.86, blue: 0.3),
-                                    Color(red: 0.95, green: 0.63, blue: 0.10),
-                                    Color(red: 0.82, green: 0.50, blue: 0.02),
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
+                        .fill(Color.clear)
                         .frame(height: 58)
-                        .shadow(
-                            color: Color(red: 1.0, green: 0.75, blue: 0.15).opacity(0.55),
-                            radius: 22,
-                            y: 8
-                        )
+                        .premiumGoldBackground(cornerRadius: 18)
 
                     // Shimmer sweep
                     RoundedRectangle(cornerRadius: 18)
@@ -290,47 +437,31 @@ struct PaywallView: View {
                         HStack(spacing: 8) {
                             Image(systemName: "crown.fill")
                                 .font(.system(size: 16, weight: .semibold))
-                            Text(String(localized: "paywall.cta"))
-                                .font(.system(size: 19, weight: .bold, design: .rounded))
+                            Text(ctaTitle)
+                                .font(.system(size: 17, weight: .bold, design: .rounded))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
                         }
                         .foregroundStyle(.white)
+                        .padding(.horizontal, 12)
                     }
                 }
             }
-            .disabled(premiumManager.isPurchasing)
-
-            if !dailyLimit.hasSharedToday {
-                Button {
-                    showShareSheet = true
-                } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: "square.and.arrow.up")
-                            .font(.system(size: 15, weight: .semibold))
-                        Text(String(localized: "paywall.share.button"))
-                            .font(.system(size: 16, weight: .semibold, design: .rounded))
-                    }
-                    .foregroundStyle(.white.opacity(0.80))
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 50)
-                    .background(
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(.white.opacity(0.08))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 16)
-                                    .stroke(.white.opacity(0.15), lineWidth: 1)
-                            )
-                    )
-                }
-            }
-
-            if let error = premiumManager.errorMessage {
-                Text(error)
-                    .font(.system(size: 12, design: .rounded))
-                    .foregroundStyle(Color.swipeRed)
-                    .multilineTextAlignment(.center)
-                    .padding(.top, 4)
-            }
+            .disabled(premiumManager.isPurchasing || premiumManager.products[selectedTier] == nil)
         }
+        .padding(.horizontal, 28)
+        .padding(.top, 22)
+        .padding(.bottom, 14)
+        .background(
+            LinearGradient(
+                colors: [bottomFadeColor.opacity(0), bottomFadeColor.opacity(0.92), bottomFadeColor],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .padding(.top, -44)
+            .allowsHitTesting(false)
+        )
+        .opacity(appeared ? 1 : 0)
     }
 
     // MARK: - Restore

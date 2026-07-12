@@ -88,6 +88,8 @@ Swipy/
 │   │   ├── ReviewBinView.swift     # 3-column grid
 │   │   ├── ReviewGridItemView.swift
 │   │   └── FullScreenMediaView.swift
+│   ├── Paywall/
+│   │   └── PaywallView.swift       # 3-tier pricing (Monthly/Yearly/Lifetime), gold-glow selection, dynamic CTA
 │   └── Components/
 │       ├── SessionSavingsBarView.swift # Gamified top bar: MB progress + lava-star + GB milestone celebration
 │       ├── LifetimeSavingsView.swift
@@ -103,6 +105,8 @@ Swipy/
 │   ├── PhotoLibraryService.swift   # PHPhotoLibrary access + pagination
 │   ├── AestheticScoringService.swift # Builds UserAestheticPersona from Favorites; scores cards 1–10
 │   ├── PersistenceService.swift    # UserDefaults (kept IDs, bin IDs, space saved)
+│   ├── DailyLimitService.swift     # 120 free swipes/day + share bonus; gates PremiumManager paywall trigger
+│   ├── PremiumManager.swift        # StoreKit 2 — PremiumTier (monthly/yearly/lifetime), entitlement status
 │   ├── HapticService.swift         # UIImpactFeedbackGenerator wrapper
 │   ├── AudioSessionManager.swift   # AVAudioSession — muted video mixes with background audio
 │   ├── VideoPlayerPool.swift       # Singleton AVPlayer pool (max 3)
@@ -112,7 +116,7 @@ Swipy/
 │   └── ShareHUDManager.swift       # UIWindow at .alert+1 hosting ShareHUDView during share operations
 │
 ├── Extensions/
-│   ├── View+Extensions.swift       # cardShadow, onShake, color helpers
+│   ├── View+Extensions.swift       # cardShadow, onShake, color helpers, premiumGoldBackground (paywall gold gradient + glow)
 │   └── PHAsset+Extensions.swift    # fileSize, isScreenshot, isScreenRecording
 │
 └── Assets.xcassets/                # Icons, colors, images
@@ -303,6 +307,7 @@ This project uses **zero third-party packages** (no CocoaPods, SPM, Carthage). U
 - **Video safety**: Never delete a video from PHPhotoLibrary without first draining its AVPlayer from VideoPlayerPool — this prevents crashes.
 - **Notification quota**: Respect the 2/day cap. Check notification cap dates from `@AppStorage` before scheduling.
 - **Photos permission denied/restricted**: Never a dead end. `OnboardingView` swaps its CTA to a Settings deep link instead of re-prompting; `SwipeStackView` shows a dedicated `EmptyStateView.galleryAccessDenied` instead of `VictoryView` whenever `PHPhotoLibrary.authorizationStatus(for: .readWrite)` is `.denied`/`.restricted`. Both views observe `@Environment(\.scenePhase)` and silently re-check authorization on `.active` — if the user granted access from Settings, the app recovers automatically (advances onboarding / reloads the stack) with no extra tap.
+- **Paywall (3-tier)**: `PaywallView` is shown via `SwipeStackView`'s `.fullScreenCover(isPresented: $viewModel.shouldShowPaywall)` whenever a keep/delete swipe is attempted after `DailyLimitService.canSwipe(isPremium:)` returns false (120 free swipes/day + a one-time +50 share bonus). `PremiumManager` exposes exactly 3 fixed tiers via `PremiumTier` (`monthly`/`yearly`/`lifetime`, each with a hardcoded `productID`) and `products: [PremiumTier: Product]` — a tier missing from this dictionary means its `Product.products(for:)` fetch failed or hasn't resolved yet; its pricing card still renders (shows "—", stays tappable) but the CTA disables until it resolves. Monthly and Yearly share one subscription group (see `Swipy.storekit`) so StoreKit treats a tier switch between them as an upgrade/downgrade, not a second independent purchase; Lifetime is a separate non-consumable. `updatePremiumStatus()` branches explicitly on `transaction.productType` (`.autoRenewable` vs `.nonConsumable`) rather than inferring from a nil `expirationDate` — a non-consumable never has one, so an implicit fallback there is a latent correctness bug. The headline (`paywall.title.a`/`.b`) is chosen via a `Bool.random()` `@State` initial value, and the default-selected tier (`.yearly`) is likewise a plain `@State` initial value — both decided before `body` first renders so there's no post-layout flash. Pricing cards render in `pricingRow`, a horizontally-scrolling `ScrollView` (`.scrollTargetBehavior(.viewAligned)`, edge-to-edge via a negative-padding bleed) of fixed 148×148 `PricingCardView`s — the yearly card carries a "Popular" badge (`paywall.tier.bestValue`), truncation-proofed with `.lineLimit(1)`/`.minimumScaleFactor(0.7)`. `shareButton` and `restoreButton` both live in the main scrollable content below the pricing row (restore always renders; share only when `!dailyLimit.hasSharedToday`) — only the primary purchase CTA and its error/double-billing text stay pinned via `.safeAreaInset(edge: .bottom)`. Local StoreKit testing uses `Swipy.storekit` (repo root), wired into the scheme's `LaunchAction` via a path relative to the `.xcscheme` file itself — no ASC sandbox needed to test purchase/restore/crossgrade/expiry flows in the simulator.
 
 ---
 

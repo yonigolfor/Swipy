@@ -1,15 +1,36 @@
 import StoreKit
 import SwiftUI
 
+enum PremiumTier: String, CaseIterable, Identifiable {
+    case monthly, yearly, lifetime
+    var id: String { rawValue }
+
+    // Set these product IDs in App Store Connect: Monthly/Yearly as Auto-Renewable
+    // Subscriptions in the same subscription group, Lifetime as a Non-Consumable.
+    var productID: String {
+        switch self {
+        case .monthly:  return "com.yonigolfor.Swipy.monthlySubscription"
+        case .yearly:   return "com.yonigolfor.Swipy.yearlySubscription"
+        case .lifetime: return "com.yonigolfor.Swipy.lifetimePurchase"
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .monthly:  return String(localized: "paywall.tier.monthly")
+        case .yearly:   return String(localized: "paywall.tier.yearly")
+        case .lifetime: return String(localized: "paywall.tier.lifetime")
+        }
+    }
+}
+
 @MainActor
 class PremiumManager: ObservableObject {
     static let shared = PremiumManager()
 
-    // Set this product ID in App Store Connect as a Non-Consumable or Auto-Renewable Subscription.
-    static let productID = "com.yonigolfor.Swipy.monthlySubscription"
-
     @Published private(set) var isPremium: Bool = false
-    @Published private(set) var product: Product? = nil
+    @Published private(set) var hasActiveSubscription: Bool = false
+    @Published private(set) var products: [PremiumTier: Product] = [:]
     @Published private(set) var isPurchasing: Bool = false
     @Published private(set) var errorMessage: String? = nil
 
@@ -18,7 +39,7 @@ class PremiumManager: ObservableObject {
     private init() {
         transactionListener = listenForTransactions()
         Task {
-            await loadProduct()
+            await loadProducts()
             await updatePremiumStatus()
         }
     }
@@ -27,17 +48,22 @@ class PremiumManager: ObservableObject {
         transactionListener?.cancel()
     }
 
-    func loadProduct() async {
+    func loadProducts() async {
         do {
-            let fetched = try await Product.products(for: [PremiumManager.productID])
-            product = fetched.first
+            let fetched = try await Product.products(for: PremiumTier.allCases.map(\.productID))
+            products = Dictionary(uniqueKeysWithValues: fetched.compactMap { product in
+                PremiumTier.allCases.first { $0.productID == product.id }.map { ($0, product) }
+            })
+            let missing = PremiumTier.allCases.filter { products[$0] == nil }
+            if !missing.isEmpty {
+                print("[PremiumManager] No StoreKit product resolved for: \(missing.map(\.productID))")
+            }
         } catch {
-            print("[PremiumManager] Failed to load product: \(error)")
+            print("[PremiumManager] Failed to load products: \(error)")
         }
     }
 
-    func purchase() async {
-        guard let product else { return }
+    func purchase(_ product: Product) async {
         isPurchasing = true
         errorMessage = nil
         defer { isPurchasing = false }
@@ -71,17 +97,28 @@ class PremiumManager: ObservableObject {
     }
 
     private func updatePremiumStatus() async {
+        let tierProductIDs = Set(PremiumTier.allCases.map(\.productID))
         var hasPremium = false
+        var hasSubscription = false
         for await result in Transaction.currentEntitlements {
-            if case .verified(let transaction) = result,
-               transaction.productID == PremiumManager.productID,
-               transaction.revocationDate == nil,
-               transaction.expirationDate.map({ $0 > Date() }) ?? true {
+            guard case .verified(let transaction) = result,
+                  tierProductIDs.contains(transaction.productID),
+                  transaction.revocationDate == nil else { continue }
+
+            switch transaction.productType {
+            case .autoRenewable:
+                if let expirationDate = transaction.expirationDate, expirationDate > Date() {
+                    hasPremium = true
+                    hasSubscription = true
+                }
+            case .nonConsumable:
                 hasPremium = true
-                break
+            default:
+                print("[PremiumManager] Unexpected productType \(transaction.productType) for known product \(transaction.productID)")
             }
         }
         isPremium = hasPremium
+        hasActiveSubscription = hasSubscription
     }
 
     private func listenForTransactions() -> Task<Void, Error> {

@@ -1626,19 +1626,87 @@
         }
       }
     },
-    "paywall.cta" : {
+    "paywall.cta.lifetime" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Go Premium"
+            "value" : "Unlock Lifetime Access"
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "עבור לפרימיום"
+            "value" : "קבל גישה לכל החיים"
+          }
+        }
+      }
+    },
+    "paywall.cta.lifetime.withPrice" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unlock Lifetime Access — %@ total"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "קבל גישה לכל החיים — %@ סך הכל"
+          }
+        }
+      }
+    },
+    "paywall.cta.subscribe" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subscribe Now"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "הירשם עכשיו"
+          }
+        }
+      }
+    },
+    "paywall.cta.subscribe.monthly.withPrice" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subscribe Now — %@/month"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "הירשם עכשיו — %@ לחודש"
+          }
+        }
+      }
+    },
+    "paywall.cta.subscribe.yearly.withPrice" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Subscribe Now — %@/year"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "הירשם עכשיו — %@ לשנה"
           }
         }
       }
@@ -1717,30 +1785,149 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "You've used all %lld free swipes for today.\nUpgrade once — swipe forever, every day."
+            "value" : "You've used all your free swipes for today.\nUpgrade once — swipe forever, every day."
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "השתמשת בכל %lld ההחלקות החינמיות של היום.\nשדרג פעם אחת — החלק לנצח, כל יום."
+            "value" : "השתמשת בכל ההחלקות החינמיות של היום.\nשדרג פעם אחת — החלק לנצח, כל יום."
           }
         }
       }
     },
-    "paywall.title" : {
+    "paywall.tier.bestValue" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Unlock Unlimited Swipes"
+            "value" : "Popular"
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "החלקות ללא הגבלה"
+            "value" : "פופולרי"
+          }
+        }
+      }
+    },
+    "paywall.tier.lifetime" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lifetime"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "לכל החיים"
+          }
+        }
+      }
+    },
+    "paywall.tier.lifetime.doubleBillingNote" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "You already have an active subscription — consider canceling it after purchasing Lifetime to avoid double billing."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "כבר יש לך מנוי פעיל — מומלץ לבטל אותו לאחר רכישת \"לכל החיים\" כדי למנוע חיוב כפול."
+          }
+        }
+      }
+    },
+    "paywall.tier.monthly" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Monthly"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "חודשי"
+          }
+        }
+      }
+    },
+    "paywall.tier.savings" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Save 65%"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "חיסכון של 65%"
+          }
+        }
+      }
+    },
+    "paywall.tier.yearly" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Yearly"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "שנתי"
+          }
+        }
+      }
+    },
+    "paywall.title.a" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Don't Stop Now!"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "אל תעצרו עכשיו!"
+          }
+        }
+      }
+    },
+    "paywall.title.b" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep the Momentum Going!"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "שמרו על המומנטום!"
           }
         }
       }

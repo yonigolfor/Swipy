@@ -1,24 +1,70 @@
 {
   "identifier" : "4A2E5F1B-8C3D-4A9E-B7F2-1D6E8C0A5B3F",
-  "autoRenewableSubscriptions" : [
+  "nonConsumables" : [
     {
+      "displayPrice" : "29.99",
       "familyShareable" : false,
-      "groupID" : "C1D2E3F4-A5B6-7890-CDEF-123456789ABC",
-      "internalID" : "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+      "internalID" : "B2C3D4E5-F6A7-4890-BCDE-F12345678901",
       "localizations" : [
         {
-          "description" : "Unlock unlimited swipes every day. Support independent development.",
-          "displayName" : "Swipy Premium",
+          "description" : "One-time purchase. Unlimited swipes, forever.",
+          "displayName" : "Swipy Lifetime",
           "locale" : "en_US"
         }
       ],
-      "productID" : "com.swipy.premium.unlimited",
-      "recurringSubscriptionPeriod" : "P1M",
-      "referenceName" : "Swipy Premium Monthly",
-      "subscriptionGroupReferenceName" : "Swipy Premium",
-      "introductoryOffer" : null,
-      "displayPrice" : "4.99",
-      "type" : "RecurringSubscription"
+      "productID" : "com.yonigolfor.Swipy.lifetimePurchase",
+      "referenceName" : "Swipy Lifetime"
+    }
+  ],
+  "subscriptionGroups" : [
+    {
+      "id" : "C1D2E3F4-A5B6-7890-CDEF-123456789ABC",
+      "localizations" : [],
+      "name" : "Swipy Premium",
+      "subscriptions" : [
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "4.99",
+          "familyShareable" : false,
+          "groupNumber" : 1,
+          "internalID" : "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Unlock unlimited swipes every day. Support independent development.",
+              "displayName" : "Swipy Premium Monthly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.yonigolfor.Swipy.monthlySubscription",
+          "recurringSubscriptionPeriod" : "P1M",
+          "referenceName" : "Swipy Premium Monthly",
+          "subscriptionGroupID" : "C1D2E3F4-A5B6-7890-CDEF-123456789ABC",
+          "winbackOffers" : []
+        },
+        {
+          "adHocOffers" : [],
+          "codeOffers" : [],
+          "displayPrice" : "19.99",
+          "familyShareable" : false,
+          "groupNumber" : 2,
+          "internalID" : "D4E5F6A7-B8C9-4012-DEFA-234567890123",
+          "introductoryOffer" : null,
+          "localizations" : [
+            {
+              "description" : "Unlock unlimited swipes every day. Best value — save vs. monthly.",
+              "displayName" : "Swipy Premium Yearly",
+              "locale" : "en_US"
+            }
+          ],
+          "productID" : "com.yonigolfor.Swipy.yearlySubscription",
+          "recurringSubscriptionPeriod" : "P1Y",
+          "referenceName" : "Swipy Premium Yearly",
+          "subscriptionGroupID" : "C1D2E3F4-A5B6-7890-CDEF-123456789ABC",
+          "winbackOffers" : []
+        }
+      ]
     }
   ],
   "version" : {
