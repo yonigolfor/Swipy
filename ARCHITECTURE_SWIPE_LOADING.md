@@ -329,25 +329,41 @@ DragGesture.onChanged (offset > 30pt — פעם אחת)
 
 DragGesture.onEnded (swipe מושלם)
   → swipedItem = viewModel.topCard   ← נתפס מיד, לפני האנימציה/העיכוב
+  → viewModel.beginSwipe(swipedItem, action)   ← סינכרוני, ראה "Pending Swipe" למטה
   → animate card off-screen (±500pt, 0.4s spring)
   → DispatchQueue.main.asyncAfter(0.3s):
-      ├── viewModel.performAction(action, for: swipedItem)
-      │     ├── lastSwipedImage = imageCache[swipedItem.id]   ← שומר לundo
-      │     ├── photoStack.remove(at: index of swipedItem.id) ← לא removeFirst()!
-      │     │     (מוצא לפי id, לא לפי מיקום — ראה הערה למטה)
-      │     ├── processedAssetIDs.insert(id)
-      │     ├── precacheNextImages()                  ← cache + pool + eviction
-      │     └── loadNextPageIfNeeded()                ← אם stack ≤ 15
-      └── dragOffset = .zero
+      ├── viewModel.finalizeSwipe(swipedItem, action)  ← false אם בוטל תוך כדי טיסה, ראה למטה
+      │     └── (אם true) performAction → keepPhoto/deletePhoto/snoozePhoto:
+      │           ├── lastSwipedImage = imageCache[swipedItem.id]   ← שומר לundo
+      │           ├── photoStack.remove(at: index of swipedItem.id) ← לא removeFirst()!
+      │           │     (מוצא לפי id, לא לפי מיקום — ראה הערה למטה)
+      │           ├── processedAssetIDs.insert(id)
+      │           ├── precacheNextImages()                  ← cache + pool + eviction
+      │           └── loadNextPageIfNeeded()                ← אם stack ≤ 15
+      └── (אם finalizeSwipe החזיר true) dragOffset = .zero
 ```
 
 **קריטי — race עם undo:** `swipedItem` נתפס ב-`onEnded` (סינכרוני), *לפני* ה-0.3s delay,
-ומועבר במפורש ל-`performAction`. `keepPhoto`/`deletePhoto`/`snoozePhoto` מסירים אותו לפי
-**התאמת `id`**, לא `photoStack.first`/`removeFirst()`. הסיבה: אם המשתמש מנער לביטול
+ומועבר במפורש ל-`beginSwipe`/`finalizeSwipe`. `keepPhoto`/`deletePhoto`/`snoozePhoto` מסירים
+אותו לפי **התאמת `id`**, לא `photoStack.first`/`removeFirst()`. הסיבה: אם המשתמש מנער לביטול
 (undo) בדיוק בתוך אותם 0.3 שניות — `undoLastAction()` עלול להכניס פריט קודם בחזרה
 לראש הערימה (`insert(at: 0)`) *לפני* שהעיכוב הזה מסתיים. בלי הקישור המפורש ל-item,
 הפעולה הממתינה הייתה נופלת על מי שנמצא כרגע בראש (הפריט שהוחזר ע"י undo) במקום על
 הקלף שבאמת swipe-קו.
+
+**Pending Swipe — סגירת חלון המירוץ עם ה-Undo button/shake (300ms):**
+`lastAction`/`canUndo` היו מתעדכנים רק בתוך `keepPhoto`/`deletePhoto`/`snoozePhoto` —
+כלומר רק אחרי ה-0.3s delay. במשך אותם 300ms, אם המשתמש לחץ Undo או ניער — הפעולה
+הייתה מכוונת עדיין לswipe ה*קודם*, לא לזה שכרגע רואים עף מהמסך; והswipe החדש היה
+ממשיך ומתבצע במלואו (הפריט עדיין נמחק/נשמר) בלי שהמשתמש שם לב.
+התיקון: `beginSwipe(item, action)` נקרא **סינכרונית** ב-`onEnded`, לפני ה-delay —
+מסמן `pendingSwipe`/`pendingSwipeIDs` ומעדכן `lastAction` (וכך `canUndo`) מיידית.
+`undoLastAction()` בודק `pendingSwipe` ראשון: אם הswipe עדיין pending, שום דבר לא
+מוטט עדיין (הפריט מעולם לא הוסר מ-`photoStack`) — הביטול הוא רק ניקוי הflag,
+בלי `insert(at:)` ובלי שחזור cache. ה-`finalizeSwipe` שקורה 0.3s לאחר מכן בודק אם
+ה-id עדיין ב-`pendingSwipeIDs` — אם לא (בוטל), הוא no-op ומחזיר `false`, וה-View
+מדלג על איפוס `dragOffset`/הצגת particle explosion/ספירת shake-hint, כדי לא לפגוע
+באנימציית הנחיתה של ה-undo שכבר רצה.
 ```
 
 DragGesture.onEnded (swipe בוטל — חזר למרכז)

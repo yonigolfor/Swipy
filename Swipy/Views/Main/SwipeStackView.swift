@@ -1029,7 +1029,12 @@ struct SwipeStackView: View {
                         }
                     }
 
-                    // Perform action after exit-animation completes.
+                    // Mark the swipe pending *now*, synchronously — makes canUndo/lastAction
+                    // point at this card immediately instead of the previous one, so a shake
+                    // or Undo tap during the exit-fly below can never restore the wrong photo.
+                    viewModel.beginSwipe(swipedItem, action: action)
+
+                    // Perform the actual removal after exit-animation completes.
                     // Crucially we reset dragOffset WITHOUT animation so the
                     // incoming card never inherits the ±500 offset and slides in.
                     NotificationCenter.default.post(name: .stopCurrentVideo, object: nil)
@@ -1037,7 +1042,10 @@ struct SwipeStackView: View {
                         // swipedItem was captured at gesture-end, not re-read here — the
                         // stack's front can change in the meantime (e.g. shake-to-undo),
                         // so the action must stay bound to the exact card the user swiped.
-                        viewModel.performAction(action, for: swipedItem)
+                        // finalizeSwipe no-ops (returns false) if the user already undid this
+                        // exact swipe mid-flight — in that case dragOffset/dragRotation now
+                        // belong to the undo's own landing spring and must not be touched.
+                        guard viewModel.finalizeSwipe(swipedItem, action: action) else { return }
                         dragOffset = .zero
                         dragRotation = 0
 

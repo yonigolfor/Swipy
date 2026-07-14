@@ -153,6 +153,18 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     }
     /// Drives the Undo button's enabled/disabled + dimmed appearance.
     @Published private(set) var canUndo = false
+    /// The most recent swipe whose exit animation has started but whose removal
+    /// (keepPhoto/deletePhoto/snoozePhoto) hasn't run yet — SwipeStackView defers that
+    /// ~300ms so the card can fly off-screen first. Without this, `lastAction`/`canUndo`
+    /// would still point at the *previous* swipe during that window, so tapping Undo (or
+    /// shaking) right after a swipe would restore the wrong photo while the one just
+    /// swiped silently continues on to keep/delete. `beginSwipe` sets this (and
+    /// `lastAction`) synchronously at gesture-end so Undo always targets the right item.
+    private var pendingSwipe: (item: PhotoItem, action: SwipeAction)?
+    /// IDs with a swipe pending finalize. A set (not just `pendingSwipe`) so a second
+    /// swipe started before the first one's finalize fires doesn't orphan the first —
+    /// each finalizes independently by id; only the most recent is undoable.
+    private var pendingSwipeIDs: Set<String> = []
     /// Holds the cached image of the last swiped item so undo (shake) can
     /// restore it to the top card without a reload flash.
     private var lastSwipedImage: UIImage?
@@ -962,6 +974,8 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// stack context it no longer belongs to.
     private func invalidatePendingUndo() {
         lastAction = nil
+        pendingSwipe = nil
+        pendingSwipeIDs.removeAll()
     }
 
     /// Undo — restores the last deleted photo back to the top of the stack.
@@ -969,6 +983,15 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// re-entry animation (e.g. a `.keep` undo re-enters from the right).
     @discardableResult
     func undoLastAction() -> SwipeAction? {
+        // Swipe is still mid-exit-animation — nothing has been mutated yet (the item
+        // never left photoStack), so undoing it is just cancelling the pending finalize.
+        if let pending = pendingSwipe, pendingSwipeIDs.contains(pending.item.id) {
+            pendingSwipeIDs.remove(pending.item.id)
+            pendingSwipe = nil
+            lastAction = nil
+            hapticService.undo()
+            return pending.action
+        }
         guard let last = lastAction else { return nil }
         lastAction = nil
         let item = last.item
@@ -1059,6 +1082,28 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         case .snooze: snoozePhoto(item)
         case .undo:   undoLastAction()
         }
+    }
+
+    /// Marks `item` as the pending outcome of a swipe gesture — called synchronously by
+    /// SwipeStackView at gesture-end, before the exit-fly animation's ~300ms delay. This
+    /// makes `canUndo`/`lastAction` point at the just-swiped card immediately instead of
+    /// the previous one — see `pendingSwipe`'s doc comment for the race this closes.
+    func beginSwipe(_ item: PhotoItem, action: SwipeAction) {
+        pendingSwipe = (item, action)
+        pendingSwipeIDs.insert(item.id)
+        lastAction = (item, action)
+    }
+
+    /// Performs the deferred removal for a swipe marked via `beginSwipe`, once its exit
+    /// animation has finished. Returns `false` (no-op) if the swipe was undone in the
+    /// meantime — the caller must not touch shared drag state in that case, since it may
+    /// now belong to a different card (the undo's own landing animation, or a newer swipe).
+    /// The only caller (SwipeStackView) always checks this, so no `@discardableResult`.
+    func finalizeSwipe(_ item: PhotoItem, action: SwipeAction) -> Bool {
+        guard pendingSwipeIDs.remove(item.id) != nil else { return false }
+        if pendingSwipe?.item.id == item.id { pendingSwipe = nil }
+        performAction(action, for: item)
+        return true
     }
 
     // MARK: - Offline Mode
