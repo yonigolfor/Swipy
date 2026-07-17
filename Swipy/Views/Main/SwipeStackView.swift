@@ -412,7 +412,13 @@ struct SwipeStackView: View {
         } label: {
             Image(systemName: "shuffle")
                 .font(.system(size: 19, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundStyle(
+                    viewModel.isShuffleModeActive
+                        ? AnyShapeStyle(LinearGradient(
+                            colors: [.shuffleAccentStart, .shuffleAccentEnd],
+                            startPoint: .topLeading, endPoint: .bottomTrailing))
+                        : AnyShapeStyle(Color.white)
+                )
                 .frame(width: 44, height: 44)
                 .rotationEffect(viewModel.isShuffleModeActive ? .degrees(180) : .zero)
                 .animation(.spring(response: 0.4, dampingFraction: 0.65), value: viewModel.isShuffleModeActive)
@@ -447,17 +453,17 @@ struct SwipeStackView: View {
         }
         .padding(6)
         .background(
+            // Glass stays translucent in both states — even while active — so the
+            // capsule never blocks the card content underneath it. "On" is
+            // communicated by the animated border + tinted icon only, since the
+            // top shuffleBadge already spells out the active state in text.
             Capsule()
                 .fill(.ultraThinMaterial)
                 .overlay(
                     Capsule().fill(
-                        viewModel.isShuffleModeActive
-                            ? LinearGradient(
-                                colors: [.shuffleAccentStart, .shuffleAccentEnd],
-                                startPoint: .topLeading, endPoint: .bottomTrailing)
-                            : LinearGradient(
-                                colors: [Color.white.opacity(0.2), Color.white.opacity(0.05)],
-                                startPoint: .topLeading, endPoint: .bottomTrailing)
+                        LinearGradient(
+                            colors: [Color.white.opacity(0.2), Color.white.opacity(0.05)],
+                            startPoint: .topLeading, endPoint: .bottomTrailing)
                     )
                 )
                 .overlay(
