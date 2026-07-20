@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — Swipy</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="brand">
+    <div class="mark">S</div>
+    <div class="name">Swipy</div>
+  </div>
+
+  <div class="nav">
+    <a href="privacy-policy.html">Privacy Policy</a>
+    <a href="terms-of-use.html">Terms of Use</a>
+  </div>
+
+  <h1>Privacy Policy</h1>
+  <p class="updated">Last updated: July 20, 2026</p>
+
+  <div class="card">
+    <p><strong>The short version:</strong> Swipy does not have a server. Your photos and videos are never uploaded, transmitted, or shared with anyone — everything the app does happens entirely on your iPhone.</p>
+  </div>
+
+  <h2>What Swipy accesses</h2>
+  <p>Swipy requests access to your Photos library so it can display your photos and videos for you to sort, and to delete or organize the ones you choose. This access is used exclusively for that purpose, on your device, in real time. Swipy has no backend server and no database of its own — it never sends your photos, videos, or any metadata about them anywhere.</p>
+
+  <h2>What Swipy stores, and where</h2>
+  <p>Swipy keeps a small amount of app state — such as which items you've reviewed, your Review Bin contents, and how much storage you've freed — in your device's local storage (<code>UserDefaults</code>). This data:</p>
+  <ul>
+    <li>Never leaves your device</li>
+    <li>Is not readable by us or by any third party</li>
+    <li>Is deleted automatically if you uninstall the app</li>
+  </ul>
+
+  <h2>Notifications</h2>
+  <p>Swipy may schedule local notifications (for example, to remind you about items waiting in your Review Bin). These are generated and delivered entirely on-device via Apple's notification system — Swipy does not use a push notification server and cannot send you anything remotely.</p>
+
+  <h2>Purchases</h2>
+  <p>Subscriptions and one-time purchases are handled entirely by Apple through StoreKit. Swipy never sees or stores your payment details — that information belongs to your Apple ID account and is governed by Apple's own privacy practices.</p>
+
+  <h2>Analytics, ads, and tracking</h2>
+  <p>Swipy does not use third-party analytics SDKs, advertising networks, or tracking libraries of any kind. There are no cookies, no device fingerprinting, and no data shared with advertisers.</p>
+
+  <h2>Third parties</h2>
+  <p>Swipy is built exclusively with Apple's own frameworks and does not integrate any third-party services. No data is shared with any external company.</p>
+
+  <h2>Children's privacy</h2>
+  <p>Swipy is not directed at children under 13 and does not knowingly collect any information from children, on-device or otherwise.</p>
+
+  <h2>Your control over your data</h2>
+  <p>Because everything Swipy stores lives only on your device, you are always in full control of it. You can revoke Photos access at any time in iOS Settings, and uninstalling the app permanently removes all app data associated with it.</p>
+
+  <h2>Changes to this policy</h2>
+  <p>If this policy changes, the update will be posted on this page with a revised "Last updated" date.</p>
+
+  <h2>Contact</h2>
+  <p>Questions about this policy can be sent to <a id="contact-email" href="#">this address</a>.</p>
+
+  <footer>
+    © 2026 Yoni Golfor. Swipy — Declutter your memories.
+  </footer>
+</div>
+
+<script>
+  (function () {
+    var user = "yonigolfor", domain = "gmail.com";
+    var el = document.getElementById("contact-email");
+    if (el) {
+      el.href = "mailto:" + user + "@" + domain;
+      el.textContent = user + "@" + domain;
+    }
+  })();
+</script>
+</body>
+</html>
