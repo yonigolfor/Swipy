@@ -158,10 +158,23 @@ class NotificationManager {
 
     // MARK: - Weekly Cleanup
 
-    func scheduleWeeklyCleanup() {
+    /// Cancel any pending weekly cleanup notification and arm a fresh one, picking a
+    /// random message from the pool each time. Stays `repeats: true` — Sunday 21:30 keeps
+    /// firing forever with whatever content was set at the last reschedule, so a lapsed
+    /// user who stops opening the app still gets it every week (same OS-level guarantee
+    /// as before). Calling this on every foreground (see
+    /// `NotificationScheduler.rescheduleWeeklyCleanup()`) just swaps in fresh copy for
+    /// users who are actually around to see the variety; it is not what keeps the
+    /// notification alive.
+    func rescheduleWeeklyCleanup() {
         let content = UNMutableNotificationContent()
-        content.title = String(localized: "notif.weekly.title")
-        content.body = String(localized: "notif.weekly.body")
+        if Bool.random() {
+            content.title = String(localized: "notif.weekly.title.a")
+            content.body = String(localized: "notif.weekly.body.a")
+        } else {
+            content.title = String(localized: "notif.weekly.title.b")
+            content.body = String(localized: "notif.weekly.body.b")
+        }
         content.categoryIdentifier = Self.weeklyCategory
         content.sound = .default
         content.userInfo = ["destination": "swipe"]

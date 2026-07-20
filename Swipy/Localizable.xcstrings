@@ -924,36 +924,70 @@
         }
       }
     },
-    "notif.weekly.body" : {
+    "notif.weekly.body.a" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "The weekend is the perfect time to declutter your gallery and free up space."
+            "value" : "Time for a fresh sweep — give your gallery (and your phone) room to breathe! 🌿"
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "סוף השבוע — זמן מושלם לנקות את הגלריה ולפנות מקום."
+            "value" : "זה זמן מושלם לנקות את הגלריה ושהמכשיר ינשום לרווחה! 🌿"
           }
         }
       }
     },
-    "notif.weekly.title" : {
+    "notif.weekly.title.a" : {
       "extractionState" : "manual",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Sunday Clean-Up 🧹"
+            "value" : "🧹🧹🧹🧹🧹🧹🧹🧹"
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "ניקיון יום ראשון 🧹"
+            "value" : "🧹🧹🧹🧹🧹🧹🧹🧹"
+          }
+        }
+      }
+    },
+    "notif.weekly.body.b" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "How many gigs can we free up this week? Let's tidy up."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "כמה ג'יגה-בייט נשחרר השבוע? כנס לעשות קצת סדר."
+          }
+        }
+      }
+    },
+    "notif.weekly.title.b" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Your iPhone will thank you 📲"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "האייפון שלך יודה לך 📲"
           }
         }
       }

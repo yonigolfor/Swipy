@@ -18,6 +18,7 @@ struct SwipyApp: App {
                 NotificationScheduler.shared.resetBurstBaseline()
                 NotificationScheduler.shared.evaluateAndScheduleNotifications()
                 NotificationScheduler.shared.rescheduleInactivityReminder()
+                NotificationScheduler.shared.rescheduleWeeklyCleanup()
             }
         }
     }

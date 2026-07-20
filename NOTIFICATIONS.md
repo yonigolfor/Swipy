@@ -110,11 +110,18 @@ checkPhotoBurstTrigger()
 ### 5. ניקוי שבועי
 **מתי:** כל יום ראשון בערב בשעה 21:30.
 
-**מנגנון:** `UNCalendarNotificationTrigger` עם `repeats: true` — **מובטח לחלוטין**, לא תלוי ב-background task.
+**תוכן דינמי — pool אקראי:** בכל תזמון נבחר אקראית (`Bool.random()`) אחד משני מסרים כדי שהמשתמש לא ישעמם מאותו טקסט כל שבוע:
 
-**מתוזמן פעם אחת בלבד** (guard ב-UserDefaults, מפתח `weeklyCleanupScheduledV2`) ואז חוזר על עצמו אוטומטית.
+| וריאנט | כותרת | תוכן |
+|---|---|---|
+| a | 🧹🧹🧹🧹🧹🧹🧹🧹 | "זה זמן מושלם לנקות את הגלריה ושהמכשיר ינשום לרווחה! 🌿" |
+| b | "האייפון שלך יודה לך 📲" | "כמה ג'יגה-בייט נשחרר השבוע? כנס לעשות קצת סדר." |
 
-> **שינוי V2:** שינוי ממפתח `weeklyCleanupScheduledV2` מאפשר reschedule חד-פעמי למשתמשים קיימים (ביטול שבת 19:00 → ראשון 21:30).
+הועדף נוסח ניטרלי-עונתי (לא "סוף שבוע") כי יום ראשון הוא תחילת שבוע העבודה בישראל, לא סופו — ולכן אינו מתאים לזירת "weekend" גלובלית.
+
+**מנגנון:** `UNCalendarNotificationTrigger` עם `repeats: true` — **נשאר מובטח לחלוטין ע"י ה-OS**, בדיוק כמו קודם. משתמש שלא פותח יותר את האפליקציה עדיין מקבל את הנוטיפיקציה כל יום ראשון לנצח, עם הטקסט שנבחר בפעם האחרונה שתוזמן.
+
+**מתוזמן מחדש בכל כניסה לפורגראונד** (`rescheduleWeeklyCleanup()`, נקרא מ-`scenePhase == .active` ב-`SwipyApp.swift`, באותו מקום כמו תזכורת האי-פעילות) — אותו מזהה (`weeklyNotif`) → iOS מחליף אטומית טריגר `repeats: true` ישן בחדש. חשוב: ה-reschedule **לא** מה שמבטיח שהנוטיפיקציה תמשיך להישלח — זה תפקידו של `repeats: true` עצמו. ה-reschedule רק מחליף את התוכן במסר אקראי טרי, עבור משתמשים שבפועל פותחים את האפליקציה מספיק כדי ליהנות מהגיוון. משתמש שלא חוזר יותר פשוט ימשיך לקבל את המסר האחרון שנבחר עבורו, כל שבוע, ללא הפסקה.
 
 ---
 
@@ -183,7 +190,6 @@ AppDelegate.didFinishLaunching
 
 ContentView.onAppear   ← נחיתה במסך הראשי, אחרי onboarding (או משתמש חוזר)
     └── requestAuthorization { granted in
-            ├── scheduleWeeklyCleanupIfNeeded()
             ├── scheduleBackgroundTask()
             └── evaluateAndScheduleNotifications()
                     ├── checkReviewBinTrigger()
@@ -192,7 +198,9 @@ ContentView.onAppear   ← נחיתה במסך הראשי, אחרי onboarding (
 
 scenePhase → .active
     ├── resetBurstBaseline()
-    └── evaluateAndScheduleNotifications()
+    ├── evaluateAndScheduleNotifications()
+    ├── rescheduleInactivityReminder()
+    └── rescheduleWeeklyCleanup()
 ```
 
 **למה לא ב-`didFinishLaunching`:** לבקש הרשאת התראות בהפעלה קרה ראשונה — לפני שהמשתמש בכלל ראה את onboarding — סותר את ה-HIG של Apple (לבקש הרשאה בהקשר, אחרי שהערך של האפליקציה כבר הודגם). `requestAuthorization` הוא idempotent — אם המשתמש כבר החליט (אישר/דחה), iOS לא מציג דיאלוג נוסף, כך שקריאה מ-`ContentView.onAppear` בטוחה גם למשתמשים חוזרים בכל הפעלה.

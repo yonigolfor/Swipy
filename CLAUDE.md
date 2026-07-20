@@ -255,7 +255,7 @@ Views show a shimmer/loading indicator while Phase 2 is in progress. Never block
 - `reviewBinSpaceSaved` / `totalSpaceSavedLifetime` — space saved in bytes
 - `snoozedPhotos` — `[localIdentifier: snoozeCount]`, drives exponential backoff on re-injection
 
-Notification scheduling caps at **2 notifications/day**. The 4 trigger types are: review bin reminder (24h), photo burst (50+ new photos), milestone (per GB freed), weekly cleanup.
+Notification scheduling caps at **2 notifications/day**. The 6 trigger types are: review bin reminder (24h), photo burst (50+ new photos), milestone (per GB freed), swipe-limit reset (00:01 after daily quota exhausted), weekly cleanup (Sunday 21:30, `repeats: true` — stays OS-guaranteed for lapsed users; `rescheduleWeeklyCleanup()` re-arms it on every foreground purely to swap in a fresh random variant from a 2-message pool for users who are actually opening the app), and an inactivity reminder (72h since last foreground). Swipe-limit reset and inactivity reminder don't count against the daily cap — see `NOTIFICATIONS.md` for full details.
 
 ---
 

@@ -216,14 +216,16 @@ class NotificationScheduler {
         }
     }
 
-    // MARK: - Weekly cleanup (called once; trigger repeats automatically)
+    // MARK: - Weekly cleanup
 
-    func scheduleWeeklyCleanupIfNeeded() {
-        // V2 key forces reschedule for existing users who had the old Saturday 19:00 trigger.
-        let key = "weeklyCleanupScheduledV2"
-        guard !UserDefaults.standard.bool(forKey: key) else { return }
-        manager.scheduleWeeklyCleanup()
-        UserDefaults.standard.set(true, forKey: key)
+    /// Cancel any pending weekly cleanup notification and arm a new `repeats: true`
+    /// Sunday 21:30 trigger with a freshly randomized message. Called on every foreground
+    /// — same pattern as `rescheduleInactivityReminder()` — purely to rotate the copy for
+    /// users who are actively opening the app; a lapsed user who never reschedules still
+    /// gets the notification every Sunday forever with whatever text was set last, since
+    /// the trigger itself stays `repeats: true`.
+    func rescheduleWeeklyCleanup() {
+        manager.rescheduleWeeklyCleanup()
     }
 
     /// Cancel any pending inactivity notification and arm a new 72-hour one.

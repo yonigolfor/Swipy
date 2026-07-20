@@ -67,7 +67,6 @@ struct ContentView: View {
     private func requestNotificationAuthorizationIfNeeded() {
         NotificationManager.shared.requestAuthorization { granted in
             guard granted else { return }
-            NotificationScheduler.shared.scheduleWeeklyCleanupIfNeeded()
             NotificationScheduler.shared.scheduleBackgroundTask()
             NotificationScheduler.shared.evaluateAndScheduleNotifications()
         }
