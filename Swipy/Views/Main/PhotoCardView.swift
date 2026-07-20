@@ -20,7 +20,7 @@ extension Notification.Name {
 struct PhotoCardView: View {
     let item: PhotoItem
     let isTopCard: Bool
-    static var globalMute = false
+    static var globalMute = true
 
     @State private var image: UIImage?
     @State private var isLoading: Bool
