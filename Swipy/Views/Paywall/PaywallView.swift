@@ -41,6 +41,8 @@ struct PaywallView: View {
                     }
 
                     restoreButton
+                    legalLinksRow
+                        .padding(.top, 6)
                 }
                 .padding(.horizontal, 28)
                 .padding(.top, 76)
@@ -476,6 +478,21 @@ struct PaywallView: View {
                 .underline()
         }
         .disabled(premiumManager.isPurchasing)
+    }
+
+    // MARK: - Legal Links
+
+    private static let privacyPolicyURL = URL(string: "https://swipy-app.netlify.app/privacy-policy.html")!
+    private static let termsOfUseURL = URL(string: "https://swipy-app.netlify.app/terms-of-use.html")!
+
+    private var legalLinksRow: some View {
+        HStack(spacing: 10) {
+            Link(String(localized: "paywall.legal.privacy"), destination: Self.privacyPolicyURL)
+            Text("·")
+            Link(String(localized: "paywall.legal.terms"), destination: Self.termsOfUseURL)
+        }
+        .font(.system(size: 12, weight: .medium, design: .rounded))
+        .foregroundStyle(.white.opacity(0.32))
     }
 
     // MARK: - Animations

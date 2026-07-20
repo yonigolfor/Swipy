@@ -1,4 +1,5 @@
 import SwiftUI
+import StoreKit
 
 // MARK: - ChubbyStarShape
 
@@ -118,6 +119,9 @@ struct SessionSavingsBarView: View {
     let sessionMB: Double
 
     @Environment(\.colorScheme) private var colorScheme
+    /// Native SwiftUI review-prompt action — the system decides whether to actually
+    /// surface it (capped at 3x/365 days), so no extra frequency-gating is needed here.
+    @Environment(\.requestReview) private var requestReview
 
     // Adaptive color for the star outline and progress track background.
     // Dark: white at 0.7 opacity so both elements are legible on black.
@@ -175,6 +179,8 @@ struct SessionSavingsBarView: View {
                 // Step 2: star celebration
                 celebrationTrigger += 1
                 triggerHapticBurst()
+                // Ask right at the peak of the positive moment — a GB just got freed.
+                requestReview()
 
                 // Step 3: after star cycle — bar snaps to remainder, star drains with easeIn
                 try? await Task.sleep(for: .milliseconds(CelebrationPhase.totalDurationMS))

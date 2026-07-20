@@ -223,3 +223,56 @@ Micro (10K–100K עוקבים): engagement rate 4–8% לעומת 1–2% ב-Meg
 > **"Tinder לגלריה שלך. חינם. 120 סוויפים ביום."**
 
 זה ה-pitch. 8 מילים. כולם מבינים. כולם רוצים לנסות.
+
+---
+
+## 9. App Store Connect — Metadata (ASO) + מועמדות עריכה
+
+### ✅ Privacy Policy / Terms of Use — חי בפרודקשן
+
+שני דפים סטטיים (`docs/privacy-policy.html`, `docs/terms-of-use.html`, `docs/index.html`, `docs/style.css`) — עצמאיים לחלוטין (ללא JS/CSS חיצוני), מנוסחים לפי הארכיטקטורה האמיתית (no backend, הכל on-device, StoreKit מטפל בתשלומים). מתארחים ב-Netlify (Publish directory `docs`, ללא build step) בכתובת:
+- `https://swipy-app.netlify.app/privacy-policy.html`
+- `https://swipy-app.netlify.app/terms-of-use.html`
+
+`PaywallView.swift` מקשר אליהם (`legalLinksRow`, ליד `restoreButton`) בהתאם ל-Guideline 3.1.2.
+
+**נשאר:**
+- להדביק את URL ה-Privacy Policy בשדה הייעודי ב-App Store Connect → App Privacy.
+- **TODO:** כתובת המייל שמוצגת בשני הדפים (`docs/privacy-policy.html`, `docs/terms-of-use.html`) היא כרגע המייל האישי שלך — להחליף לכתובת ייעודית לאפליקציה כשתיווצר (מסומן ב-TODO גם בקוד ה-JS של שני הדפים).
+
+⚠️ המסמכים נוסחו בקפידה אבל **אינם ייעוץ משפטי** — אם יש לך עו"ד/רו"ח שמלווה את המיזם, שווה מעבר קצר לפני ההגשה הראשונה, בעיקר על סעיף האחריות (Limitation of Liability).
+
+### שם ותת-כותרת (30 תו כל אחד — המשקל הכי גבוה ב-ASO)
+
+| שדה | אנגלית | עברית |
+|---|---|---|
+| **Name** | `Swipy: Photo & Video Cleaner` (28) | `Swipy: ניקוי גלריה בסוויפ` |
+| **Subtitle** | `Declutter Camera Roll Storage` (29) | `מנקה תמונות, חוסך מקום` |
+
+**לא בחרתי** ב-"Tinder for your camera roll" בתור subtitle הרשמי — שימוש בסימן מסחר של חברה אחרת (Tinder/Match Group) בשדה metadata רשמי הוא סיכון דחייה/תביעה גבוה יותר מאשר שימוש בו כהשוואה בתוכן שיווקי (TikTok caption, script). ה-framing הזה מעולה לתוכן — פחות מתאים לשדה רשמי ב-App Store.
+
+### Keywords (100 תו, מופרד בפסיקים, ללא רווחים, ללא חזרה על מילים שכבר ב-Name/Subtitle)
+
+```
+swipe,gallery,organize,junk,duplicate,blurry,screenshot,delete,memories,icloud,burst,manager,tidy
+```
+(97/100 תו — אין חזרה על "photo/video/clean/declutter/camera roll/storage" כי הן כבר ב-Name+Subtitle ומקבלות אינדוקס משם).
+
+### Promotional Text (170 תו — היחיד שניתן לעדכן בלי הגשת גרסה חדשה)
+
+> `Your camera roll, decluttered in minutes. Swipe right to keep, left to delete — 120 free swipes daily. Nothing leaves your device.`
+
+### Description — הפתיח הקריטי (3 השורות הראשונות לפני "עוד")
+
+> **Your gallery has 4,000 photos. 200 of them matter. Swipy finds them — one swipe at a time.**
+
+(אחרי זה: bullets לפיצ'רים, גילוי Subscription חובה לפי Guideline 3.1.2 — משך המנוי, מחיר, חידוש אוטומטי, קישור למסמכים.)
+
+### מועמדות לעריכה של Apple ("New Apps We Love")
+
+אין כפתור "nominate" סטנדרטי בתוך זרימת ההגשה הרגילה — הערוץ הרשמי הוא טופס "Promote your app" תחת developer.apple.com (Contact Us → App Store). זה שווה למלא **ביום ההגשה עצמו**, לא אחרי — לחלון הראשוני יש זמן מוגבל.
+
+**טיוטת פיץ' (2–3 משפטים, כמו שAlta רוצה):**
+> *"Swipy turns the most dreaded iPhone chore — cleaning a bloated camera roll — into a Tinder-style swipe session. It auto-detects blurry shots, duplicate bursts, and screenshots so users find what to delete in minutes, not hours. Every photo stays on-device — no cloud upload, no account, no backend."*
+
+הפרטים הטכניים ("no backend, on-device only") הם לא רק אמת אלא גם ה-hook הכי חזק לעריכה של Apple — הם באופן עקבי מקדמים אפליקציות שמכבדות פרטיות ולא דורשות התחברות.
