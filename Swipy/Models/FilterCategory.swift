@@ -12,8 +12,8 @@ enum FilterCategory: String, CaseIterable, Identifiable {
     case screenRecordings
     case largeVideos
     case blurryPhotos
-    case all
     case burstPhotos
+    case all
 
     var displayName: String {
         switch self {
