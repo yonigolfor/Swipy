@@ -587,6 +587,11 @@ struct PhotoCardView: View {
     @MainActor
     private func activatePlayer(_ avPlayer: AVPlayer) async {
         avPlayer.isMuted = PhotoCardView.globalMute
+        // Pooled items may have a reduced read-ahead buffer set by VideoPlayerPool
+        // while they were sitting unwatched (see pooledBufferDuration). Restore the
+        // automatic default before this card can play, so the memory optimization
+        // never costs the user a rebuffer stall on the item they're actually watching.
+        avPlayer.currentItem?.preferredForwardBufferDuration = 0
         self.player = avPlayer
         self.isLoading = false
         if self.isTopCard {

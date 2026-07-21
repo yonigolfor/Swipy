@@ -592,12 +592,18 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             default:            pageSize = initialPageSize
             }
 
-            let (rawItems, nextIdx) = photoService.fetchPageOfAssets(
-                for: filter,
-                startIndex: 0,
-                pageSize: pageSize,
-                excluding: processedAssetIDs
-            )
+            // Off the Main Actor — burst (500) / blurry (200) page sizes are large enough
+            // that the PHFetchResult scan shouldn't run inline on the UI thread.
+            let service = photoService
+            let excludedIDs = processedAssetIDs
+            let (rawItems, nextIdx) = await Task.detached(priority: .userInitiated) {
+                service.fetchPageOfAssets(
+                    for: filter,
+                    startIndex: 0,
+                    pageSize: pageSize,
+                    excluding: excludedIDs
+                )
+            }.value
 
             self.fetchCursor = nextIdx ?? photoService.totalAssetCount
 
@@ -820,12 +826,20 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         isFetchingNextPage = true
 
         Task {
-            let (rawItems, nextIdx) = photoService.fetchPageOfAssets(
-                for: currentFilter,
-                startIndex: fetchCursor,
-                pageSize: nextPageSize,
-                excluding: processedAssetIDs
-            )
+            // Off the Main Actor, matching scanLocalUniverse's existing per-batch pattern.
+            let service = photoService
+            let filter = currentFilter
+            let cursor = fetchCursor
+            let excludedIDs = processedAssetIDs
+            let pageSize = nextPageSize
+            let (rawItems, nextIdx) = await Task.detached(priority: .userInitiated) {
+                service.fetchPageOfAssets(
+                    for: filter,
+                    startIndex: cursor,
+                    pageSize: pageSize,
+                    excluding: excludedIDs
+                )
+            }.value
 
             let newFetchCursor = nextIdx ?? photoService.totalAssetCount
 
@@ -1486,13 +1500,17 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
             let cursor = fetchCursor
             let processed = processedAssetIDs
+            let service = photoService
 
-            let (rawItems, nextIdx) = photoService.fetchPageOfAssets(
-                for: filter,
-                startIndex: cursor,
-                pageSize: batchSize,
-                excluding: processed
-            )
+            // Off the Main Actor, per-batch — matches scanLocalUniverse's existing pattern.
+            let (rawItems, nextIdx) = await Task.detached(priority: .userInitiated) {
+                service.fetchPageOfAssets(
+                    for: filter,
+                    startIndex: cursor,
+                    pageSize: batchSize,
+                    excluding: processed
+                )
+            }.value
 
             let newCursor = nextIdx ?? photoService.totalAssetCount
             await MainActor.run { self.fetchCursor = newCursor }
@@ -1688,7 +1706,11 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         photoService.warmUpCache(for: upcomingItems)
 
         let topCardID = photoStack.first?.asset.localIdentifier
-        let upcomingAssets = upcomingItems.map { $0.asset }
+        // Wider window than the image-cache prefix above — gives VideoPlayerPool
+        // enough upcoming candidates to fill a true look-ahead buffer beyond what's
+        // visible, even when videos are interleaved with photos in the stack.
+        let upcomingVideoWindow = Array(photoStack.dropFirst().prefix(15))
+        let upcomingAssets = upcomingVideoWindow.map { $0.asset }
         Task { await VideoPlayerPool.shared.warmUp(for: upcomingAssets, protectedID: topCardID) }
 
         for item in upcomingItems where !item.isVideo {
@@ -1727,7 +1749,9 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         // zero NSCache cost — iOS evicts the pipeline buffer under memory pressure automatically.
         photoService.warmUpCache(for: Array(photoStack.prefix(20)))
 
-        let nextAssets = nextItems.map { $0.asset }
+        // Wider window than nextItems (image cache) — see prepareUpcomingCards for rationale.
+        let videoWindow = Array(photoStack.prefix(15))
+        let nextAssets = videoWindow.map { $0.asset }
         Task { await VideoPlayerPool.shared.warmUp(for: nextAssets) }
 
         for (stackIndex, item) in nextItems.enumerated() where !item.isVideo {

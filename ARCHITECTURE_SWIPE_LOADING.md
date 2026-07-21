@@ -271,14 +271,22 @@ DragGesture.onChanged (offset > 30pt, פעם אחת per gesture)
 
 | פרמטר | ערך |
 |--------|-----|
-| maxPoolSize | 3 players |
+| maxPoolSize | 5 players — top card + 2 back cards + 2-video true look-ahead |
+| maxConcurrentLoads | 2 — `PHImageManager.requestPlayerItem` calls בו-זמנית, השאר נכנסים ל-`pendingLoadQueue` |
 | deliveryMode | `.fastFormat` |
-| warmUp נקרא עם | 5 assets הבאים (אחרי כל swipe ובזמן drag) |
-| eviction | assets שאינם ב-5 הבאים מוסרים — למעט protectedID |
+| warmUp נקרא עם | חלון רחב (~15 assets, לא רק 5) — כדי שתמיד יהיו מועמדים נוספים למלא slots שהתפנו על פני כמה קריאות; קריאה בודדת עדיין פועלת רק על 5 הוידאו הראשונים בחלון |
+| eviction | assets שאינם בחלון הנוכחי מוסרים — למעט protectedID |
+| preferredForwardBufferDuration | 2.0s ל-players ב-pool שטרם נצפים; מתאפס ל-automatic (0) ב-`PhotoCardView.activatePlayer()` לפני `play()` |
 
 **Fast path**: `VideoPlayerPool.shared.player(for: asset)` → מחזיר `AVPlayer` מוכן  
 **Slow path**: pool miss → `isVideoPlayerReady = false` (reset gate) → `PHImageManager.requestPlayerItem` → async load  
 **Re-sync**: `resumeTopCardVideo` notification → `PhotoCardView` מחדש play אם player נעצר בטעות בזמן drag שבוטל
+
+### Bounded-Concurrency Load Queue
+
+`enqueue()` → אם `activeLoadIDs.count < maxConcurrentLoads` מתחיל טעינה מיידית (`startLoad`), אחרת נכנס ל-`pendingLoadQueue`. כל סיום טעינה (`finishLoad`) קורא ל-`startNextQueuedLoad()` כדי לרוקן את התור בהדרגה — לעולם לא יותר מ-2 בקשות `PHImageManager` בו-זמנית.
+
+`evict()` מבטל גם את ה-`PHImageRequestID` בפועל (`PHImageManager.cancelImageRequest`), לא רק את ה-`Task` העוטף — אבל ביטול Task אינו מבטיח שהקריאה הבסיסית ל-PHImageManager שכבר ירתה בפועל תיפסק. `loadGeneration` (מונה per-asset) מגן על `finishLoad` מפני תוצאה "ישנה" שמגיעה אחרי שאותו asset פונה ונכנס מחדש (למשל swipe ואז shake-undo מהיר) — רק completion שהmarker שלו תואם לגנרציה הנוכחית מתקבל.
 
 ### Pool Lifecycle — מחזור חיים של ה-pool
 
