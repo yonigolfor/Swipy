@@ -2,7 +2,7 @@
 
 **איך להשתמש בקובץ הזה:** זהו מסמך עבודה חי. סמנו `[x]` על כל סעיף שהושלם. בכל סשן חדש עם Claude — פשוט הפנו לקובץ הזה ("תמשיך איתי מה-LAUNCH_CHECKLIST") והעבודה תמשיך מהנקודה המדויקת שבה עצרתם.
 
-**עדכון אחרון:** 2026-07-21
+**עדכון אחרון:** 2026-07-23
 **שלב נוכחי:** שלב 0 — הכנה לפני הגשה (TestFlight ✅ הושלם, פידבק נקי)
 
 ---
@@ -12,7 +12,7 @@
 - [ ] להחליף את כתובת המייל האישית (`yonitestgolfor@gmail.com`) בדפי `docs/privacy-policy.html` ו-`docs/terms-of-use.html` לכתובת ייעודית לאפליקציה
 - [ ] להדביק את ה-Privacy Policy URL (`https://swipy-app.netlify.app/privacy-policy.html`) בשדה App Privacy ב-App Store Connect
 - [ ] (רשות, מומלץ) מעבר קצר של עו"ד/רו"ח על סעיף Limitation of Liability ב-Terms
-- [ ] להכין Screenshots — פירוט מלא בתת-סעיף "Screenshots — אילו פיצ'רים להדגיש" למטה
+- [x] להכין Screenshots — סעיפים 1–5 (עדיפות עליונה) צולמו והועלו בהצלחה ל-App Store Connect; פירוט מלא בתת-סעיף "Screenshots — אילו פיצ'רים להדגיש" למטה
 - [ ] להכין App Preview video (אופציונלי אך מומלץ — מעלה המרה בדף האפליקציה)
 - [ ] למלא Name / Subtitle / Keywords / Promotional Text / Description ב-App Store Connect — הכל כבר מנוסח ב-`MARKETING.md` §9
 - [ ] Age Rating questionnaire
@@ -27,7 +27,7 @@
   - EN: **"Swipe your gallery clean"** / sub: *"Keep, delete, or snooze — in seconds"*
   - HE: **"מנקים את הגלריה בסוויפ אחד"** / sub: *"שומרים, מוחקים או דוחים — תוך שניות"*
 
-- [ ] **2. Smart Filters** — מסך `SmartFiltersView` עם 6 הקטגוריות והספירות. ה-USP הכי חזק — "האפליקציה מוצאת את הזבל בשבילך"
+- [x] **2. Smart Filters** (בוצע) — מסך `SmartFiltersView` עם 6 הקטגוריות והספירות. ה-USP הכי חזק — "האפליקציה מוצאת את הזבל בשבילך"
   - EN: **"Swipy finds the junk for you"** / sub: *"Screenshots, blurry shots, duplicates, big videos — all auto-detected"*
   - HE: **"Swipy מוצא את הזבל בשבילכם"** / sub: *"צילומי מסך, תמונות מטושטשות, כפילויות, סרטונים כבדים — הכל אוטומטי"*
 
@@ -35,11 +35,11 @@
   - EN: **"Watch your storage come back"** / sub: *"Every swipe frees up real space"*
   - HE: **"תראו את המקום מתפנה בזמן אמת"** / sub: *"כל סוויפ משחרר עוד מקום"*
 
-- [ ] **4. Review Bin** — רשת פריטים לפני מחיקה סופית — טיפול בהתנגדות המרכזית (פחד למחוק בטעות)
+- [x] **4. Review Bin** (בוצע) — רשת פריטים לפני מחיקה סופית — טיפול בהתנגדות המרכזית (פחד למחוק בטעות)
   - EN: **"Nothing is deleted until you say so"** / sub: *"Every photo waits safely in your Review Bin"*
   - HE: **"שום דבר לא נמחק עד שאתם מאשרים"** / sub: *"כל תמונה מחכה בבטחה בסל המיחזור"*
 
-- [ ] **5. Privacy / On-device (חדש)** — **אין מסך קיים באפליקציה לזה — צריך גרפיקה שיווקית ייעודית** (לא צילום מסך אמיתי): רקע במיתוג האפליקציה + אייקון מנעול/מכשיר, לא מסך מצולם בפועל. מרגיע לקוחות שחוששים מהעלאת תמונות רגישות לענן
+- [x] **5. Privacy / On-device** (בוצע) — גרפיקה שיווקית ייעודית (לא צילום מסך אמיתי): רקע במיתוג האפליקציה + אייקון מנעול/מכשיר. מרגיע לקוחות שחוששים מהעלאת תמונות רגישות לענן
   - EN: **"100% on your device. Always."** / sub: *"No cloud upload. No account. No server — ever."*
   - HE: **"100% על המכשיר שלכם. תמיד."** / sub: *"בלי העלאה לענן. בלי חשבון. בלי שרת — אף פעם."*
 
@@ -61,7 +61,7 @@
 
 **הערות טכניות:**
 - גדלים נדרשים: **6.9"** (iPhone 16 Pro Max) חובה, **13"** iPad חובה (כי `TARGETED_DEVICE_FAMILY = "1,2"` — אפליקציה universal) — למרות ש-iPad נעול ל-Portrait בלבד (`UIRequiresFullScreen`), עדיין צריך צילומי מסך iPad תקינים
-- אם אין זמן לצלם את כל ה-9 — עדיפות מוחלטת לסעיפים 1–5 (הם מה שמופיע בלי גלילה ומניע את ההורדה, כולל שכבת האמון של Review Bin + Privacy יחד)
+- אם אין זמן לצלם את כל ה-9 — עדיפות מוחלטת לסעיפים 1–5 (הם מה שמופיע בלי גלילה ומניע את ההורדה, כולל שכבת האמון של Review Bin + Privacy יחד) — **הושלם והועלה ל-App Store Connect**; סעיפים 3, 7, 8, 9 נותרו אופציונליים
 - כל הכתוביות מנוסחות דו-לשוני (EN/HE) — לבחור לפי locale ההגשה; כדאי localize את ה-screenshots בפועל אם ההגשה כוללת גם עברית וגם אנגלית ב-App Store Connect
 
 ## שלב 0.5 — TestFlight (הושלם)
