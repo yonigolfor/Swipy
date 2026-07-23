@@ -180,7 +180,11 @@ struct SessionSavingsBarView: View {
                 celebrationTrigger += 1
                 triggerHapticBurst()
                 // Ask right at the peak of the positive moment — a GB just got freed.
+                // Skipped in DEBUG builds so development/testing never trips Apple's
+                // rate-limited review prompt.
+                #if !DEBUG
                 requestReview()
+                #endif
 
                 // Step 3: after star cycle — bar snaps to remainder, star drains with easeIn
                 try? await Task.sleep(for: .milliseconds(CelebrationPhase.totalDurationMS))

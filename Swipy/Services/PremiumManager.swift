@@ -22,6 +22,11 @@ enum PremiumTier: String, CaseIterable, Identifiable {
         case .lifetime: return String(localized: "paywall.tier.lifetime")
         }
     }
+
+    init?(productID: String) {
+        guard let match = PremiumTier.allCases.first(where: { $0.productID == productID }) else { return nil }
+        self = match
+    }
 }
 
 @MainActor
@@ -52,7 +57,7 @@ class PremiumManager: ObservableObject {
         do {
             let fetched = try await Product.products(for: PremiumTier.allCases.map(\.productID))
             products = Dictionary(uniqueKeysWithValues: fetched.compactMap { product in
-                PremiumTier.allCases.first { $0.productID == product.id }.map { ($0, product) }
+                PremiumTier(productID: product.id).map { ($0, product) }
             })
             let missing = PremiumTier.allCases.filter { products[$0] == nil }
             if !missing.isEmpty {
@@ -74,6 +79,7 @@ class PremiumManager: ObservableObject {
                 guard case .verified(let transaction) = verification else { return }
                 await transaction.finish()
                 await updatePremiumStatus()
+                AnalyticsService.shared.log(.subscriptionPurchased, detail: PremiumTier(productID: product.id)?.rawValue)
             case .pending, .userCancelled:
                 break
             @unknown default:

@@ -659,6 +659,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         isLoading = true
         isFetchingNextPage = false
         invalidatePendingUndo()
+        AnalyticsService.shared.log(.shuffleActivated)
 
         let total = photoService.totalAssetCount
         let randomStart = Int.random(in: 0..<total)
@@ -908,6 +909,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         stageSnoozedItemsIfReady()
         precacheNextImages()
         loadNextPageIfNeeded()
+        AnalyticsService.shared.log(.swipeKeep)
     }
 
     /// Swipe Left — Delete (moves to Review Bin)
@@ -933,6 +935,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         precacheNextImages()
         saveBinToDisk()
         loadNextPageIfNeeded()
+        AnalyticsService.shared.log(.swipeDelete)
     }
 
     private func scheduleSwipeLimitResetIfNeeded() {
@@ -981,6 +984,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         hapticService.snooze()
         precacheNextImages()
         loadNextPageIfNeeded()
+        AnalyticsService.shared.log(.swipeSnooze)
     }
 
     /// Call whenever `photoStack` is about to be wholesale-replaced (filter change,
@@ -1004,6 +1008,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             pendingSwipe = nil
             lastAction = nil
             hapticService.undo()
+            AnalyticsService.shared.log(.undoTriggered)
             return pending.action
         }
         guard let last = lastAction else { return nil }
@@ -1040,6 +1045,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         }
 
         hapticService.undo()
+        AnalyticsService.shared.log(.undoTriggered)
         return last.action
     }
 
@@ -1075,6 +1081,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             totalSpaceSaved = 0
             saveBinToDisk()
         }
+        AnalyticsService.shared.log(.reviewBinEmptied)
     }
 
     /// Resets all decisions (kept, snoozed) to start over

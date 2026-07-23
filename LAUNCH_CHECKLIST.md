@@ -73,8 +73,11 @@
 
 ## שלב 0.6 — אנליטיקס (להתקין *לפני* ההשקה — אי אפשר למדוד רטרואקטיבית)
 
-- [ ] להתקין RevenueCat ו/או Mixpanel (או כלי מדידה שנבחר) — נדרש למדידת D7 Retention, Referral Rate וכו' לפי טבלת המדדים ב-`MARKETING.md` §7
-- [ ] לוודא שהאירועים הרלוונטיים (swipe, keep, delete, share, purchase) נשלחים
+**החלטה:** נשארים **Native-Only** — בלי RevenueCat/Mixpanel/שום 3rd-party SDK, כדי לשמור על הבטחת "100% on-device" במלואה.
+- [x] D7 Retention / Conversion / Revenue — App Store Connect Analytics (StoreKit 2 כבר נותן את זה native, בלי קוד נוסף)
+- [x] שימוש מוצרי פנימי (swipe counts, Smart Filter usage וכו') — `AnalyticsService.swift` חדש: ספירה מקומית ב-`PersistenceService` + `os_signpost` ל-rollup דרך MetricKit (גלוי ב-Xcode Organizer → Metrics אחרי שהאפליקציה חיה ומשתמשים מאשרים שיתוף אנליטיקס)
+- [x] מסך Debug לצפייה בספירות המקומיות בזמן פיתוח/TestFlight — `AnalyticsDebugView.swift` (`#if DEBUG`, long-press על "Device" ב-Smart Filters)
+- [ ] Referral Rate — אין כלי native למדידה מדויקת בלי שרת/SDK; להישאר עם מעקב ידני/הערכה גסה בשלב זה
 
 ## שלב 1 — הגשה ל-Review
 

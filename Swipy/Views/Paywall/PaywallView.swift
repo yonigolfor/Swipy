@@ -131,6 +131,7 @@ struct PaywallView: View {
             withAnimation(.easeOut(duration: 0.5)) { appeared = true }
             startShimmer()
             startGlowPulse()
+            AnalyticsService.shared.log(.paywallShown)
         }
         .onChange(of: premiumManager.isPremium) { _, isPremium in
             if isPremium { dismiss() }

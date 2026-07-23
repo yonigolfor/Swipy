@@ -14,6 +14,7 @@ struct SmartFiltersView: View {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = true
     @AppStorage("shakeHintSwipeCount") private var shakeHintSwipeCount = 0
     @AppStorage("hasSeenShakeHint") private var hasSeenShakeHint = false
+    @State private var showAnalyticsDebug = false
     #endif
 
     var body: some View {
@@ -33,8 +34,16 @@ struct SmartFiltersView: View {
                     localStorageRow
                 } header: {
                     Text("Device")
+                        #if DEBUG
+                        .onLongPressGesture { showAnalyticsDebug = true }
+                        #endif
                 }
             }
+            #if DEBUG
+            .sheet(isPresented: $showAnalyticsDebug) {
+                AnalyticsDebugView()
+            }
+            #endif
             .navigationTitle(String(localized: "filters.title"))
             .navigationBarTitleDisplayMode(.large)
             #if DEBUG
@@ -138,6 +147,7 @@ struct SmartFiltersView: View {
             }
             stackViewModel.loadPhotos(filter: category)
             selectedTab = 1
+            AnalyticsService.shared.log(.smartFilterOpened, detail: category.rawValue)
         } label: {
             HStack(spacing: 16) {
                 // Icon

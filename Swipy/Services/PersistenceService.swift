@@ -178,5 +178,28 @@ class PersistenceService {
         // Auto-reset removed
     }
 
+    // MARK: - Analytics Event Counts (on-device only, see AnalyticsService)
+
+    @AppStorage("analyticsEventCounts") private var eventCountsData: Data = Data()
+
+    var analyticsEventCounts: [String: Int] {
+        get { (try? JSONDecoder().decode([String: Int].self, from: eventCountsData)) ?? [:] }
+        set {
+            if let data = try? JSONEncoder().encode(newValue) {
+                eventCountsData = data
+            }
+        }
+    }
+
+    func incrementEventCount(_ key: String) {
+        var current = analyticsEventCounts
+        current[key, default: 0] += 1
+        analyticsEventCounts = current
+    }
+
+    func resetAnalyticsEventCounts() {
+        analyticsEventCounts = [:]
+    }
+
     private init() {}
 }

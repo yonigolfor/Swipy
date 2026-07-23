@@ -99,7 +99,8 @@ Swipy/
 │       ├── ParticleExplosionView.swift
 │       ├── EmptyStateView.swift
 │       ├── VideoProgressBar.swift
-│       └── ShareHUDView.swift          # Floating progress HUD shown during share (hosted in ShareHUDManager's UIWindow)
+│       ├── ShareHUDView.swift          # Floating progress HUD shown during share (hosted in ShareHUDManager's UIWindow)
+│       └── AnalyticsDebugView.swift    # DEBUG-only inspector for AnalyticsService's local event counters
 │
 ├── Services/
 │   ├── PhotoLibraryService.swift   # PHPhotoLibrary access + pagination
@@ -113,7 +114,8 @@ Swipy/
 │   ├── NotificationManager.swift   # UNUserNotificationCenter builder
 │   ├── NotificationScheduler.swift # 4 trigger types + 2/day quota
 │   ├── NotificationDelegate.swift  # In-app notification handling
-│   └── ShareHUDManager.swift       # UIWindow at .alert+1 hosting ShareHUDView during share operations
+│   ├── ShareHUDManager.swift       # UIWindow at .alert+1 hosting ShareHUDView during share operations
+│   └── AnalyticsService.swift      # Native-only telemetry — local event counters (PersistenceService) + os_signpost for MetricKit/Xcode Organizer rollup
 │
 ├── Extensions/
 │   ├── View+Extensions.swift       # cardShadow, onShake, color helpers, premiumGoldBackground (paywall gold gradient + glow)
@@ -256,6 +258,18 @@ Views show a shimmer/loading indicator while Phase 2 is in progress. Never block
 - `snoozedPhotos` — `[localIdentifier: snoozeCount]`, drives exponential backoff on re-injection
 
 Notification scheduling caps at **2 notifications/day**. The 6 trigger types are: review bin reminder (24h), photo burst (50+ new photos), milestone (per GB freed), swipe-limit reset (00:01 after daily quota exhausted), weekly cleanup (Sunday 21:30, `repeats: true` — stays OS-guaranteed for lapsed users; `rescheduleWeeklyCleanup()` re-arms it on every foreground purely to swap in a fresh random variant from a 2-message pool for users who are actually opening the app), and an inactivity reminder (72h since last foreground). Swipe-limit reset and inactivity reminder don't count against the daily cap — see `NOTIFICATIONS.md` for full details.
+
+---
+
+## Analytics / Telemetry
+
+`AnalyticsService` is native-only, 100%-on-device product telemetry — no network calls, no third-party SDK (RevenueCat/Mixpanel were evaluated and rejected for launch to preserve the zero-dependency, on-device-only promise). Two layers per `AnalyticsService.shared.log(_:detail:)` call:
+1. **Local aggregate counter** — `PersistenceService.analyticsEventCounts` (`[String: Int]`, JSON-over-`@AppStorage`, same pattern as `keptPhotoIDs`). Counts only, no timestamped raw log, to keep the footprint bounded. Inspectable via `AnalyticsDebugView` (`#if DEBUG`-gated, long-press the "Device" section header in `SmartFiltersView`).
+2. **`os_signpost`** — MetricKit automatically aggregates these into `MXSignpostMetric`, surfaced in **Xcode Organizer → Metrics** for opted-in users once the app is live on TestFlight/App Store (24–48h delay, aggregated/anonymized, no subscriber code required). Signpost names are static per `AnalyticsService.Event` case (os_signpost requires `StaticString`) — the `detail` parameter (e.g. a `FilterCategory` or `PremiumTier` rawValue) only breaks down the local counter key, not the signpost taxonomy.
+
+D7 Retention, Conversion, and Revenue are **not** tracked here — they come from App Store Connect Analytics / StoreKit 2 directly, per `MARKETING.md` §7 and `LAUNCH_CHECKLIST.md`.
+
+Current log sites: `PhotoStackViewModel` (`keepPhoto`/`deletePhoto`/`snoozePhoto`/`undoLastAction`/`activateShuffle`/`emptyTrash`), `SmartFiltersView.filterRow` (tap), `PaywallView.onAppear`, `PremiumManager.purchase` (success).
 
 ---
 
