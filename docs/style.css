@@ -99,8 +99,8 @@ li { margin-bottom: 6px; }
 
 .card p:last-child { margin-bottom: 0; }
 
-a { color: var(--accent-1); text-decoration: none; }
-a:hover { text-decoration: underline; }
+a { color: var(--accent-1); text-decoration: underline; text-underline-offset: 2px; }
+a:hover { opacity: 0.8; }
 
 .nav {
   display: flex;
@@ -115,4 +115,10 @@ footer {
   border-top: 1px solid var(--border);
   color: var(--fg-muted);
   font-size: 13px;
+}
+
+.footer-links {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--fg-muted);
 }

@@ -10,14 +10,15 @@
 ## שלב 0 — הכנה לפני הגשה ל-App Store
 
 - [ ] להחליף את כתובת המייל האישית (`yonitestgolfor@gmail.com`) בדפי `docs/privacy-policy.html` ו-`docs/terms-of-use.html` לכתובת ייעודית לאפליקציה
-- [ ] להדביק את ה-Privacy Policy URL (`https://swipy-app.netlify.app/privacy-policy.html`) בשדה App Privacy ב-App Store Connect
+- [x] להדביק את ה-Privacy Policy URL (`https://swipy-app.netlify.app/privacy-policy.html`) בשדה App Privacy ב-App Store Connect
 - [ ] (רשות, מומלץ) מעבר קצר של עו"ד/רו"ח על סעיף Limitation of Liability ב-Terms
 - [x] להכין Screenshots — סעיפים 1–5 (עדיפות עליונה) צולמו והועלו בהצלחה ל-App Store Connect; פירוט מלא בתת-סעיף "Screenshots — אילו פיצ'רים להדגיש" למטה
 - [ ] להכין App Preview video (אופציונלי אך מומלץ — מעלה המרה בדף האפליקציה)
-- [ ] למלא Name / Subtitle / Keywords / Promotional Text / Description ב-App Store Connect — הכל כבר מנוסח ב-`MARKETING.md` §9
+- [x] למלא Name / Subtitle / Keywords / Promotional Text / Description opener ב-App Store Connect — הוזן ב-ASC לפי הניסוח ב-`MARKETING.md` §9
 - [ ] Age Rating questionnaire
 - [ ] Support URL
 - [ ] לוודא שכל ה-Subscription disclosures (משך, מחיר, חידוש אוטומטי, לינק למסמכים) מופיעים ב-Description לפי Guideline 3.1.2
+- [x] App Review Notes — טקסט מוכן ומעודכן (120 swipes/day, +50 share bonus, 3 tiers, Sandbox purchase testing) ב-`MARKETING.md` §9
 
 ### Screenshots — פיצ'רים + כתוביות overlay (סדר מומלץ)
 

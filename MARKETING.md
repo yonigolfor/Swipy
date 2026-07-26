@@ -230,17 +230,24 @@ Micro (10K–100K עוקבים): engagement rate 4–8% לעומת 1–2% ב-Meg
 
 ### ✅ Privacy Policy / Terms of Use — חי בפרודקשן
 
-שני דפים סטטיים (`docs/privacy-policy.html`, `docs/terms-of-use.html`, `docs/index.html`, `docs/style.css`) — עצמאיים לחלוטין (ללא JS/CSS חיצוני), מנוסחים לפי הארכיטקטורה האמיתית (no backend, הכל on-device, StoreKit מטפל בתשלומים). מתארחים ב-Netlify (Publish directory `docs`, ללא build step) בכתובת:
+ארבעה דפים סטטיים (`docs/privacy-policy.html`, `docs/terms-of-use.html`, `docs/accessibility.html`, `docs/index.html`, `docs/style.css`) — עצמאיים לחלוטין (ללא JS/CSS חיצוני), מנוסחים לפי הארכיטקטורה האמיתית (no backend, הכל on-device, StoreKit מטפל בתשלומים). מתארחים ב-Netlify (Publish directory `docs`, ללא build step) בכתובת:
 - `https://swipy-app.netlify.app/privacy-policy.html`
 - `https://swipy-app.netlify.app/terms-of-use.html`
+- `https://swipy-app.netlify.app/accessibility.html`
 
 `PaywallView.swift` מקשר אליהם (`legalLinksRow`, ליד `restoreButton`) בהתאם ל-Guideline 3.1.2.
 
+**✅ בוצע:** ה-Privacy Policy URL הודבק בשדה App Privacy ב-App Store Connect.
+
+**✅ בוצע — נגישות:** כל ארבעת הדפים עודכנו עם landmarks סמנטיים (`<nav>`/`<main>`), קישורים המסומנים גם בקו תחתון (לא רק בצבע, לפי WCAG 1.4.1 / ת"י 5568), ו-`<noscript>` fallback לקישור המייל המעורפל ב-JS. נוסף עמוד `accessibility.html` (הצהרת נגישות, לפי ניסוח שסיפק ה-PM — כולל ניסוח פטור ניטרלי שלא טוען מעמד עוסק ספציפי-לא-מאומת ["our services are structured to align with accessibility exemption criteria..."], ו-SLA תגובה של 3–5 ימי עסקים), ומקושר גם מהניווט העליון וגם משורת קישורים (`Privacy Policy | Terms of Use | Accessibility Statement`) בפוטר של כל אחד מארבעת הדפים. הרקע המשפטי המלא (פטורים, סף מחזור) תועד בשיחה עם Claude ב-2026-07-26 — בקצרה: כ"עוסק פטור"/מיזם טרום-הכנסות משמעותיות Swipy קרוב לוודאי פטור כרגע מהחובה החוקית המלאה, אבל שווה לחזור ולבדוק מול תקן 5568 במלואו ברגע שההכנסות עוברות את סף עוסק פטור (~120,000 ₪/שנה).
+
 **נשאר:**
-- להדביק את URL ה-Privacy Policy בשדה הייעודי ב-App Store Connect → App Privacy.
-- **TODO:** כתובת המייל שמוצגת בשני הדפים (`docs/privacy-policy.html`, `docs/terms-of-use.html`) היא כרגע המייל האישי שלך — להחליף לכתובת ייעודית לאפליקציה כשתיווצר (מסומן ב-TODO גם בקוד ה-JS של שני הדפים).
+- **TODO:** כתובת המייל שמוצגת בכל הדפים (כולל `accessibility.html`) היא כרגע המייל האישי שלך — להחליף לכתובת ייעודית לאפליקציה כשתיווצר (מסומן ב-TODO גם בקוד ה-JS של כל דף).
 
 ⚠️ המסמכים נוסחו בקפידה אבל **אינם ייעוץ משפטי** — אם יש לך עו"ד/רו"ח שמלווה את המיזם, שווה מעבר קצר לפני ההגשה הראשונה, בעיקר על סעיף האחריות (Limitation of Liability).
+
+### ✅ בוצע ב-App Store Connect
+Name, Subtitle, Keywords, Promotional Text, ופתיח ה-Description (למטה) הוזנו ב-ASC לפי הניסוח הבא.
 
 ### שם ותת-כותרת (30 תו כל אחד — המשקל הכי גבוה ב-ASO)
 
@@ -267,6 +274,28 @@ swipe,gallery,organize,junk,duplicate,blurry,screenshot,delete,memories,icloud,b
 > **Your gallery has 4,000 photos. 200 of them matter. Swipy finds them — one swipe at a time.**
 
 (אחרי זה: bullets לפיצ'רים, גילוי Subscription חובה לפי Guideline 3.1.2 — משך המנוי, מחיר, חידוש אוטומטי, קישור למסמכים.)
+
+### App Review Notes (שדה "Notes" בהגשה ל-Review)
+
+**עודכן 2026-07-24** — גרסה קודמת של הטקסט הזה הפנתה בטעות ל-"Debug Bar" שמאפשר לבייפס את ה-paywall; אותו כפתור (🧪 ב-`PaywallView.swift`) עטוף ב-`#if DEBUG` ול-Release config (זה שנארז ל-App Store Connect) אין `SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG` — כלומר הוא לא קיים בבילד שהסוקר בודק בפועל. הטקסט למטה מחליף אותו לחלוטין ומפנה ל-Sandbox testing הסטנדרטי של Apple במקום.
+
+> Dear App Review Team,
+>
+> Thank you for reviewing our app. Here are some implementation details to help you test the user flow, viral loop, and premium configurations efficiently:
+>
+> **1. Free Tier Limitation & Paywall:**
+> The app uses a subscription-based premium model (Monthly / Yearly / Lifetime — see Subscription details below). Users on the free tier can perform up to **120 swipes** (photos/videos evaluated) per day before the Premium Paywall is automatically presented.
+>
+> **2. Viral "Share to Earn" Mechanic:**
+> Within the free tier experience, users have an option to share the app with friends. Successfully triggering the system share sheet grants the user a one-time bonus of **50 additional swipes** before they encounter the subscription paywall again.
+>
+> **3. Testing the Paywall & Subscriptions:**
+> Once the swipe limit is reached (120 free swipes, or 170 after using the one-time share bonus), the Premium Paywall is presented automatically. Please use your **Sandbox Apple ID** to test the purchase flow — all three tiers (Monthly, Yearly, Lifetime) are available for purchase, upgrade/downgrade (Monthly ⇄ Yearly share one subscription group), and restore. No special test account or debug affordance is needed beyond the standard Sandbox environment.
+>
+> Please let us know if you require any further information or additional credentials to complete your review.
+>
+> Best regards,
+> The Development Team
 
 ### מועמדות לעריכה של Apple ("New Apps We Love")
 
