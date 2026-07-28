@@ -335,11 +335,19 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             let cached = await self.cachedAccurateCounts
             for (category, count) in cached { fastCounts[category] = count }
 
+            // Only surface the dim+spinner "recalculating" affordance for categories
+            // that have never had an accurate value computed before — their Phase 1
+            // count is a candidate-pool estimate that can be off by 10x for
+            // blurry/burst, so silently swapping it out would read as a glitch.
+            // Once a category has a trustworthy cached value, Phase 2 re-verifies
+            // silently in the background; the badge itself still animates via
+            // .contentTransition(.numericText()) if the accurate count changes.
+            let expensiveCategories: Set<FilterCategory> = [.largeVideos, .blurryPhotos, .burstPhotos]
+            let needsVisibleRecalc = expensiveCategories.subtracting(cached.keys)
+
             await MainActor.run {
                 withAnimation { self.categoryCounts = fastCounts }
-                // Show smart-shimmer indicator while Phase 2 verifies these three —
-                // their Phase 1 count is only a candidate-pool estimate, not a real match count.
-                self.categoriesRecalculating = [.largeVideos, .blurryPhotos, .burstPhotos]
+                self.categoriesRecalculating = needsVisibleRecalc
             }
 
             // ── Phase 2: Accurate counts, in parallel, in the background ──────

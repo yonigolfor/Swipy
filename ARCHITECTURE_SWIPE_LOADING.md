@@ -279,7 +279,12 @@ refreshCategoryCounts()  [guarded by isRefreshingCounts — re-entry no-ops]
       accurateBlurryCount()  — pagination + BlurBurstScanEngine.countBlurry, cache-first
       accurateBurstCount()   — pagination + BurstAnalyzer.analyze, cache-first
       releaseBlurBurstScan() בסיום
-  → categoriesRecalculating (Set<FilterCategory>) מניע את ה-shimmer/spinner ב-SmartFiltersView
+  → categoriesRecalculating = expensiveCategories.subtracting(cached.keys)
+    — dim+spinner ב-SmartFiltersView רק לקטגוריה שמעולם לא חושבה במדויק
+    (Phase 1 של blurry/burst הוא הערכת candidate-pool שיכולה להיות גדולה
+    פי 10+ מהמספר האמיתי — להחליף אותה בשקט בלי שום אינדיקציה, בחישוב
+    קר ראשון, ייראה כמו גליץ'). ברגע שיש ערך מאומת בעבר, Phase 2 הבא
+    רץ בשקט לגמרי; ה-badge עדיין מתעדכן באנימציה דרך .contentTransition(.numericText())
   → תוצאות נשמרות ל-Documents/categoryCounts.json (מחליף את largeVideoCount.json הישן)
 ```
 
