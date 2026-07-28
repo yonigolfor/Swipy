@@ -12,6 +12,14 @@ struct SwipyApp: App {
     var body: some Scene {
         WindowGroup {
             SplashScreenView()
+                // Forced app-wide, not just for the onboarding/handoff transitions: on
+                // an RTL device (Hebrew), iOS mirrors the entire root coordinate space,
+                // which flips even raw-offset transitions (not just Edge.leading/.trailing-
+                // based ones) — the only reliable fix is overriding layoutDirection at the
+                // root. Hebrew text itself still renders correctly (Unicode bidi is
+                // independent of this); only container layout (HStack ordering, transition
+                // direction) is pinned to LTR everywhere, so "forward" always means right.
+                .environment(\.layoutDirection, .leftToRight)
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {

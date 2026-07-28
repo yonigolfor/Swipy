@@ -76,10 +76,11 @@ struct OnboardingView: View {
                 default: EmptyView()
                 }
             }
-            .transition(.asymmetric(
-                insertion: .move(edge: .trailing).combined(with: .opacity),
-                removal: .move(edge: .leading).combined(with: .opacity)
-            ))
+            // .pushForward (not .move(edge:)) so step progression always visually
+            // moves right→left regardless of device language — .move(edge: .trailing/
+            // .leading) flips under RTL (Hebrew), which is exactly backwards from the
+            // conventional "progress moves right" navigation language.
+            .transition(.pushForward)
             .id(currentStep) // Forces transition on step change
         }
         .onAppear { haptic.prepare(); softHaptic.prepare() }

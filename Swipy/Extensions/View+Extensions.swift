@@ -114,8 +114,25 @@ extension CGSize {
     static func * (lhs: CGSize, rhs: CGFloat) -> CGSize {
         CGSize(width: lhs.width * rhs, height: lhs.height * rhs)
     }
-    
+
     var magnitude: CGFloat {
         sqrt(width * width + height * height)
+    }
+}
+
+// MARK: - Transition Extensions
+
+extension AnyTransition {
+    /// Forward-navigation transition — incoming content enters from the right,
+    /// outgoing content exits to the left. Plain `.move(edge:)` is safe here (not
+    /// a raw offset) because `SwipyApp` pins `\.layoutDirection` to `.leftToRight`
+    /// app-wide, so `.trailing`/`.leading` always resolve to right/left consistently —
+    /// see SwipyApp.swift for why that override exists.
+    /// Used by OnboardingView's step transitions and SplashScreenView's handoff.
+    static var pushForward: AnyTransition {
+        .asymmetric(
+            insertion: .move(edge: .trailing).combined(with: .opacity),
+            removal: .move(edge: .leading).combined(with: .opacity)
+        )
     }
 }

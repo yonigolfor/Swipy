@@ -53,6 +53,10 @@ struct SmartFiltersView: View {
                         hasCompletedOnboarding = false
                         shakeHintSwipeCount = 0
                         hasSeenShakeHint = false
+                        // SplashScreenView's view-swap runs off a plain @State that only
+                        // mirrors hasCompletedOnboarding at init time (see its own comment) —
+                        // setting the AppStorage flag alone doesn't re-trigger it mid-session.
+                        NotificationCenter.default.post(name: .debugResetOnboarding, object: nil)
                     } label: {
                         Image(systemName: "arrow.counterclockwise")
                             .foregroundColor(.orange)

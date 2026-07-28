@@ -212,6 +212,10 @@ No `NavigationStack` or `NavigationView` is used at the root level. Tab switchin
 
 The tab bar is the native iOS `TabView` — on iOS 18 it renders automatically as the floating capsule style (as in WhatsApp / Instagram). Content views stop above the tab bar via the safe area injected by `TabView`; no manual height math needed.
 
+### Layout Direction — Pinned to LTR App-Wide
+
+`SwipyApp.swift` sets `.environment(\.layoutDirection, .leftToRight)` on the root `WindowGroup` content. On an RTL device (Hebrew), iOS mirrors the entire root coordinate space — this flips not just `Edge.leading`/`.trailing`-based transitions but was observed to flip raw `.offset(x:)`-based ones too, since the mirroring happens above where SwiftUI's `\.layoutDirection` environment alone can counteract it; overriding the root's layout direction is the only fix that reliably holds for both. Hebrew text itself still renders correctly (Unicode bidi text shaping is independent of this) — only *container* layout (HStack ordering, `.leading`/`.trailing` resolution, transition direction) is pinned to LTR everywhere, so "forward" always means right regardless of device language. `AnyTransition.pushForward` (`View+Extensions.swift`) — used by `OnboardingView`'s step transitions and `SplashScreenView`'s onboarding↔ContentView handoff — relies on this: it's plain `.move(edge: .trailing/.leading)`, safe only because layout direction is pinned upstream.
+
 ---
 
 ## Pagination & Image Loading
