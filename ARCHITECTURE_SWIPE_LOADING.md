@@ -291,7 +291,10 @@ refreshCategoryCounts()  [guarded by isRefreshingCounts — re-entry no-ops]
 `SmartFiltersView` קורא ל-`refreshCategoryCounts()` רק בשלושה מקרים: טעינה ראשונה (`categoryCounts.isEmpty`), אחרי שפעולת swipe/undo סימנה `hasPendingCountUpdate` והמשתמש חזר לטאב, או pull-to-refresh מפורש — לא בכל `onAppear`.
 
 ### Pre-scan ברקע + Invalidation
-`startBackgroundBlurBurstPrescan()` נקרא פעם אחת מ-`OnboardingView` מיד אחרי אישור הרשאת תמונות (`.background` priority, pagination זהה ל-`scanUntilFull`) — עד שהמשתמש מגיע בפועל לקטגוריה, רוב הספרייה כבר verified. Cache-first הופך ריצות חוזרות לזולות כמעט לחינם.
+`startBackgroundBlurBurstPrescan()` נקרא מתוך הסוף של `startOnboardingScan()` עצמו (**לא** במקביל אליו!) — ראו "CPU spike" למטה. `.background` priority, `maxConcurrency: 3` (נמוך מה-default של 6 שמשמש נתיבים אינטראקטיביים), pagination זהה ל-`scanUntilFull`. עד שהמשתמש מגיע בפועל לקטגוריה, רוב הספרייה כבר verified. Cache-first הופך ריצות חוזרות לזולות כמעט לחינם.
+
+### CPU Spike ב-Onboarding (תוקן)
+`startOnboardingScan()` ו-`startBackgroundBlurBurstPrescan()` היו יורים **במקביל** מ-`OnboardingView.requestPermission()`, בדיוק בזמן שהמשתמש עדיין באנימציות של SwipeDemo/Scan — שניהם כבדים (concurrentPerform ללא cap + 6 CIFilter/Vision concurrent) וגרמו ל-~160% CPU עם jank נראה לעין. התיקון: (1) sequencing — ה-prescan נקרא רק מסוף ה-Task של `startOnboardingScan()`, לא במקביל; (2) עדיפות ה-Task הראשי ירדה מ-`.utility` ל-`.background`; (3) `DispatchQueue.concurrentPerform` (בלי cap) הוחלף ב-`TaskGroup` מוגבל (cap 4); (4) concurrency של ה-prescan ירד ל-3 (הנתיב האינטראקטיבי נשאר ב-6 default).
 
 **נעילה משותפת:** ה-prescan ו-Phase 2 (למעלה) חולקים דגל בודד — `isBlurBurstScanActive`, דרך `tryAcquireBlurBurstScan()`/`releaseBlurBurstScan()` — כדי שלא ירוצו שני סריקות blur/burst על `BlurBurstScanEngine`/`BurstAnalyzer` במקביל. מי שתופס ראשון ממשיך; השני מדלג על העבודה הזו לסבב הזה (הערך הקיים ב-cache/badge נשאר, הסבב הבא ישלים).
 

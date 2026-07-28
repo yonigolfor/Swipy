@@ -16,7 +16,11 @@ final class BlurBurstScanEngine {
     static let shared = BlurBurstScanEngine()
     private init() {}
 
-    private static let maxConcurrency = 6
+    /// Default concurrency for interactive scans (scanUntilFull) — the user is
+    /// actively waiting, so favor throughput. Background callers (the post-onboarding
+    /// prescan) pass a lower value explicitly since nothing there is time-sensitive
+    /// and it competes with onboarding's own animations for CPU.
+    static let defaultConcurrency = 6
 
     /// Cache-first blur verdict for one asset. Returns nil when the asset isn't
     /// locally analyzable this pass (e.g. iCloud-only with no cached thumbnail yet) —
@@ -41,7 +45,11 @@ final class BlurBurstScanEngine {
     /// Scans `items` with bounded concurrency, invoking `onBlurry` for each confirmed-blurry
     /// item as soon as it resolves — callers hop back to MainActor themselves inside the closure.
     /// Returns once every item has been resolved (not once `onBlurry` has fired N times).
-    func scanBlurry(_ items: [PhotoItem], onBlurry: @escaping @Sendable (PhotoItem) async -> Void) async {
+    func scanBlurry(
+        _ items: [PhotoItem],
+        maxConcurrency: Int = defaultConcurrency,
+        onBlurry: @escaping @Sendable (PhotoItem) async -> Void
+    ) async {
         await withTaskGroup(of: Void.self) { group in
             var iterator = items.makeIterator()
             func addNext() {
@@ -52,7 +60,7 @@ final class BlurBurstScanEngine {
                     }
                 }
             }
-            for _ in 0..<Self.maxConcurrency { addNext() }
+            for _ in 0..<maxConcurrency { addNext() }
             while await group.next() != nil { addNext() }
         }
     }
@@ -60,7 +68,7 @@ final class BlurBurstScanEngine {
     /// Cache-first accurate count, capped at `cap` (matches the "99+" UI ceiling).
     /// Resolves and caches verdicts for any uncached items it encounters along the
     /// way, so repeated badge refreshes get progressively cheaper.
-    func countBlurry(_ items: [PhotoItem], cap: Int) async -> Int {
+    func countBlurry(_ items: [PhotoItem], cap: Int, maxConcurrency: Int = defaultConcurrency) async -> Int {
         var count = 0
         await withTaskGroup(of: Bool?.self) { group in
             var iterator = items.makeIterator()
@@ -68,7 +76,7 @@ final class BlurBurstScanEngine {
                 guard count < cap, let item = iterator.next() else { return }
                 group.addTask { await self.blurVerdict(for: item) }
             }
-            for _ in 0..<Self.maxConcurrency { addNext() }
+            for _ in 0..<maxConcurrency { addNext() }
             while let result = await group.next() {
                 if result == true { count += 1 }
                 if count < cap { addNext() }

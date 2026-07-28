@@ -469,14 +469,19 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         let service = photoService
         let excluded = processedAssetIDs
 
+        // Lower than BlurBurstScanEngine/BurstAnalyzer's interactive default (6) — nothing
+        // here is time-sensitive (cache-warming only), and running fewer concurrent CIFilter/
+        // Vision pipelines leaves more CPU headroom for onboarding's own UI animations.
+        let prescanConcurrency = 3
+
         Task.detached(priority: .background) {
             if service.fetchResult == nil { service.fetchAllPhotos() }
 
             await Self.prescanBatches(filter: .blurryPhotos, service: service, excluding: excluded) { batch in
-                await BlurBurstScanEngine.shared.scanBlurry(batch) { _ in }
+                await BlurBurstScanEngine.shared.scanBlurry(batch, maxConcurrency: prescanConcurrency) { _ in }
             }
             await Self.prescanBatches(filter: .burstPhotos, service: service, excluding: excluded, pageSize: 500) { batch in
-                let analyzed = await BurstAnalyzer.shared.analyze(batch)
+                let analyzed = await BurstAnalyzer.shared.analyze(batch, maxConcurrency: prescanConcurrency)
                 let analyzedIDs = Set(analyzed.map { $0.id })
                 BlurBurstCacheService.shared.setBurstVerdicts(
                     Dictionary(uniqueKeysWithValues: batch.map { ($0.id, analyzedIDs.contains($0.id)) })
@@ -516,7 +521,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         onboardingLargeVideoCount = 0
         onboardingScanComplete = false
 
-        Task.detached(priority: .utility) {
+        Task.detached(priority: .background) {
             let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
             guard status == .authorized || status == .limited else {
                 try? await Task.sleep(for: .seconds(1.5))
@@ -561,13 +566,31 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             let candidates = PHAsset.fetchAssets(with: candidateOptions)
             let n = candidates.count
 
-            var hits = [UInt8](repeating: 0, count: max(1, n))
-            DispatchQueue.concurrentPerform(iterations: n) { i in
-                let size = PHAssetResource.assetResources(for: candidates.object(at: i))
-                    .first.flatMap { $0.value(forKey: "fileSize") as? Int64 } ?? 0
-                if size > PhotoLibraryService.largeVideoThresholdBytes { hits[i] = 1 }
+            // Bounded TaskGroup instead of DispatchQueue.concurrentPerform — the latter
+            // has no concurrency cap and spawns as many worker threads as GCD sees fit,
+            // which competes with onboarding's own animations for CPU. Cap 4, matching
+            // the reduced concurrency used elsewhere for non-interactive background work.
+            let finalLarge = await withTaskGroup(of: Bool.self) { group -> Int in
+                var index = 0
+                let maxConcurrency = 4
+                func addNext() {
+                    guard index < n else { return }
+                    let i = index
+                    index += 1
+                    group.addTask {
+                        let size = PHAssetResource.assetResources(for: candidates.object(at: i))
+                            .first.flatMap { $0.value(forKey: "fileSize") as? Int64 } ?? 0
+                        return size > PhotoLibraryService.largeVideoThresholdBytes
+                    }
+                }
+                for _ in 0..<maxConcurrency { addNext() }
+                var count = 0
+                while let isLarge = await group.next() {
+                    if isLarge { count += 1 }
+                    addNext()
+                }
+                return count
             }
-            let finalLarge = hits.reduce(0) { $0 + Int($1) }
 
             await MainActor.run {
                 withAnimation(.spring(response: 0.6)) { self.onboardingLargeVideoCount = finalLarge }
@@ -575,6 +598,12 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             // Kick off persona building while the user finishes the last onboarding step.
             await AestheticScoringService.shared.analyzeFavorites()
             await MainActor.run { self.scoreCachedCardsIfNeeded() }
+
+            // Sequenced, not parallel: starting this alongside the work above (both used
+            // to fire together right at permission grant, during onboarding's own animated
+            // steps) doubled up CPU load at the worst possible time — two unrelated heavy
+            // background scans competing with onboarding's UI animations for the same cores.
+            await MainActor.run { self.startBackgroundBlurBurstPrescan() }
         }
     }
 

@@ -18,7 +18,10 @@ class BurstAnalyzer {
     /// (gap ≤ 30s AND visual similarity via VNFeaturePrint).
     /// Chain comparison: each new photo is compared to the last added,
     /// which handles gradual scene drift in long shooting sessions.
-    func analyze(_ items: [PhotoItem]) async -> [PhotoItem] {
+    /// `maxConcurrency` bounds the feature-print precompute pass — interactive callers
+    /// (scanUntilFull) use the default; background callers (the post-onboarding
+    /// prescan) pass a lower value since nothing there is time-sensitive.
+    func analyze(_ items: [PhotoItem], maxConcurrency: Int = defaultConcurrency) async -> [PhotoItem] {
         guard items.count >= minGroupSize else { return [] }
 
         let sorted = items.sorted {
@@ -29,7 +32,7 @@ class BurstAnalyzer {
         // which one depends on the grouping decisions below, so precompute all of them
         // concurrently up front. The grouping pass itself is then pure CPU (dictionary
         // lookups + vector distance), no more sequential per-photo I/O waits.
-        let prints = await featurePrints(for: sorted)
+        let prints = await featurePrints(for: sorted, maxConcurrency: maxConcurrency)
 
         var groups: [[PhotoItem]] = []
         var currentGroup: [PhotoItem] = [sorted[0]]
@@ -90,11 +93,14 @@ class BurstAnalyzer {
 
     // MARK: - Private
 
-    private static let maxConcurrency = 6
+    /// Default concurrency for interactive scans — see BlurBurstScanEngine.defaultConcurrency
+    /// for the same rationale (this mirrors it rather than sharing it, to keep the two
+    /// engines independent).
+    static let defaultConcurrency = 6
 
     /// Computes feature prints for every item concurrently, bounded to avoid decoding
     /// too many images at once. Order-independent — the grouping pass looks these up by ID.
-    private func featurePrints(for items: [PhotoItem]) async -> [String: VNFeaturePrintObservation] {
+    private func featurePrints(for items: [PhotoItem], maxConcurrency: Int) async -> [String: VNFeaturePrintObservation] {
         var result: [String: VNFeaturePrintObservation] = [:]
         await withTaskGroup(of: (String, VNFeaturePrintObservation?).self) { group in
             var iterator = items.makeIterator()
@@ -102,7 +108,7 @@ class BurstAnalyzer {
                 guard let item = iterator.next() else { return }
                 group.addTask { (item.id, await self.featurePrint(for: item.asset)) }
             }
-            for _ in 0..<Self.maxConcurrency { addNext() }
+            for _ in 0..<maxConcurrency { addNext() }
             while let (id, fp) = await group.next() {
                 if let fp { result[id] = fp }
                 addNext()
