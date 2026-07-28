@@ -246,13 +246,16 @@ class PhotoLibraryService: ObservableObject {
         }
     }
 
-    /// Counts assets in a PHFetchResult that are not already in processedIDs.
+    /// Counts assets in a PHFetchResult that are not already in processedIDs, stopping
+    /// once `cap` is reached — this is the Phase-1 badge, so an exact count past the
+    /// "99+" display ceiling costs enumeration time for no visible benefit.
     /// O(n) enumeration with O(1) Set lookup — safe for background Task.detached calls.
-    private func countExcluding(_ result: PHFetchResult<PHAsset>, processedIDs: Set<String>) -> Int {
-        guard !processedIDs.isEmpty else { return result.count }
+    private func countExcluding(_ result: PHFetchResult<PHAsset>, processedIDs: Set<String>, cap: Int = 100) -> Int {
+        guard !processedIDs.isEmpty else { return min(result.count, cap) }
         var count = 0
-        result.enumerateObjects { asset, _, _ in
+        result.enumerateObjects { asset, _, stop in
             if !processedIDs.contains(asset.localIdentifier) { count += 1 }
+            if count >= cap { stop.pointee = true }
         }
         return count
     }
@@ -493,6 +496,31 @@ class PhotoLibraryService: ObservableObject {
         }
 
         DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 2.0, execute: timeoutWork)
+    }
+
+    /// Loads a small, local-only image for background blur analysis — single callback,
+    /// no iCloud round-trip. Unlike `loadImage`'s `.highQualityFormat`+network path (built
+    /// for card display), blur/burst scanning must never stall on a network download, so an
+    /// iCloud-only asset with no local proxy yet simply yields nil and is skipped this pass.
+    /// Unlike card display, a degraded/lower-quality proxy is fine here — BlurDetector
+    /// downsamples to 200×200 regardless, so quality tier doesn't affect the analysis.
+    /// Matches BurstAnalyzer.featurePrint's delivery settings so both scanners see the same
+    /// local-availability behavior.
+    func loadImageForAnalysis(
+        for asset: PHAsset,
+        completion: @escaping (UIImage?) -> Void
+    ) {
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .fastFormat
+        options.resizeMode = .fast
+        options.isNetworkAccessAllowed = false
+        options.isSynchronous = false
+
+        imageManager.requestImage(
+            for: asset, targetSize: CGSize(width: 200, height: 200),
+            contentMode: .aspectFill, options: options,
+            resultHandler: { image, _ in completion(image) }
+        )
     }
 
     /// Loads a fast local thumbnail — never touches iCloud.

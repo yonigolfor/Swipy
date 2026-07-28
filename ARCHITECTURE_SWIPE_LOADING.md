@@ -246,6 +246,54 @@ Fallback: variance = ∞ (CIEdges נכשל)  →  raw ×= 0.6
 
 ---
 
+## 3b. Blur/Burst Smart Filter Scanning
+
+### הבעיה שנפתרה
+עד לגרסה זו, כניסה לקטגוריית Blurry Photos סרקה וניתחה תמונות **ברצף, אחת אחת** — decode + `CIEdges` לכל תמונה, כולל הורדת iCloud כשצריך (`.highQualityFormat` + network). ללא cache, כל כניסה מחדש לקטגוריה חזרה על כל הניתוח מאפס. ה-badge ("99+") גם לא שיקף ספירה אמיתית של תמונות מטושטשות — הוא ספר את **כל מאגר המועמדים** (כל תמונה שאינה screenshot), בלי Phase 2 לחידוד.
+
+### BlurBurstCacheService
+Singleton דיסק-based (`Caches/blurBurstVerdicts.json`, לא `Documents` — אינדקס בר-שחזור, לא user data) ששומר `[assetID: Bool]` לכל אחת מ-blur/burst. Thread-safe (`NSLock`), כתיבות מבוטלות ל-2 שניות (`scheduleSave`) כדי לא לכתוב לדיסק על כל item בודד. וורדיקט, ברגע שחושב, יציב לכל חיי ה-asset — אין צורך לחשב פעמיים.
+
+### BlurBurstScanEngine
+`class` פשוט **ולא** `@MainActor` — כמו `BlurDetector`/`BurstAnalyzer` — כדי שעבודת ה-`CIFilter` הכבדה תרוץ באמת מחוץ ל-main thread גם כשנקראת עם `await` מ-method של `PhotoStackViewModel` (`@MainActor`). Swift מחזיר את הביצוע לאקטור המבקש רק בסיום ה-`await`, אז כל קוד שרץ *בתוך* פונקציה non-isolated נשאר off-actor.
+
+```
+blurVerdict(for:) -> Bool?     // cache-first; nil = לא ניתן לניתוח כרגע (לא לשמור כ-false!)
+scanBlurry(_:onBlurry:)        // TaskGroup מוגבל ל-6 concurrent, streaming
+countBlurry(_:cap:)            // כמו scanBlurry אך סופר בלבד, capped ל-100
+```
+**קריטי:** תמונה ש-`loadImageForAnalysis` מחזיר לה `nil` (iCloud-only, עוד לא synced) — **לא** נשמרת בקאש כ-`false`. שמירה שגויה כזו הייתה מסתירה לצמיתות תמונה שרק עוד לא הגיעה מקומית.
+
+### BurstAnalyzer — פירוק מקבילי
+אלגוריתם ה-chain grouping (כל תמונה מושווית לקודמתה) נשאר **סדרתי מטבעו** (תלוי state). אבל חישוב ה-`VNFeaturePrintObservation` לכל תמונה **אינו** תלוי ב-state — `featurePrints(for:)` מחשב את כולם מראש ב-`TaskGroup` מוגבל (6 concurrent), ואז ה-loop הסדרתי המקורי רק עושה lookup במילון + `computeDistance` (CPU בלבד, בלי I/O).
+
+### Phase 2 — Accurate Counts
+`.largeVideos` היחיד שהיה לו Phase 2 אמיתי; עכשיו גם `.blurryPhotos` ו-`.burstPhotos`:
+
+```
+refreshCategoryCounts()  [guarded by isRefreshingCounts — re-entry no-ops]
+  Phase 1: countFast() לכל קטגוריה במקביל (capped ל-100, כולל .blurryPhotos/.burstPhotos)
+  Phase 2: async let, במקביל:
+    service.count(for: .largeVideos)  — תמיד רץ (זול, metadata בלבד)
+    accurateBlurryCount() + accurateBurstCount() — רק אם tryAcquireBlurBurstScan() הצליח
+      accurateBlurryCount()  — pagination + BlurBurstScanEngine.countBlurry, cache-first
+      accurateBurstCount()   — pagination + BurstAnalyzer.analyze, cache-first
+      releaseBlurBurstScan() בסיום
+  → categoriesRecalculating (Set<FilterCategory>) מניע את ה-shimmer/spinner ב-SmartFiltersView
+  → תוצאות נשמרות ל-Documents/categoryCounts.json (מחליף את largeVideoCount.json הישן)
+```
+
+`SmartFiltersView` קורא ל-`refreshCategoryCounts()` רק בשלושה מקרים: טעינה ראשונה (`categoryCounts.isEmpty`), אחרי שפעולת swipe/undo סימנה `hasPendingCountUpdate` והמשתמש חזר לטאב, או pull-to-refresh מפורש — לא בכל `onAppear`.
+
+### Pre-scan ברקע + Invalidation
+`startBackgroundBlurBurstPrescan()` נקרא פעם אחת מ-`OnboardingView` מיד אחרי אישור הרשאת תמונות (`.background` priority, pagination זהה ל-`scanUntilFull`) — עד שהמשתמש מגיע בפועל לקטגוריה, רוב הספרייה כבר verified. Cache-first הופך ריצות חוזרות לזולות כמעט לחינם.
+
+**נעילה משותפת:** ה-prescan ו-Phase 2 (למעלה) חולקים דגל בודד — `isBlurBurstScanActive`, דרך `tryAcquireBlurBurstScan()`/`releaseBlurBurstScan()` — כדי שלא ירוצו שני סריקות blur/burst על `BlurBurstScanEngine`/`BurstAnalyzer` במקביל. מי שתופס ראשון ממשיך; השני מדלג על העבודה הזו לסבב הזה (הערך הקיים ב-cache/badge נשאר, הסבב הבא ישלים).
+
+`photoLibraryDidChange`: assets שנמחקו → `BlurBurstCacheService.invalidate(removedIDs:)` (לא wipe מלא!). assets חדשים → `startBackgroundBlurBurstPrescan()` נקרא שוב — מהיר כי כל ה-assets הישנים כבר ב-cache.
+
+---
+
 ## 4. Early Precache — prepareUpcomingCards()
 
 מנגנון חדש שמפחית מסכים שחורים בהחלקה מהירה.

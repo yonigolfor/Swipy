@@ -856,6 +856,9 @@ struct OnboardingView: View {
                     // Start scan in background — numbers will be ready by the time
                     // user finishes the demo and reaches the Scan screen
                     viewModel.startOnboardingScan()
+                    // Pre-warm the Blurry/Burst verdict cache so those Smart Filters
+                    // open near-instantly the first time the user taps into them.
+                    viewModel.startBackgroundBlurBurstPrescan()
                 case .denied:
                     HapticService.shared.error()
                     withAnimation(.easeInOut(duration: 0.3)) {

@@ -25,8 +25,10 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     @Published private(set) var offlineFoundNoLocalItems: Bool = false
     @Published var categoryCounts: [FilterCategory: Int] = [:]
     @Published var hasPendingCountUpdate = false
-    /// True while the expensive Phase 2 large video scan is running.
-    @Published var isCountingLargeVideos = false
+    /// Categories whose expensive Phase 2 accurate count is currently running
+    /// (large videos, blurry, burst — the three categories whose Phase 1 count
+    /// is only a candidate-pool estimate).
+    @Published var categoriesRecalculating: Set<FilterCategory> = []
 
     /// IDs of assets whose full-res card image is currently stored in `imageCache`.
     /// @Published so views can react when a card becomes ready — used by the
@@ -100,15 +102,15 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// Count of snoozed items that match the current filter — drives the VictoryView CTA.
     @Published private(set) var pendingSnoozedCount: Int = 0
 
-    /// In-memory cache for the expensive large video count.
-    /// Persisted to Documents/largeVideoCount.json between app launches.
-    private var cachedLargeVideoCount: Int? = nil
+    /// In-memory cache for the expensive Phase 2 accurate counts (large videos,
+    /// blurry, burst). Persisted to Documents/categoryCounts.json between launches.
+    private var cachedAccurateCounts: [FilterCategory: Int] = [:]
 
-    /// Path to the small JSON cache file for large video count.
-    private var cacheFileURL: URL {
+    /// Path to the small JSON cache file for accurate category counts.
+    private var categoryCountCacheFileURL: URL {
         FileManager.default
             .urls(for: .documentDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("largeVideoCount.json")
+            .appendingPathComponent("categoryCounts.json")
     }
 
     // MARK: - Active Request Tracking
@@ -265,30 +267,43 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         updatePendingSnoozedCount()
         loadPhotos()
         PHPhotoLibrary.shared().register(self)
-        loadCachedLargeVideoCount()
+        loadCachedAccurateCounts()
         startNetworkObserver()
         // NOTE: refreshCategoryCounts() is NOT called here.
         // It is triggered lazily by SmartFiltersView.onAppear via .task.
     }
 
-    /// Loads the cached large video count from disk if available.
-    /// Called once at init so the count is available immediately.
-    private func loadCachedLargeVideoCount() {
-        guard let data = try? Data(contentsOf: cacheFileURL),
-              let count = try? JSONDecoder().decode(Int.self, from: data) else { return }
-        cachedLargeVideoCount = count
-        categoryCounts[.largeVideos] = count
-    }
-
-    /// Saves the accurate large video count to disk for next launch.
-    private func saveLargeVideoCountToCache(_ count: Int) {
-        cachedLargeVideoCount = count
-        if let data = try? JSONEncoder().encode(count) {
-            try? data.write(to: cacheFileURL, options: .atomic)
+    /// Loads cached Phase-2 accurate counts from disk if available.
+    /// Called once at init so counts are available immediately.
+    private func loadCachedAccurateCounts() {
+        guard let data = try? Data(contentsOf: categoryCountCacheFileURL),
+              let raw = try? JSONDecoder().decode([String: Int].self, from: data) else { return }
+        for (rawCategory, count) in raw {
+            guard let category = FilterCategory(rawValue: rawCategory) else { continue }
+            cachedAccurateCounts[category] = count
+            categoryCounts[category] = count
         }
     }
 
+    /// Saves one category's accurate count to disk for next launch.
+    private func saveAccurateCount(_ count: Int, for category: FilterCategory) {
+        cachedAccurateCounts[category] = count
+        let raw = Dictionary(uniqueKeysWithValues: cachedAccurateCounts.map { ($0.key.rawValue, $0.value) })
+        if let data = try? JSONEncoder().encode(raw) {
+            try? data.write(to: categoryCountCacheFileURL, options: .atomic)
+        }
+    }
+
+    /// Guards against refreshCategoryCounts() re-entering while a previous call is
+    /// still running — it's called from both loadPhotos()'s initial-load path and
+    /// SmartFiltersView's `.task`, which can otherwise fire two full Phase 2 scans
+    /// (including the now-expensive blur/burst ones) concurrently on a fresh launch.
+    private var isRefreshingCounts = false
+
     func refreshCategoryCounts() {
+        guard !isRefreshingCounts else { return }
+        isRefreshingCounts = true
+
         Task.detached(priority: .userInitiated) {
             let service = PhotoLibraryService.shared
 
@@ -298,7 +313,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
             let processed = await self.processedAssetIDs
 
-            // ── Phase 1: All categories in parallel (milliseconds) ────────
+            // ── Phase 1: All categories in parallel (milliseconds, capped at 100) ──
             // withTaskGroup runs each countFast() on a separate thread,
             // so total time = slowest single call instead of their sum.
             var fastCounts: [FilterCategory: Int] = await withTaskGroup(
@@ -316,33 +331,172 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 return results
             }
 
-            // Overlay cached large-video count so the user never waits for Phase 2.
-            let cached = await self.cachedLargeVideoCount
-            if let cached {
-                fastCounts[.largeVideos] = cached
-            }
+            // Overlay cached accurate counts so the user never waits for Phase 2 again.
+            let cached = await self.cachedAccurateCounts
+            for (category, count) in cached { fastCounts[category] = count }
 
             await MainActor.run {
                 withAnimation { self.categoryCounts = fastCounts }
-                // Show smart-shimmer indicator while Phase 2 verifies the count.
-                // If there is no cached value (first launch) the badge itself is nil
-                // → the view falls back to the full shimmer placeholder.
-                self.isCountingLargeVideos = true
+                // Show smart-shimmer indicator while Phase 2 verifies these three —
+                // their Phase 1 count is only a candidate-pool estimate, not a real match count.
+                self.categoriesRecalculating = [.largeVideos, .blurryPhotos, .burstPhotos]
             }
 
-            // ── Phase 2: Accurate large-video count in background ─────────
-            let accurateLargeVideoCount = await Task.detached(priority: .background) {
+            // ── Phase 2: Accurate counts, in parallel, in the background ──────
+            // Large videos is cheap (file-size metadata only) and always runs.
+            // Blurry/burst share a scan lock with startBackgroundBlurBurstPrescan() —
+            // only one blur/burst scan touches BlurBurstScanEngine/BurstAnalyzer at a
+            // time. If the prescan already owns it, skip recomputing here this round
+            // rather than duplicate the same work; the existing cached/estimate value
+            // stays, and the next refresh (or the prescan's own completion) catches up.
+            async let largeVideoCount = Task.detached(priority: .background) {
                 service.count(for: .largeVideos, excluding: processed)
             }.value
 
-            await self.saveLargeVideoCountToCache(accurateLargeVideoCount)
+            let (accurateBlurry, accurateBurst): (Int?, Int?) = await {
+                guard await self.tryAcquireBlurBurstScan() else { return (nil, nil) }
+                async let blurryCount = self.accurateBlurryCount(excluding: processed)
+                async let burstCount = self.accurateBurstCount(excluding: processed)
+                let result = await (blurryCount, burstCount)
+                await self.releaseBlurBurstScan()
+                return result
+            }()
+
+            let accurateLargeVideoCount = await largeVideoCount
+            await self.saveAccurateCount(accurateLargeVideoCount, for: .largeVideos)
+            if let accurateBlurry { await self.saveAccurateCount(accurateBlurry, for: .blurryPhotos) }
+            if let accurateBurst { await self.saveAccurateCount(accurateBurst, for: .burstPhotos) }
 
             await MainActor.run {
                 withAnimation(.spring(response: 0.4)) {
                     self.categoryCounts[.largeVideos] = accurateLargeVideoCount
-                    self.isCountingLargeVideos = false
+                    if let accurateBlurry { self.categoryCounts[.blurryPhotos] = accurateBlurry }
+                    if let accurateBurst { self.categoryCounts[.burstPhotos] = accurateBurst }
+                    self.categoriesRecalculating = []
                 }
+                self.isRefreshingCounts = false
             }
+        }
+    }
+
+    /// Phase 2 accurate blurry count — cache-first (via BlurBurstScanEngine) and
+    /// capped at 100 to match the "99+" display ceiling. Paginates the same way
+    /// scanUntilFull does; each newly-resolved verdict is written back to the
+    /// shared cache, so repeated badge refreshes get progressively cheaper.
+    /// `nonisolated` so the scan genuinely runs off the main actor.
+    private nonisolated func accurateBlurryCount(excluding processedIDs: Set<String>) async -> Int {
+        let service = PhotoLibraryService.shared
+        let cap = 100
+        var cursor = 0
+        var count = 0
+        while count < cap, cursor < service.totalAssetCount {
+            let (batch, next) = service.fetchPageOfAssets(
+                for: .blurryPhotos, startIndex: cursor, pageSize: 300, excluding: processedIDs
+            )
+            cursor = next ?? service.totalAssetCount
+            if !batch.isEmpty {
+                count += await BlurBurstScanEngine.shared.countBlurry(batch, cap: cap - count)
+            }
+            if next == nil { break }
+        }
+        return min(count, cap)
+    }
+
+    /// Phase 2 accurate burst count — same pagination shape as scanUntilFull's burst
+    /// path, capped at 100. Caches per-item verdicts as a side effect.
+    private nonisolated func accurateBurstCount(excluding processedIDs: Set<String>) async -> Int {
+        let service = PhotoLibraryService.shared
+        let cap = 100
+        var cursor = 0
+        var count = 0
+        while count < cap, cursor < service.totalAssetCount {
+            let (batch, next) = service.fetchPageOfAssets(
+                for: .burstPhotos, startIndex: cursor, pageSize: 500, excluding: processedIDs
+            )
+            cursor = next ?? service.totalAssetCount
+            if !batch.isEmpty {
+                let analyzed = await BurstAnalyzer.shared.analyze(batch)
+                let analyzedIDs = Set(analyzed.map { $0.id })
+                BlurBurstCacheService.shared.setBurstVerdicts(
+                    Dictionary(uniqueKeysWithValues: batch.map { ($0.id, analyzedIDs.contains($0.id)) })
+                )
+                count += analyzed.count
+            }
+            if next == nil { break }
+        }
+        return min(count, cap)
+    }
+
+    // MARK: - Background Blur/Burst Pre-scan
+
+    /// True while any blur/burst scan — the prescan below, or refreshCategoryCounts()'s
+    /// Phase 2 accurate count — is actively using BlurBurstScanEngine/BurstAnalyzer.
+    /// Shared between both so they never duplicate the same expensive work concurrently;
+    /// whichever acquires it first proceeds, the other skips its blur/burst work for
+    /// that round. Use tryAcquireBlurBurstScan()/releaseBlurBurstScan(), not directly.
+    private var isBlurBurstScanActive = false
+
+    /// Attempts to claim exclusive access to the blur/burst scan engines. Returns false
+    /// if another scan already owns it — the caller should skip its blur/burst work for
+    /// this round rather than duplicate it. Must be paired with releaseBlurBurstScan().
+    private func tryAcquireBlurBurstScan() -> Bool {
+        guard !isBlurBurstScanActive else { return false }
+        isBlurBurstScanActive = true
+        return true
+    }
+
+    private func releaseBlurBurstScan() {
+        isBlurBurstScanActive = false
+    }
+
+    /// Walks the full library at background priority, populating BlurBurstCacheService
+    /// so Blurry/Burst Smart Filters are already warm by the time the user taps into
+    /// them. Cache-first throughout — re-running this after it already completed once
+    /// is cheap, since every previously-verdicted asset is skipped in O(1). Triggered
+    /// once after onboarding grants Photos permission, and again (cheaply) whenever
+    /// photoLibraryDidChange sees new assets.
+    func startBackgroundBlurBurstPrescan() {
+        guard tryAcquireBlurBurstScan() else { return }
+
+        let service = photoService
+        let excluded = processedAssetIDs
+
+        Task.detached(priority: .background) {
+            if service.fetchResult == nil { service.fetchAllPhotos() }
+
+            await Self.prescanBatches(filter: .blurryPhotos, service: service, excluding: excluded) { batch in
+                await BlurBurstScanEngine.shared.scanBlurry(batch) { _ in }
+            }
+            await Self.prescanBatches(filter: .burstPhotos, service: service, excluding: excluded, pageSize: 500) { batch in
+                let analyzed = await BurstAnalyzer.shared.analyze(batch)
+                let analyzedIDs = Set(analyzed.map { $0.id })
+                BlurBurstCacheService.shared.setBurstVerdicts(
+                    Dictionary(uniqueKeysWithValues: batch.map { ($0.id, analyzedIDs.contains($0.id)) })
+                )
+            }
+
+            await MainActor.run { self.releaseBlurBurstScan() }
+        }
+    }
+
+    /// Pages through every asset matching `filter`, handing each batch to `process`.
+    /// `nonisolated static` — pure pagination + delegation, no actor-isolated state.
+    private nonisolated static func prescanBatches(
+        filter: FilterCategory,
+        service: PhotoLibraryService,
+        excluding: Set<String>,
+        pageSize: Int = 300,
+        process: ([PhotoItem]) async -> Void
+    ) async {
+        var cursor = 0
+        while cursor < service.totalAssetCount {
+            let (batch, next) = service.fetchPageOfAssets(
+                for: filter, startIndex: cursor, pageSize: pageSize, excluding: excluding
+            )
+            cursor = next ?? service.totalAssetCount
+            if !batch.isEmpty { await process(batch) }
+            await Task.yield()
+            if next == nil { break }
         }
     }
 
@@ -420,10 +574,13 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
         Task { @MainActor in
-            // Library changed — invalidate large video cache so Phase 2
-            // runs fresh and the user sees accurate counts.
-            self.cachedLargeVideoCount = nil
-            try? FileManager.default.removeItem(at: self.cacheFileURL)
+            // Library changed — invalidate the accurate-count cache so Phase 2
+            // runs fresh and the user sees accurate counts. Recomputing this is
+            // now cheap even for a fresh cache miss since the per-asset blur/burst
+            // verdict cache (BlurBurstCacheService) below is invalidated
+            // incrementally, not wiped — only genuinely new/removed assets cost anything.
+            self.cachedAccurateCounts = [:]
+            try? FileManager.default.removeItem(at: self.categoryCountCacheFileURL)
 
             guard let oldResult = self.photoService.fetchResult else {
                 // No prior fetch — do a full initial load.
@@ -436,11 +593,16 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             let newResult = self.photoService.fetchAllPhotos()
 
             guard let details = changeInstance.changeDetails(for: oldResult) else { return }
+            guard details.hasIncrementalChanges else { return }
 
-            // Only act on insertions.
-            guard details.hasIncrementalChanges,
-                  let insertedIndexes = details.insertedIndexes,
-                  !insertedIndexes.isEmpty else { return }
+            // Removed assets — drop their verdicts so the cache doesn't accumulate
+            // entries for photos that no longer exist.
+            let removedIDs = Set(details.removedObjects.map { $0.localIdentifier })
+            if !removedIDs.isEmpty {
+                BlurBurstCacheService.shared.invalidate(removedIDs: removedIDs)
+            }
+
+            guard let insertedIndexes = details.insertedIndexes, !insertedIndexes.isEmpty else { return }
 
             // Newly inserted assets arrive at the top (newest-first sort).
             // Collect only those not already seen.
@@ -456,6 +618,11 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
             guard !newItems.isEmpty else { return }
             self.photoStack.insert(contentsOf: newItems, at: 0)
+
+            // Warm the blur/burst cache for the newly inserted assets so Smart
+            // Filters stay instant — cache-first means re-running the prescan is
+            // cheap for every already-known asset, only the new ones cost anything.
+            self.startBackgroundBlurBurstPrescan()
 
             // Burst detection — fires only when app is in foreground
             NotificationScheduler.shared.checkBurstFromLibraryChange(insertedCount: insertedIndexes.count)
@@ -1455,39 +1622,6 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         isLoading = false
     }
 
-    /// Scans items for blur and returns only blurry ones.
-    /// Processes images concurrently for maximum speed.
-    private func filterBlurry(_ items: [PhotoItem]) async -> [PhotoItem] {
-        await withCheckedContinuation { continuation in
-            Task.detached(priority: .userInitiated) {
-                var result: [PhotoItem] = []
-                let group = DispatchGroup()
-                let lock = NSLock()
-
-                for item in items {
-                    guard !item.isVideo else { continue }
-                    group.enter()
-                    PhotoLibraryService.shared.loadImage(
-                        for: item.asset,
-                        targetSize: CGSize(width: 200, height: 200)
-                    ) { image in
-                        defer { group.leave() }
-                        guard let image else { return }
-                        if BlurDetector.shared.isBlurry(image) {
-                            lock.lock()
-                            result.append(item)
-                            lock.unlock()
-                        }
-                    }
-                }
-
-                group.notify(queue: .main) {
-                    continuation.resume(returning: result)
-                }
-            }
-        }
-    }
-
     /// Continuously scans the library until it finds at least `targetCount`
     /// items matching the filter, or exhausts the entire library.
     /// This powers the "refill mechanism" — the user never sees an empty
@@ -1523,35 +1657,29 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             await MainActor.run { self.fetchCursor = newCursor }
 
             if filter == .blurryPhotos {
-                // Stream: push each blurry image to UI as soon as it is found.
-                // User sees cards appear one by one instead of waiting for batch.
-                for item in rawItems {
-                    guard !item.isVideo else { continue }
-                    let result = await withCheckedContinuation { (cont: CheckedContinuation<PhotoItem?, Never>) in
-                        PhotoLibraryService.shared.loadImage(
-                            for: item.asset,
-                            targetSize: CGSize(width: 200, height: 200)
-                        ) { image in
-                            guard let image else { cont.resume(returning: nil); return }
-                            let isBlurry = BlurDetector.shared.isBlurry(image)
-                            cont.resume(returning: isBlurry ? item : nil)
-                        }
-                    }
-                    if let found = result {
-                        await MainActor.run {
-                            self.photoStack.append(found)
-                            self.photoService.startCaching(
-                                for: [found],
-                                targetSize: photoService.cardTargetSize
-                            )
-                            // Hide loading indicator as soon as first result arrives
-                            if self.isLoading { self.isLoading = false }
-                        }
+                // Bounded-concurrency scan (cache-first) — pushes each blurry image to
+                // the UI as soon as it resolves, instead of one-at-a-time sequential
+                // decode+analyze. See BlurBurstScanEngine for the concurrency + cache.
+                let candidates = rawItems.filter { !$0.isVideo }
+                await BlurBurstScanEngine.shared.scanBlurry(candidates) { found in
+                    await MainActor.run {
+                        self.photoStack.append(found)
+                        self.photoService.startCaching(
+                            for: [found],
+                            targetSize: self.photoService.cardTargetSize
+                        )
+                        // Hide loading indicator as soon as first result arrives
+                        if self.isLoading { self.isLoading = false }
                     }
                 }
             } else if filter == .burstPhotos {
-                // Burst needs grouping — analyze full batch then stream results
+                // Burst needs grouping — analyze full batch then stream results.
+                // Internally parallelized (feature prints computed concurrently).
                 let analyzed = await BurstAnalyzer.shared.analyze(rawItems)
+                let analyzedIDs = Set(analyzed.map { $0.id })
+                BlurBurstCacheService.shared.setBurstVerdicts(
+                    Dictionary(uniqueKeysWithValues: rawItems.map { ($0.id, analyzedIDs.contains($0.id)) })
+                )
                 if !analyzed.isEmpty {
                     await MainActor.run {
                         self.photoStack.append(contentsOf: analyzed)

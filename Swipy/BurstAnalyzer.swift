@@ -25,10 +25,16 @@ class BurstAnalyzer {
             ($0.asset.creationDate ?? .distantPast) < ($1.asset.creationDate ?? .distantPast)
         }
 
+        // Every item that isn't part of a native burst chain may need its feature print —
+        // which one depends on the grouping decisions below, so precompute all of them
+        // concurrently up front. The grouping pass itself is then pure CPU (dictionary
+        // lookups + vector distance), no more sequential per-photo I/O waits.
+        let prints = await featurePrints(for: sorted)
+
         var groups: [[PhotoItem]] = []
         var currentGroup: [PhotoItem] = [sorted[0]]
         // Feature print of the last item added to the current group
-        var lastPrint: VNFeaturePrintObservation? = await featurePrint(for: sorted[0].asset)
+        var lastPrint: VNFeaturePrintObservation? = prints[sorted[0].id]
 
         for i in 1..<sorted.count {
             let prev = sorted[i - 1]
@@ -39,14 +45,12 @@ class BurstAnalyzer {
                 && prev.asset.burstIdentifier == curr.asset.burstIdentifier
 
             var shouldGroup = false
-            var currPrint: VNFeaturePrintObservation? = nil
+            let currPrint = prints[curr.id]
 
             if sameBurstID {
                 // Native iOS burst — no need for visual check
                 shouldGroup = true
             } else if gap <= timeGapThreshold {
-                // Only compute feature print when time gate passes
-                currPrint = await featurePrint(for: curr.asset)
                 if let p1 = lastPrint, let p2 = currPrint {
                     var distance: Float = 0
                     try? p1.computeDistance(&distance, to: p2)
@@ -65,11 +69,7 @@ class BurstAnalyzer {
                 if currentGroup.count >= minGroupSize { groups.append(currentGroup) }
                 currentGroup = [curr]
                 // Reuse already-computed print for the new group's anchor
-                if let p = currPrint {
-                    lastPrint = p
-                } else {
-                    lastPrint = await featurePrint(for: curr.asset)
-                }
+                lastPrint = currPrint
             }
         }
         if currentGroup.count >= minGroupSize { groups.append(currentGroup) }
@@ -89,6 +89,27 @@ class BurstAnalyzer {
     }
 
     // MARK: - Private
+
+    private static let maxConcurrency = 6
+
+    /// Computes feature prints for every item concurrently, bounded to avoid decoding
+    /// too many images at once. Order-independent — the grouping pass looks these up by ID.
+    private func featurePrints(for items: [PhotoItem]) async -> [String: VNFeaturePrintObservation] {
+        var result: [String: VNFeaturePrintObservation] = [:]
+        await withTaskGroup(of: (String, VNFeaturePrintObservation?).self) { group in
+            var iterator = items.makeIterator()
+            func addNext() {
+                guard let item = iterator.next() else { return }
+                group.addTask { (item.id, await self.featurePrint(for: item.asset)) }
+            }
+            for _ in 0..<Self.maxConcurrency { addNext() }
+            while let (id, fp) = await group.next() {
+                if let fp { result[id] = fp }
+                addNext()
+            }
+        }
+        return result
+    }
 
     private func featurePrint(for asset: PHAsset) async -> VNFeaturePrintObservation? {
         await withCheckedContinuation { continuation in

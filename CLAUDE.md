@@ -105,6 +105,8 @@ Swipy/
 ├── Services/
 │   ├── PhotoLibraryService.swift   # PHPhotoLibrary access + pagination
 │   ├── AestheticScoringService.swift # Builds UserAestheticPersona from Favorites; scores cards 1–10
+│   ├── BlurBurstCacheService.swift # Disk-backed [assetID: Bool] verdict cache for Blurry/Burst Smart Filters
+│   ├── BlurBurstScanEngine.swift   # Nonisolated, bounded-concurrency (6) blur scanner; cache-first
 │   ├── PersistenceService.swift    # UserDefaults (kept IDs, bin IDs, space saved)
 │   ├── DailyLimitService.swift     # 120 free swipes/day + share bonus; gates PremiumManager paywall trigger
 │   ├── PremiumManager.swift        # StoreKit 2 — PremiumTier (monthly/yearly/lifetime), entitlement status
@@ -226,10 +228,23 @@ The tab bar is the native iOS `TabView` — on iOS 18 it renders automatically a
 
 ## Smart Filter Counting (2-Phase)
 
-Phase 1 (fast, runs first): metadata-only `PHFetchRequest` counts — instant.
-Phase 2 (accurate, background): resource inspection for large videos / burst analysis — streams results.
+Phase 1 (fast, runs first): metadata-only `PHFetchRequest` counts, capped at 100 (matches the "99+" display ceiling) — instant for every category, including `.blurryPhotos`/`.burstPhotos` where this is only a *candidate-pool* estimate (all non-screenshot images), not a real match count.
 
-Views show a shimmer/loading indicator while Phase 2 is in progress. Never block Phase 1 counts waiting for Phase 2 to finish.
+Phase 2 (accurate, background): runs for all three expensive categories — `.largeVideos` (file-size resource inspection, always runs) and `.blurryPhotos`/`.burstPhotos` (cache-first via `BlurBurstCacheService`/`BlurBurstScanEngine`, capped at 100) — in parallel via `async let` in `PhotoStackViewModel.refreshCategoryCounts()`. Results persist to `Documents/categoryCounts.json` so a warm cache is available immediately on the next launch, before Phase 2 even reruns. `refreshCategoryCounts()` is itself guarded by `isRefreshingCounts` so its two real-world call sites (the initial `loadPhotos()` path and `SmartFiltersView`'s `.task`) can't fire two concurrent Phase 2 scans on a fresh launch.
+
+`PhotoStackViewModel.categoriesRecalculating: Set<FilterCategory>` (not a single large-video-only bool) drives the shimmer/spinner per category in `SmartFiltersView`. Never block Phase 1 counts waiting for Phase 2 to finish.
+
+`SmartFiltersView` only triggers `refreshCategoryCounts()` in three cases — first-ever load (`categoryCounts.isEmpty`), after a swipe/keep/delete/snooze/undo action flags `hasPendingCountUpdate` and the user returns to the tab, or an explicit pull-to-refresh. Simply switching tabs back and forth without any of those does not re-trigger it — the in-memory `categoryCounts` is reused as-is.
+
+### Blurry/Burst Scanning — Bounded Concurrency + Verdict Cache
+Both categories used to decode and analyze candidate photos **sequentially, one at a time** on every visit — the root cause of a reported hang where a "99+" badge led into a long unresponsive load with a bare spinner and no progress signal. Fixed via:
+- **`BlurBurstCacheService`** — disk-backed `[assetID: Bool]` verdict cache (Caches dir, debounced writes). A verdict is stable for the asset's lifetime, so it's computed once, not on every category visit.
+- **`BlurBurstScanEngine`** — a plain (non-`@MainActor`) class, like `BlurDetector`/`BurstAnalyzer`, so its `CIFilter`/Vision work genuinely runs off the main thread even when awaited from a `@MainActor` caller. Scans with bounded concurrency (`TaskGroup`, cap 6) instead of one image at a time, and uses `loadImageForAnalysis` (`.fastFormat`, no network) instead of the card-display path's `.highQualityFormat`+network — an iCloud-only photo with no local proxy is skipped for that pass, never blocks the scan waiting on a download.
+- **`BurstAnalyzer`** — the sequential chain-grouping algorithm is unchanged (each item's grouping decision depends on the previous group's state), but the expensive `VNFeaturePrintObservation` computation per photo is now precomputed concurrently up front (bounded `TaskGroup`); the grouping pass itself is then pure CPU (dictionary lookups + vector distance).
+- **`PhotoStackViewModel.startBackgroundBlurBurstPrescan()`** — triggered once from `OnboardingView` right after Photos permission is granted, walks the full library at `.background` priority so both categories are already warm by the time the user taps into them. Cache-first makes repeat runs (e.g. re-triggered on library changes) cheap. Shares a single lock (`isBlurBurstScanActive`, claimed/released via `tryAcquireBlurBurstScan()`/`releaseBlurBurstScan()`) with `refreshCategoryCounts()`'s Phase 2 blurry/burst counting — only one of the two touches `BlurBurstScanEngine`/`BurstAnalyzer` at a time; whichever loses the race skips its blur/burst work for that round rather than duplicate it.
+- **`photoLibraryDidChange`** — incremental cache invalidation: removed assets are purged from the verdict cache (`BlurBurstCacheService.invalidate(removedIDs:)`), not a full wipe; newly inserted assets trigger a fresh (cheap, cache-first) prescan run.
+
+See `ARCHITECTURE_SWIPE_LOADING.md` §3b for the full data flow.
 
 ---
 

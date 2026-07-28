@@ -176,7 +176,7 @@ struct SmartFiltersView: View {
                 
                 // Count badge
                 let cachedCount = stackViewModel.categoryCounts[category]
-                let isRecalculating = category == .largeVideos && stackViewModel.isCountingLargeVideos
+                let isRecalculating = stackViewModel.categoriesRecalculating.contains(category)
 
                 if cachedCount == nil {
                     // No data at all yet — show full shimmer placeholder.
