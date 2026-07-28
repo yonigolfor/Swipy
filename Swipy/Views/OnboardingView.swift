@@ -3,14 +3,16 @@
 //  OnboardingView.swift
 //  CleanSwipe
 //
-//  6-step onboarding flow shown only on first launch.
+//  6-step onboarding flow shown only on first launch, plus an embedded paywall
+//  page (step 7) that gates the actual handoff to the main app.
 //  Display order (case numbers differ — see switch statement):
 //  1. Visual Hook    — animated photo stack
 //  2. Permission     — pre-permission screen before iOS prompt
 //  3. Swipe Demo     — interactive swipe tutorial
 //  4. Snooze Intro   — explains swipe-up to snooze
 //  5. Scan           — real PHAsset counts with animated counters
-//  6. Quick Win      — transition into the app
+//  6. Quick Win      — CTA slides to the paywall page (currentStep = 6)
+//  7. Paywall        — dismissing it (X, purchase, or restore) calls onComplete()
 //
 
 import SwiftUI
@@ -19,7 +21,9 @@ import Photos
 struct OnboardingView: View {
 
     @ObservedObject var viewModel: PhotoStackViewModel
-    /// Called when onboarding completes — parent should show ContentView.
+    /// Called when the embedded paywall page (step6_Paywall) is dismissed —
+    /// parent should show ContentView. Not called any earlier; step5_QuickWin's
+    /// CTA only advances currentStep to the paywall page.
     let onComplete: () -> Void
 
     @Environment(\.scenePhase) private var scenePhase
@@ -68,6 +72,7 @@ struct OnboardingView: View {
                 case 3: step4_Permission
                 case 4: step5_QuickWin
                 case 5: step_SnoozeIntro
+                case 6: step6_Paywall
                 default: EmptyView()
                 }
             }
@@ -597,7 +602,11 @@ struct OnboardingView: View {
 
             Button {
                 haptic.impactOccurred()
-                onComplete()
+                // Slide to the paywall page rather than completing onboarding directly —
+                // conversion is highest right here, before the user has seen the main app.
+                withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
+                    currentStep = 6
+                }
             } label: {
                 Text(String(localized: "onboarding.quickwin.cta"))
                     .font(.headline)
@@ -619,6 +628,17 @@ struct OnboardingView: View {
             .padding(.horizontal, 32)
             .padding(.bottom, 48)
         }
+    }
+
+    // MARK: - Step 6: Paywall
+
+    /// Final page of the onboarding sequence, reached via the same currentStep-driven
+    /// transition as every other step (slides in from the trailing edge). Its dismiss
+    /// action IS onComplete() — there's no sheet/fullScreenCover here to dismiss, so
+    /// closing this page is what actually finishes onboarding and hands off to
+    /// ContentView (see SplashScreenView's transition on the hasCompletedOnboarding swap).
+    private var step6_Paywall: some View {
+        PaywallView(context: .postOnboarding, onDismiss: onComplete)
     }
 
     // MARK: - Snooze Intro

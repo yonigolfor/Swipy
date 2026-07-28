@@ -342,7 +342,7 @@ struct SwipeStackView: View {
             viewModel.pauseVideoPool()
         }
         .fullScreenCover(isPresented: $viewModel.shouldShowPaywall) {
-            PaywallView()
+            PaywallView(context: .swipeLimitReached)
         }
         .sheet(isPresented: $viewModel.isShowingShareSheet) {
             // .presentationDetents were previously suspected as the cause of third-party

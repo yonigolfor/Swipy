@@ -13,14 +13,29 @@ struct SplashScreenView: View {
     @State private var size = 0.7
     @State private var opacity = 0.4
 
+    /// Shared by both branches below so onboarding (incl. its embedded paywall page)
+    /// slides out to the left while ContentView slides in from the right — the same
+    /// horizontal language OnboardingView already uses between its own steps.
+    private var handoffTransition: AnyTransition {
+        .asymmetric(
+            insertion: .move(edge: .trailing).combined(with: .opacity),
+            removal: .move(edge: .leading).combined(with: .opacity)
+        )
+    }
+
     var body: some View {
         if isActive {
             if hasCompletedOnboarding {
                 ContentView(stackViewModel: stackViewModel)
+                    .transition(handoffTransition)
             } else {
                 OnboardingView(viewModel: stackViewModel) {
-                    hasCompletedOnboarding = true
+                    // The paywall page's own dismiss IS this — see step6_Paywall.
+                    withAnimation(.spring(response: 0.4, dampingFraction: 0.75)) {
+                        hasCompletedOnboarding = true
+                    }
                 }
+                .transition(handoffTransition)
             }
         } else {
             ZStack {

@@ -1,12 +1,29 @@
 import SwiftUI
 import StoreKit
 
+/// Where the paywall was triggered from — drives which headline/subtitle copy is shown.
+enum PaywallContext {
+    /// Shown once, embedded as the final page of the onboarding sequence.
+    case postOnboarding
+    /// Shown via fullScreenCover when DailyLimitService.canSwipe(isPremium:) returns false.
+    case swipeLimitReached
+}
+
 struct PaywallView: View {
+    let context: PaywallContext
+    /// Set when PaywallView is embedded directly in a view hierarchy (e.g. as an
+    /// onboarding page) rather than presented via sheet/fullScreenCover — there's
+    /// nothing for `@Environment(\.dismiss)` to dismiss in that case, so closing
+    /// (X tap, successful purchase) calls this instead. Nil preserves the original
+    /// sheet/fullScreenCover behavior.
+    var onDismiss: (() -> Void)? = nil
+
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var premiumManager = PremiumManager.shared
     @ObservedObject private var dailyLimit = DailyLimitService.shared
 
     // Decided once per presentation, before first render — avoids a post-layout flash.
+    // Only used for .swipeLimitReached; .postOnboarding has a single fixed headline.
     @State private var headerVariant: Bool = Bool.random()
     @State private var selectedTier: PremiumTier = .yearly
     // Starts nil (not `.yearly.id`) so the `.task` below is a genuine transition —
@@ -54,20 +71,30 @@ struct PaywallView: View {
                 bottomCTASection
             }
 
-            // X dismiss button — static, not animated
+            // X dismiss button — static, not animated. Full-white icon + a stroked
+            // background keeps it readable over any part of the gradient/blur below;
+            // the 44×44 hit area (Apple's minimum) is decoupled from the smaller
+            // visible circle via an outer frame + contentShape, so the button doesn't
+            // visually balloon just to satisfy tap-target size.
             VStack {
                 HStack {
                     Button {
-                        dismiss()
+                        closePaywall()
                     } label: {
-                        Image(systemName: "xmark")
-                            .font(.system(size: 16, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.55))
-                            .padding(10)
-                            .background(Circle().fill(.white.opacity(0.10)))
+                        ZStack {
+                            Circle()
+                                .fill(.white.opacity(0.18))
+                                .overlay(Circle().stroke(.white.opacity(0.30), lineWidth: 1))
+                                .frame(width: 34, height: 34)
+                            Image(systemName: "xmark")
+                                .font(.system(size: 15, weight: .bold))
+                                .foregroundStyle(.white)
+                        }
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                     }
-                    .padding(.leading, 20)
-                    .padding(.top, 20)
+                    .padding(.leading, 12)
+                    .padding(.top, 12)
                     Spacer()
                 }
                 Spacer()
@@ -80,7 +107,7 @@ struct PaywallView: View {
                     Spacer()
                     Button {
                         DailyLimitService.shared.resetDailyCount()
-                        dismiss()
+                        closePaywall()
                     } label: {
                         Text("🧪")
                             .font(.system(size: 22))
@@ -123,7 +150,7 @@ struct PaywallView: View {
                     try? await Task.sleep(nanoseconds: 3_000_000_000)
                     withAnimation(.easeOut(duration: 0.3)) { showBonusToast = false }
                     try? await Task.sleep(nanoseconds: 300_000_000)
-                    dismiss()
+                    closePaywall()
                 }
             }
         }
@@ -134,7 +161,18 @@ struct PaywallView: View {
             AnalyticsService.shared.log(.paywallShown)
         }
         .onChange(of: premiumManager.isPremium) { _, isPremium in
-            if isPremium { dismiss() }
+            if isPremium { closePaywall() }
+        }
+    }
+
+    /// Closes the paywall — via the caller-provided `onDismiss` when embedded in a
+    /// view hierarchy (no active presentation to dismiss), or `@Environment(\.dismiss)`
+    /// when presented via sheet/fullScreenCover (the original behavior).
+    private func closePaywall() {
+        if let onDismiss {
+            onDismiss()
+        } else {
+            dismiss()
         }
     }
 
@@ -169,6 +207,27 @@ struct PaywallView: View {
 
     // MARK: - Header
 
+    /// Post-onboarding gets one fixed, context-appropriate headline (a swipe-limit
+    /// message would be nonsensical before the user has ever swiped). The daily-limit
+    /// paywall keeps its existing random A/B headline.
+    private var headlineText: String {
+        switch context {
+        case .postOnboarding:
+            return String(localized: "paywall.title.onboarding")
+        case .swipeLimitReached:
+            return String(localized: headerVariant ? "paywall.title.a" : "paywall.title.b")
+        }
+    }
+
+    private var subtitleText: String {
+        switch context {
+        case .postOnboarding:
+            return String(localized: "paywall.subtitle.onboarding")
+        case .swipeLimitReached:
+            return String(localized: "paywall.subtitle")
+        }
+    }
+
     private var headerSection: some View {
         VStack(spacing: 22) {
             ZStack {
@@ -195,13 +254,13 @@ struct PaywallView: View {
             }
 
             VStack(spacing: 10) {
-                Text(String(localized: headerVariant ? "paywall.title.a" : "paywall.title.b"))
+                Text(headlineText)
                     .font(.system(size: 30, weight: .bold, design: .rounded))
                     .foregroundStyle(.white)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
 
-                Text(String(localized: "paywall.subtitle"))
+                Text(subtitleText)
                     .font(.system(size: 16, weight: .regular, design: .rounded))
                     .foregroundStyle(.white.opacity(0.60))
                     .multilineTextAlignment(.center)
@@ -513,5 +572,5 @@ struct PaywallView: View {
 }
 
 #Preview {
-    PaywallView()
+    PaywallView(context: .swipeLimitReached)
 }

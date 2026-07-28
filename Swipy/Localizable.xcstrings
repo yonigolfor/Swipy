@@ -1868,6 +1868,23 @@
         }
       }
     },
+    "paywall.subtitle.onboarding" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Get unlimited swipes and ads-free to clean years of photo clutter in minutes."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "קבלו החלקות ללא הגבלה וללא פרסומות כדי לנקות שנים של בלגן בתמונות תוך דקות."
+          }
+        }
+      }
+    },
     "paywall.tier.bestValue" : {
       "extractionState" : "manual",
       "localizations" : {
@@ -2000,6 +2017,23 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "שמרו על המומנטום!"
+          }
+        }
+      }
+    },
+    "paywall.title.onboarding" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unlock Swipy Premium"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "פתחו את Swipy Premium"
           }
         }
       }

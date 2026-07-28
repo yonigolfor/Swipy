@@ -3,6 +3,8 @@
 Single file: `Swipy/Views/OnboardingView.swift`  
 Gate: `hasCompletedOnboarding` in `UserDefaults` — `SplashScreenView` checks this; `onComplete()` sets it to `true`.
 
+**Post-onboarding paywall:** `PaywallView(context: .postOnboarding, onDismiss: onComplete)` is embedded as `step6_Paywall` — a 7th page in the same `currentStep`-driven switch as every other step, so it slides in with the identical horizontal transition (`.move(edge: .trailing)` insertion / `.move(edge: .leading)` removal via `.id(currentStep)`), not a vertical sheet/fullScreenCover. `step5_QuickWin`'s CTA no longer calls `onComplete()` directly — it animates `currentStep = 6`. Since the paywall page isn't presented via an actual SwiftUI presentation, `@Environment(\.dismiss)` has nothing to dismiss; `PaywallView.onDismiss` (nil by default, preserving the original sheet/fullScreenCover behavior at its other call site) is set here to `onComplete` itself, so closing this page (X tap, successful purchase, or restore) is literally what finishes onboarding. `SplashScreenView`'s `hasCompletedOnboarding` swap (`OnboardingView` → `ContentView`) is wrapped in `withAnimation` with a matching asymmetric transition, so the handoff continues the same leftward slide — onboarding+paywall exits left, `ContentView` (already defaulting to the Swipe tab) enters from the right. `PaywallView` gained a `context: PaywallContext` (`.postOnboarding` / `.swipeLimitReached`) driving distinct headline/subtitle copy — see `paywall.title.onboarding`/`paywall.subtitle.onboarding` in `Localizable.xcstrings`.
+
 ---
 
 ## Architecture
@@ -42,7 +44,8 @@ Step changes always use `.spring(response: 0.4, dampingFraction: 0.75)`.
 | 3 | `2` | `step3_SwipeDemo` | ניקוי בסטייל | → `5` |
 | 4 | `5` | `step_SnoozeIntro` | לא בטוחים? אין בעיה | → `1` |
 | 5 | `1` | `step2_Scan` | סורק את הגלריה | → `4` |
-| 6 | `4` | `step5_QuickWin` | הכל מוכן! | → `onComplete()` |
+| 6 | `4` | `step5_QuickWin` | הכל מוכן! | → `6` |
+| 7 | `6` | `step6_Paywall` | (PaywallView, `.postOnboarding` context) | → `onComplete()` on dismiss |
 
 ---
 
@@ -137,7 +140,7 @@ Step changes always use `.spring(response: 0.4, dampingFraction: 0.75)`.
 
 - **Visual:** `checkmark.seal.fill` (size 80) in `.green`, two concentric green-tinted circles (140pt + 180pt)
 - **Shadow:** `.green.opacity(0.5)`, radius 20
-- **CTA:** calls `onComplete()` — sets `hasCompletedOnboarding = true` and shows `ContentView`
+- **CTA:** animates `currentStep = 6`, sliding to the embedded paywall page — does **not** call `onComplete()` directly (see gate note above)
 
 ---
 
