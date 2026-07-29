@@ -825,7 +825,9 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 return
             }
 
+            #if DEBUG
             print("📸 initial page: \(rawItems.count) items, cursor: \(self.fetchCursor)/\(self.photoService.totalAssetCount)")
+            #endif
 
             await MainActor.run {
                 // Kick off pool warm-up BEFORE publishing photoStack so the pool
@@ -1048,7 +1050,9 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
             let newFetchCursor = nextIdx ?? photoService.totalAssetCount
 
+            #if DEBUG
             print("📸 next page: \(rawItems.count) items, cursor: \(newFetchCursor)/\(self.photoService.totalAssetCount)")
+            #endif
 
             await MainActor.run {
                 if !rawItems.isEmpty {
@@ -1915,7 +1919,9 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     private func precacheNextImages() {
         let nextItems = Array(photoStack.prefix(8))
         guard !nextItems.isEmpty else { return }
+        #if DEBUG
         print("[AestheticScoring] precacheNextImages — \(nextItems.count) items, personaReady=\(AestheticScoringService.shared.isPersonaReady)")
+        #endif
 
         // OS hint: give PHCachingImageManager 20 items to pre-decode in the background;
         // zero NSCache cost — iOS evicts the pipeline buffer under memory pressure automatically.
@@ -1967,9 +1973,11 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// before the persona was ready and therefore skipped the scoring guard.
     private func scoreCachedCardsIfNeeded() {
         guard AestheticScoringService.shared.isPersonaReady else { return }
+        #if DEBUG
         let stackSize = photoStack.prefix(8).filter { !$0.isVideo }.count
         let cachedCount = photoStack.prefix(8).filter { !$0.isVideo && photoService.cachedImage(for: $0.id) != nil }.count
         print("[AestheticScoring] scoreCachedCardsIfNeeded — stack:\(stackSize) cached:\(cachedCount)")
+        #endif
         for item in photoStack.prefix(8) where !item.isVideo {
             guard let cached = photoService.cachedImage(for: item.id) else { continue }
             scheduleScore(item: item, image: cached)
@@ -1979,14 +1987,20 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// Fires a background score task if the item hasn't been scored yet.
     /// Called from both precache paths (cache-hit and post-load).
     private func scheduleScore(item: PhotoItem, image: UIImage) {
+        #if DEBUG
         print("[AestheticScoring] scheduleScore called for \(item.id.prefix(8)), personaReady=\(AestheticScoringService.shared.isPersonaReady)")
+        #endif
         if AestheticScoringService.shared.cachedScore(for: item.id) != nil {
+            #if DEBUG
             print("[AestheticScoring] scheduleScore: cache hit for \(item.id.prefix(8)), inserting into loadedScoreIDs")
+            #endif
             _ = loadedScoreIDs.insert(item.id)
             return
         }
         guard AestheticScoringService.shared.isPersonaReady else {
+            #if DEBUG
             print("[AestheticScoring] scheduleScore: persona not ready, skipping \(item.id.prefix(8))")
+            #endif
             return
         }
         let capturedItem = item
@@ -1995,7 +2009,9 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         // Dispatch to a GCD thread — same pattern used in analyzeFavorites().
         DispatchQueue.global(qos: .utility).async { [weak self] in
             let score = AestheticScoringService.shared.score(for: capturedItem.asset, image: capturedImg)
+            #if DEBUG
             print("[AestheticScoring] scheduleScore: scored \(capturedItem.id.prefix(8)) → \(score)")
+            #endif
             guard score > 0 else { return }
             DispatchQueue.main.async { [weak self] in
                 _ = self?.loadedScoreIDs.insert(capturedItem.id)

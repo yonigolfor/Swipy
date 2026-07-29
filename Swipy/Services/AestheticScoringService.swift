@@ -86,15 +86,19 @@ final class AestheticScoringService {
     /// No-op if already built or currently running.
     func analyzeFavorites() async {
         if persona?.isReady == true {
+            #if DEBUG
             print("[AestheticScoring] ✓ Persona already loaded from cache (\(persona!.sampleCount) favorites). Skipping re-analysis.")
             print(persona!.debugDescription)
+            #endif
             return
         }
         guard !isAnalyzing else { return }
         isAnalyzing = true
         defer { isAnalyzing = false }
 
+        #if DEBUG
         print("[AestheticScoring] ▶︎ Starting user style analysis…")
+        #endif
         let startTime = Date()
 
         // Dispatch blocking PHImageManager + Vision work to a GCD thread.
@@ -105,7 +109,9 @@ final class AestheticScoringService {
                 continuation.resume(returning: self.buildPersonaBlocking())
             }
         }) else {
+            #if DEBUG
             print("[AestheticScoring] ✗ Analysis aborted — see logs above for reason.")
+            #endif
             return
         }
 
@@ -114,9 +120,11 @@ final class AestheticScoringService {
             UserDefaults.standard.set(data, forKey: personaKey)
         }
 
+        #if DEBUG
         let elapsed = String(format: "%.1f", Date().timeIntervalSince(startTime))
         print("[AestheticScoring] ✓ Style analysis complete in \(elapsed)s — \(p.sampleCount) favorites scanned.")
         print(p.debugDescription)
+        #endif
     }
 
     private func buildPersonaBlocking() -> UserAestheticPersona? {
@@ -130,9 +138,13 @@ final class AestheticScoringService {
 
         let result = PHAsset.fetchAssets(with: opts)
         let total = result.count
+        #if DEBUG
         print("[AestheticScoring] Found \(total) favorited images in library.")
+        #endif
         guard total >= 3 else {
+            #if DEBUG
             print("[AestheticScoring] ✗ Too few favorites (\(total)) — need at least 3.")
+            #endif
             return nil
         }
         let sampleN = min(total, 200)
@@ -181,9 +193,13 @@ final class AestheticScoringService {
             }
         }
 
+        #if DEBUG
         print("[AestheticScoring] Loaded \(loadedCount)/\(sampleN) thumbnails successfully.")
+        #endif
         guard !sharpnessValues.isEmpty else {
+            #if DEBUG
             print("[AestheticScoring] ✗ All thumbnails failed to load (iCloud-only photos with no local cache?).")
+            #endif
             return nil
         }
 
@@ -199,9 +215,13 @@ final class AestheticScoringService {
         if fpCount > 0 && !fpAccum.isEmpty {
             let n = Float(fpCount)
             p.featurePrintCentroid = fpAccum.map { $0 / n }
+            #if DEBUG
             print("[AestheticScoring] Feature print centroid built from \(fpCount) images (\(fpAccum.count) dims).")
+            #endif
         } else {
+            #if DEBUG
             print("[AestheticScoring] ⚠︎ Feature print extraction failed for all images — centroid unavailable.")
+            #endif
         }
 
         p.isReady = true
@@ -215,16 +235,24 @@ final class AestheticScoringService {
     func score(for asset: PHAsset, image: UIImage) -> Int {
         let key = asset.localIdentifier as NSString
         if let cached = scoreCache.object(forKey: key) {
+            #if DEBUG
             print("[AestheticScoring] score() NSCache hit → \(cached.intValue) for \(asset.localIdentifier.prefix(8))")
+            #endif
             return cached.intValue
         }
         guard let p = persona, p.isReady else {
+            #if DEBUG
             print("[AestheticScoring] score() persona nil/not ready — returning 0")
+            #endif
             return 0
         }
+        #if DEBUG
         print("[AestheticScoring] score() computing for \(asset.localIdentifier.prefix(8))…")
+        #endif
         let result = computeScore(asset: asset, image: image, persona: p)
+        #if DEBUG
         print("[AestheticScoring] score() done → \(result) for \(asset.localIdentifier.prefix(8))")
+        #endif
         scoreCache.setObject(NSNumber(value: result), forKey: key)
         return result
     }
