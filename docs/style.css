@@ -7,6 +7,9 @@
   --accent-2: #7a4dff;
   --card-bg: #f6f7fb;
   --border: rgba(0, 0, 0, 0.08);
+  --swipe-green: #33cc66;
+  --swipe-red: #f24d4d;
+  --swipe-blue: #408cf2;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -47,14 +50,8 @@ body {
   width: 40px;
   height: 40px;
   border-radius: 11px;
-  background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #fff;
-  font-weight: 700;
-  font-size: 20px;
-  font-family: -apple-system, "SF Pro Rounded", sans-serif;
+  display: block;
+  object-fit: cover;
   flex-shrink: 0;
 }
 
@@ -121,4 +118,154 @@ footer {
   margin: 0 0 10px;
   font-size: 13px;
   color: var(--fg-muted);
+}
+
+/* ---------- Landing page ---------- */
+
+.wrap--landing {
+  max-width: 1080px;
+  padding-top: 40px;
+}
+
+.hero {
+  max-width: 620px;
+  margin: 0 auto;
+  padding: 24px 0 8px;
+  text-align: center;
+}
+
+.hero-title {
+  font-size: clamp(30px, 5.5vw, 46px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.12;
+  margin: 0 0 18px;
+}
+
+.hero-sub {
+  font-size: 17px;
+  color: var(--fg-muted);
+  max-width: 480px;
+  margin: 0 auto 32px;
+}
+
+.waitlist-form { margin: 0 auto; max-width: 460px; }
+
+.hp-field { position: absolute; left: -9999px; }
+
+.form-row {
+  display: flex;
+  gap: 10px;
+}
+
+.form-row input[type="email"] {
+  flex: 1;
+  min-width: 0;
+  padding: 14px 16px;
+  font-size: 15.5px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--fg);
+  font-family: inherit;
+}
+
+.form-row input[type="email"]:focus {
+  outline: 2px solid var(--accent-1);
+  outline-offset: 1px;
+}
+
+.form-row button {
+  flex-shrink: 0;
+  padding: 14px 22px;
+  font-size: 15.5px;
+  font-weight: 700;
+  color: #fff;
+  background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.form-row button:hover { opacity: 0.9; transform: translateY(-1px); }
+.form-row button:active { transform: translateY(0); }
+
+.form-success {
+  max-width: 460px;
+  margin: 0 auto;
+  padding: 14px 18px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--swipe-green);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  text-align: center;
+}
+
+/* Screenshot carousel — real app screens, swipeable via native scroll-snap */
+
+.screens-showcase { padding: 40px 0 56px; }
+
+.screens-carousel {
+  display: flex;
+  gap: 20px;
+  overflow-x: auto;
+  scroll-snap-type: x mandatory;
+  padding: 0 calc(50% - 130px) 12px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+
+.screens-carousel::-webkit-scrollbar { display: none; }
+
+.screen-slide {
+  flex: 0 0 auto;
+  scroll-snap-align: center;
+}
+
+.screen-slide img {
+  display: block;
+  height: 460px;
+  width: auto;
+  max-width: 80vw;
+  border-radius: 28px;
+  box-shadow: 0 30px 60px -20px rgba(0, 0, 0, 0.35);
+}
+
+/* Feature grid */
+
+.features {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+  margin: 8px 0 48px;
+}
+
+.feature-card { text-align: center; }
+
+.feature-icon { font-size: 30px; margin-bottom: 10px; }
+
+.feature-card h3 {
+  font-size: 17px;
+  font-weight: 700;
+  margin: 0 0 8px;
+  letter-spacing: -0.01em;
+}
+
+.feature-card p {
+  font-size: 14.5px;
+  color: var(--fg-muted);
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .wrap--landing { padding-top: 28px; }
+  .form-row { flex-direction: column; }
+  .form-row button { width: 100%; }
+  .screen-slide img { height: 380px; }
+  .screens-carousel { padding-left: calc(50% - 108px); padding-right: calc(50% - 108px); }
+  .features { grid-template-columns: 1fr; }
 }
