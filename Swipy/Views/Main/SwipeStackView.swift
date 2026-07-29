@@ -155,7 +155,14 @@ struct SwipeStackView: View {
                                     .degrees(index == 0 ? dragRotation : item.rotation)
                                 )
                                 .opacity(index == 0 ? 1.0 : (1.0 - Double(index) * 0.2))
-                                .animation(.spring(response: 0.3, dampingFraction: 0.7), value: dragOffset)
+                                // nil while actively dragging = immediate 1:1 finger tracking (matches
+                                // the pinch pattern below); spring only takes over on release/reset/fling,
+                                // which are already wrapped in their own explicit withAnimation calls.
+                                .animation(
+                                    index == 0 && !isDragging
+                                        ? .spring(response: 0.3, dampingFraction: 0.7) : nil,
+                                    value: dragOffset
+                                )
                                 // During pinch: nil = immediate 1:1 response to gesture.
                                 // After pinch ends: spring returns card to original size/position.
                                 .animation(
@@ -939,7 +946,16 @@ struct SwipeStackView: View {
         MagnificationGesture()
             .onChanged { scale in
                 pinchScale = max(1.0, scale)
-                if !isPinching, pinchScale > 1.01 { isPinching = true }
+                if !isPinching, pinchScale > 1.01 {
+                    isPinching = true
+                    // A single-finger drag may already be mid-flight when the second
+                    // finger lands — dragGesture.onChanged bails out once isPinching
+                    // is true, so without this reset dragOffset/dragRotation would
+                    // stay frozen at their last value and stack underneath pinchOffset
+                    // for the whole gesture instead of the card tracking the pinch.
+                    dragOffset = .zero
+                    dragRotation = 0
+                }
             }
             .onEnded { _ in
                 // Spring reset handled by onChange(of: isPinching) below.
