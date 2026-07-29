@@ -19,6 +19,7 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
+<div class="bg-glow" aria-hidden="true"><span class="glow-a"></span><span class="glow-b"></span></div>
 <div class="wrap wrap--landing">
 
   <div class="brand">
@@ -28,7 +29,8 @@
 
   <main>
     <section class="hero">
-      <h1 class="hero-title">Declutter Years of Photo Clutter in Seconds.</h1>
+      <p class="hero-eyebrow">🚀 Launching Soon</p>
+      <h1 class="hero-title">Declutter Years of Photo Clutter in <span class="grad-text">Seconds.</span></h1>
       <p class="hero-sub">The fastest, most intuitive way to clean your iPhone photo library with simple swipes. 100% private, on-device processing.</p>
 
       <form name="waitlist" method="POST" data-netlify="true" netlify-honeypot="bot-field" action="/?submitted=true" class="waitlist-form" id="waitlist-form">
@@ -42,15 +44,20 @@
       <p class="form-success" id="form-success" hidden>🎉 You're on the list — we'll email you the moment Swipy launches.</p>
     </section>
 
-    <section class="screens-showcase">
+    <section class="screens-showcase reveal">
       <div class="screens-carousel">
         <div class="screen-slide"><img src="screenshots/clean-gallery.jpg" alt="Swipy's swipe stack — swipe to keep or delete photos and free up storage." width="562" height="1000" loading="lazy"></div>
         <div class="screen-slide"><img src="screenshots/smart-detection.jpg" alt="Swipy's Smart Filters screen — screenshots, screen recordings, large videos, and blurry photos auto-detected." width="621" height="1344" loading="lazy"></div>
         <div class="screen-slide"><img src="screenshots/on-device-privacy.jpg" alt="Swipy processes all photo analysis on-device — no cloud, no uploads." width="450" height="800" loading="lazy"></div>
       </div>
+      <div class="carousel-dots" aria-hidden="true">
+        <span class="dot is-active"></span>
+        <span class="dot"></span>
+        <span class="dot"></span>
+      </div>
     </section>
 
-    <section class="features">
+    <section class="features reveal">
       <div class="card feature-card">
         <div class="feature-icon">👆</div>
         <h3>Swipe to Clean</h3>
@@ -100,6 +107,54 @@
         form.submit();
       });
     });
+  })();
+
+  (function () {
+    var reveals = document.querySelectorAll('.reveal');
+    if (!reveals.length) return;
+    if (!('IntersectionObserver' in window)) {
+      reveals.forEach(function (el) { el.classList.add('is-visible'); });
+      return;
+    }
+    var revealIO = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('is-visible');
+          revealIO.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.15 });
+    reveals.forEach(function (el) { revealIO.observe(el); });
+  })();
+
+  (function () {
+    var carousel = document.querySelector('.screens-carousel');
+    var dots = document.querySelectorAll('.carousel-dots .dot');
+    var slides = document.querySelectorAll('.screen-slide');
+    if (!carousel || !dots.length || !slides.length) return;
+
+    var ticking = false;
+    function updateActiveDot() {
+      var center = carousel.scrollLeft + carousel.clientWidth / 2;
+      var closest = 0;
+      var closestDist = Infinity;
+      slides.forEach(function (slide, i) {
+        var slideCenter = slide.offsetLeft + slide.offsetWidth / 2;
+        var dist = Math.abs(slideCenter - center);
+        if (dist < closestDist) { closestDist = dist; closest = i; }
+      });
+      dots.forEach(function (d, i) { d.classList.toggle('is-active', i === closest); });
+      ticking = false;
+    }
+
+    carousel.addEventListener('scroll', function () {
+      if (!ticking) {
+        requestAnimationFrame(updateActiveDot);
+        ticking = true;
+      }
+    }, { passive: true });
+
+    updateActiveDot();
   })();
 </script>
 </body>
