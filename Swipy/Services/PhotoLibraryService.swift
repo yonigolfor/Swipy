@@ -532,22 +532,36 @@ class PhotoLibraryService: ObservableObject {
     /// image, never populate a blank one.
     /// `.aspectFit` (not `.aspectFill`) so the whole image is preserved, never cropped —
     /// unlike `PHImageManagerMaximumSize`, a bounded targetSize does NOT ignore contentMode.
+    /// `isDegraded` lets the caller distinguish the fast intermediate frame from the final
+    /// one — e.g. to know when it's safe to stop showing a "still upgrading" spinner.
+    /// Always calls `completion` at least once, even with a nil `image` (asset unavailable
+    /// or cancelled) — on that terminal nil-image call, `isDegraded` reads false, so
+    /// `!isDegraded` still means "this is final" even when there's nothing to show. This
+    /// covers outright failure, but NOT every "PHKit won't call back again" case: offline
+    /// with only a degraded local proxy available delivers exactly one call with
+    /// `isDegraded == true` and never calls back again either — from this method's output
+    /// alone that's indistinguishable from "the full-quality frame just hasn't arrived yet."
+    /// Callers that need a hard guarantee against waiting forever (e.g. a "still loading"
+    /// spinner) should pair this with their own timeout — see FullScreenMediaView's
+    /// failsafe Task for the pattern.
+    /// Returns a PHImageRequestID so callers can cancel on disappear.
+    @discardableResult
     func loadFullScreenImage(
         for asset: PHAsset,
         targetSize: CGSize,
-        completion: @escaping (UIImage?) -> Void
-    ) {
+        completion: @escaping (_ image: UIImage?, _ isDegraded: Bool) -> Void
+    ) -> PHImageRequestID {
         let options = PHImageRequestOptions()
         options.deliveryMode = .opportunistic
         options.isNetworkAccessAllowed = !isOfflineMode
         options.isSynchronous = false
 
-        imageManager.requestImage(
+        return imageManager.requestImage(
             for: asset, targetSize: targetSize,
             contentMode: .aspectFit, options: options
-        ) { image, _ in
-            guard let image else { return }
-            completion(image)
+        ) { image, info in
+            let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
+            completion(image, isDegraded)
         }
     }
 

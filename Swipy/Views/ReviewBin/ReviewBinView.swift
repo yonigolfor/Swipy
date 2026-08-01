@@ -204,6 +204,21 @@ struct FullScreenMediaView: View {
     /// frame while the AVPlayer is still preparing.
     @State private var image: UIImage?
     @State private var player: AVPlayer?
+    /// True once the fetch has reached a terminal state: a final (non-degraded) image, a
+    /// ready-to-play AVPlayer, or a definitive failure (nil result — asset unavailable,
+    /// offline with no local proxy, cancelled). Gates the delayed spinner below — without
+    /// a failure branch setting this, a load that never succeeds would spin forever.
+    @State private var isFinalReady = false
+
+    /// item.isVideo is fixed per view instance, so only one of load()'s two branches ever
+    /// runs — a single ID covers both rather than one slot each.
+    @State private var requestID = PHInvalidImageRequestID
+    @State private var failsafeTask: Task<Void, Never>?
+    /// Set in onDisappear before cancelling in-flight requests — guards their completion
+    /// handlers against mutating state (or starting AVPlayer playback) after the view is
+    /// already gone, since PHImageManager cancellation doesn't guarantee a handler that's
+    /// already in flight won't still fire.
+    @State private var isDismissed = false
 
     init(item: PhotoItem, thumbnail: UIImage?, onClose: @escaping () -> Void, onRestore: @escaping () -> Void) {
         self.item = item
@@ -224,13 +239,15 @@ struct FullScreenMediaView: View {
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .ignoresSafeArea()
-                if item.isVideo {
-                    // Poster frame is up; player is still preparing behind it.
-                    ProgressView().tint(.white)
-                }
-            } else {
-                ProgressView().tint(.white)
+            } else if isFinalReady {
+                // Fetch terminated with nothing to show (deleted/corrupt/offline-unavailable).
+                Image(systemName: "photo.fill")
+                    .font(.system(size: 60))
+                    .foregroundColor(.gray)
             }
+            // Otherwise: nothing yet — the delayedIndicator below is the sole loading
+            // signal once genuinely nothing is on screen, so a cell tapped before its own
+            // thumbnail finished loading never shows two stacked spinners.
 
             // Toolbar overlay
             VStack {
@@ -260,8 +277,36 @@ struct FullScreenMediaView: View {
                 Spacer()
             }
         }
-        .onAppear { load() }
-        .onDisappear { player?.pause() }
+        .delayedIndicator(isReady: isFinalReady) {
+            Circle()
+                .fill(.black.opacity(0.5))
+                .frame(width: 56, height: 56)
+                .overlay(ProgressView().tint(.white).scaleEffect(1.3))
+                .transition(.opacity)
+        }
+        .onAppear {
+            load()
+            // Failsafe: guarantees the spinner resolves no matter what PHKit does. Covers
+            // a gap the explicit failure branches above can't — offline mode with only a
+            // degraded local proxy available delivers that one frame and never calls back
+            // again, so isFinalReady would otherwise never flip true.
+            failsafeTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(8))
+                guard !Task.isCancelled, !isDismissed else { return }
+                isFinalReady = true
+            }
+        }
+        .onDisappear {
+            isDismissed = true
+            player?.pause()
+            failsafeTask?.cancel()
+            guard requestID != PHInvalidImageRequestID else { return }
+            if item.isVideo {
+                PHImageManager.default().cancelImageRequest(requestID)
+            } else {
+                PhotoLibraryService.shared.cancelRequest(requestID)
+            }
+        }
     }
 
     private func load() {
@@ -269,11 +314,18 @@ struct FullScreenMediaView: View {
             let options = PHVideoRequestOptions()
             options.deliveryMode = .automatic
             options.isNetworkAccessAllowed = true
-            PHImageManager.default().requestPlayerItem(forVideo: item.asset, options: options) { playerItem, _ in
-                guard let playerItem else { return }
+            requestID = PHImageManager.default().requestPlayerItem(forVideo: item.asset, options: options) { playerItem, _ in
                 DispatchQueue.main.async {
+                    guard !isDismissed else { return }
+                    guard let playerItem else {
+                        // Definitive failure (missing/corrupt/DRM-restricted resource) —
+                        // still a terminal state, so the spinner must stop here too.
+                        isFinalReady = true
+                        return
+                    }
                     self.player = AVPlayer(playerItem: playerItem)
                     self.player?.play()
+                    self.isFinalReady = true
                 }
             }
         } else {
@@ -286,8 +338,12 @@ struct FullScreenMediaView: View {
                 width: UIScreen.main.bounds.width * scale,
                 height: UIScreen.main.bounds.height * scale
             )
-            PhotoLibraryService.shared.loadFullScreenImage(for: item.asset, targetSize: targetSize) { loaded in
-                withAnimation(.easeInOut(duration: 0.2)) { self.image = loaded }
+            requestID = PhotoLibraryService.shared.loadFullScreenImage(for: item.asset, targetSize: targetSize) { loaded, isDegraded in
+                guard !isDismissed else { return }
+                if let loaded {
+                    withAnimation(.easeInOut(duration: 0.2)) { self.image = loaded }
+                }
+                if !isDegraded { self.isFinalReady = true }
             }
         }
     }

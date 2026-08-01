@@ -120,6 +120,55 @@ extension CGSize {
     }
 }
 
+// MARK: - Delayed Loading Indicator
+
+/// Overlays `indicator` only if `isReady` is still false `delay` after this view
+/// appeared — avoids a spinner flash on the common fast-load case. Generalizes the
+/// Task.sleep + cancel-guard + withAnimation pattern used by PhotoCardView's
+/// imageSpinnerTask/videoSpinnerTask (kept as-is there — that file is performance-
+/// critical and already tuned; this modifier is for new call sites, not a retrofit).
+struct DelayedIndicator<IndicatorContent: View>: ViewModifier {
+    let isReady: Bool
+    let delay: Duration
+    @ViewBuilder let indicator: () -> IndicatorContent
+
+    @State private var showIndicator = false
+    @State private var task: Task<Void, Never>?
+
+    func body(content: Content) -> some View {
+        content
+            .overlay {
+                if showIndicator && !isReady {
+                    indicator()
+                }
+            }
+            .onAppear {
+                // `onAppear`'s closure only runs once per mount, so it can't re-read `isReady`
+                // as it changes over the view's lifetime — the check that actually matters is
+                // the live one in `.overlay` above, which re-evaluates on every body render.
+                // Setting showIndicator unconditionally here is safe: if isReady already flipped
+                // true by the time this fires, the overlay's own `!isReady` keeps it hidden.
+                task = Task { @MainActor in
+                    try? await Task.sleep(for: delay)
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.easeIn(duration: 0.2)) { showIndicator = true }
+                }
+            }
+            .onDisappear { task?.cancel() }
+    }
+}
+
+extension View {
+    /// See `DelayedIndicator`.
+    func delayedIndicator<Content: View>(
+        isReady: Bool,
+        after delay: Duration = .milliseconds(500),
+        @ViewBuilder indicator: @escaping () -> Content
+    ) -> some View {
+        modifier(DelayedIndicator(isReady: isReady, delay: delay, indicator: indicator))
+    }
+}
+
 // MARK: - Transition Extensions
 
 extension AnyTransition {
