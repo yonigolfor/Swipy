@@ -1,10 +1,10 @@
 import SwiftUI
 
 struct SplashScreenView: View {
-    // ViewModel lives here so it is created once and survives the entire app session.
-    // Hoisting it up from ContentView lets us kick off refreshCategoryCounts()
-    // during the splash animation, giving Phase 1+2 a head start before the
-    // user ever opens SmartFiltersView.
+    // ViewModel lives here so it is created once and survives the entire app
+    // session — hoisting it up from ContentView means the same instance (and
+    // its photoStack/reviewBin/etc. state) carries across the onboarding ↔
+    // ContentView handoff below, with no re-fetch or state loss on that swap.
     @StateObject private var stackViewModel = PhotoStackViewModel()
 
     @State private var isActive = false

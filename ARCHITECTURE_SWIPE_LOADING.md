@@ -252,7 +252,11 @@ Fallback: variance = ∞ (CIEdges נכשל)  →  raw ×= 0.6
 עד לגרסה זו, כניסה לקטגוריית Blurry Photos סרקה וניתחה תמונות **ברצף, אחת אחת** — decode + `CIEdges` לכל תמונה, כולל הורדת iCloud כשצריך (`.highQualityFormat` + network). ללא cache, כל כניסה מחדש לקטגוריה חזרה על כל הניתוח מאפס. ה-badge ("99+") גם לא שיקף ספירה אמיתית של תמונות מטושטשות — הוא ספר את **כל מאגר המועמדים** (כל תמונה שאינה screenshot), בלי Phase 2 לחידוד.
 
 ### BlurBurstCacheService
-Singleton דיסק-based (`Caches/blurBurstVerdicts.json`, לא `Documents` — אינדקס בר-שחזור, לא user data) ששומר `[assetID: Bool]` לכל אחת מ-blur/burst. Thread-safe (`NSLock`), כתיבות מבוטלות ל-2 שניות (`scheduleSave`) כדי לא לכתוב לדיסק על כל item בודד. וורדיקט, ברגע שחושב, יציב לכל חיי ה-asset — אין צורך לחשב פעמיים.
+Singleton דיסק-based, בנוי על `DebouncedJSONStore<Value: Codable>` גנרי פרטי (lock + dirty-flag + debounced write ל-2 שניות, אותו מנגנון פעם אחת). שני stores/קבצים נפרדים, לא אחד: `verdicts` (`Caches/blurBurstVerdicts.json`, `[assetID: Bool]` blur+burst — קטן, יציב) ו-`featurePrints` (`Caches/blurBurstFeaturePrints.json`, `[assetID: Data]` — `VNFeaturePrintObservation` מסודר, גדול וגדל עם הסריקה). הפיצול קיים כי כתיבה של verdict בודד לא צריכה לגרור קידוד מחדש של כל ה-feature-prints שנצברו, ולהיפך. Thread-safe (`NSLock` בתוך ה-store), `Caches` לא `Documents` — אינדקס בר-שחזור, לא user data. וורדיקט/print, ברגע שחושב, יציב עד שמישהו קורא ל-`invalidate(assetIDs:)` (ראו `photoLibraryDidChange` למטה) — אין צורך לחשב פעמיים.
+
+**Race שתוקן:** `scheduleSave()` (הגרסה הישנה) ביטל/הקצה מחדש את `pendingSave` **מחוץ** ל-lock — עם `setFeaturePrint` שנקרא מ-TaskGroup עד 6-way concurrent, זה היה race אמיתי על property מסוג class. `DebouncedJSONStore.mutate` עושה dirty-flag + cancel + reassign כולם בתוך אותו lock.
+
+**Schema version:** `featurePrints` מתויג עם `schemaVersion` — קבוע ידני (`"1"`), לא `ProcessInfo.operatingSystemVersionString` (נוסה קודם ונדחה — מוחק את כל ה-cache בכל point release של iOS גם כשמודל ה-Vision לא השתנה). מוגדל ידנית רק כשבאמת משנים משהו באיך שמשתמשים ב-Vision.
 
 ### BlurBurstScanEngine
 `class` פשוט **ולא** `@MainActor` — כמו `BlurDetector`/`BurstAnalyzer` — כדי שעבודת ה-`CIFilter` הכבדה תרוץ באמת מחוץ ל-main thread גם כשנקראת עם `await` מ-method של `PhotoStackViewModel` (`@MainActor`). Swift מחזיר את הביצוע לאקטור המבקש רק בסיום ה-`await`, אז כל קוד שרץ *בתוך* פונקציה non-isolated נשאר off-actor.

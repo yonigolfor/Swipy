@@ -17,87 +17,90 @@ import Vision
 final class BlurBurstCacheService {
     static let shared = BlurBurstCacheService()
 
-    private struct CacheData: Codable {
+    private struct VerdictData: Codable {
         var blurVerdicts: [String: Bool] = [:]
         var burstVerdicts: [String: Bool] = [:]
+    }
+
+    private struct FeaturePrintData: Codable {
         /// Serialized VNFeaturePrintObservation per asset (NSKeyedArchiver), so
         /// BurstAnalyzer can skip re-running Vision for previously-seen assets.
-        /// Only valid for the OS version recorded in `featurePrintSchemaVersion` —
-        /// see the invalidation check in `init()`.
-        var featurePrints: [String: Data] = [:]
-        var featurePrintSchemaVersion: String = ""
+        /// Only valid for the schema recorded in `schemaVersion` — see the
+        /// invalidation check in `init()`.
+        var prints: [String: Data] = [:]
+        var schemaVersion: String = ""
     }
 
-    private var data: CacheData
-    private let lock = NSLock()
-    private var isDirty = false
-    private var pendingSave: DispatchWorkItem?
+    /// Small, stable booleans — kept in their own file/store so a blur/burst
+    /// verdict write never forces re-encoding the much larger, separately-
+    /// growing feature-print blobs below, and vice versa (a burst scan's
+    /// feature-print writes don't repeatedly re-serialize these).
+    private let verdicts: DebouncedJSONStore<VerdictData>
+    /// Feature-print vectors are a heavier payload (a few KB each, inflated
+    /// further by JSON's base64 encoding of Data) than a boolean verdict, and
+    /// grow with how much of the library has been scanned — split into its
+    /// own store/file so persisting a verdict write doesn't also re-encode
+    /// every feature print ever cached.
+    private let featurePrints: DebouncedJSONStore<FeaturePrintData>
 
-    /// Proxy for the Vision feature-print model in use — Apple ships updated Vision
-    /// models with OS updates, and a feature print computed under one model isn't
-    /// guaranteed comparable to one computed under another. `computeDistance` failing
-    /// on a mismatch silently falls through to "treat as similar" in BurstAnalyzer
-    /// (try? leaves distance at its initial 0, which is < the similarity threshold) —
-    /// so a stale cross-version vector could silently mis-group unrelated photos into
-    /// a burst instead of throwing a visible error. Wiping featurePrints alone (not
-    /// blurVerdicts/burstVerdicts, which don't carry this risk) on every OS version
-    /// change is a small correctness cost, not a performance one — it only forces the
-    /// first Smart Filters visit after an OS update to recompute prints.
-    private static let currentFeaturePrintSchemaVersion = ProcessInfo.processInfo.operatingSystemVersionString
-
-    /// Caches directory, not Documents — this is a rebuildable index, not user data,
-    /// and shouldn't be backed up or synced.
-    private var cacheFileURL: URL {
-        FileManager.default
-            .urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("blurBurstVerdicts.json")
-    }
+    /// Explicitly bumped by a developer only when the app's Vision feature-print
+    /// usage actually changes (e.g. switching VNGenerateImageFeaturePrintRequest
+    /// revisions) — NOT tied to OS version. An OS-version-string proxy was tried
+    /// first and rejected: it wiped the cache on every iOS point release even
+    /// when the underlying model almost never changes between them, and it
+    /// wouldn't catch a genuine model change that isn't reflected in the OS
+    /// version string either. A manual constant is a more honest signal for
+    /// what this is actually guarding against: `computeDistance` failing on a
+    /// cross-version-incompatible pair silently falls through to "treat as
+    /// similar" in BurstAnalyzer (try? leaves distance at its initial 0, which
+    /// is < the similarity threshold) — so a stale cross-schema vector could
+    /// silently mis-group unrelated photos into a burst instead of throwing a
+    /// visible error. Wiping featurePrints alone (verdicts don't carry this
+    /// risk) on a mismatch is a small correctness cost, not a performance one —
+    /// it only forces the first Smart Filters visit after a bump to recompute.
+    private static let currentFeaturePrintSchemaVersion = "1"
 
     private init() {
-        data = CacheData()
-        let url = FileManager.default
-            .urls(for: .cachesDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("blurBurstVerdicts.json")
-        if let raw = try? Data(contentsOf: url),
-           let decoded = try? JSONDecoder().decode(CacheData.self, from: raw) {
-            data = decoded
-        }
-        if data.featurePrintSchemaVersion != Self.currentFeaturePrintSchemaVersion {
-            data.featurePrints = [:]
-            data.featurePrintSchemaVersion = Self.currentFeaturePrintSchemaVersion
-            scheduleSave()
+        let cachesDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+        // Caches directory, not Documents — this is a rebuildable index, not
+        // user data, and shouldn't be backed up or synced.
+        verdicts = DebouncedJSONStore(
+            fileURL: cachesDir.appendingPathComponent("blurBurstVerdicts.json"),
+            defaultValue: VerdictData()
+        )
+        featurePrints = DebouncedJSONStore(
+            fileURL: cachesDir.appendingPathComponent("blurBurstFeaturePrints.json"),
+            defaultValue: FeaturePrintData()
+        )
+
+        if featurePrints.read({ $0.schemaVersion }) != Self.currentFeaturePrintSchemaVersion {
+            featurePrints.mutate { $0 = FeaturePrintData(schemaVersion: Self.currentFeaturePrintSchemaVersion) }
         }
     }
 
     // MARK: - Blur
 
     func blurVerdict(for id: String) -> Bool? {
-        lock.lock(); defer { lock.unlock() }
-        return data.blurVerdicts[id]
+        verdicts.read { $0.blurVerdicts[id] }
     }
 
     func setBlurVerdict(_ isBlurry: Bool, for id: String) {
-        lock.lock()
-        data.blurVerdicts[id] = isBlurry
-        lock.unlock()
-        scheduleSave()
+        verdicts.mutate { $0.blurVerdicts[id] = isBlurry }
     }
 
     // MARK: - Burst
 
     func burstVerdict(for id: String) -> Bool? {
-        lock.lock(); defer { lock.unlock() }
-        return data.burstVerdicts[id]
+        verdicts.read { $0.burstVerdicts[id] }
     }
 
     /// Batch write — used after a burst analysis pass covers a whole batch at once,
     /// so a 300-item scan triggers one debounced save instead of 300.
-    func setBurstVerdicts(_ verdicts: [String: Bool]) {
-        guard !verdicts.isEmpty else { return }
-        lock.lock()
-        for (id, verdict) in verdicts { data.burstVerdicts[id] = verdict }
-        lock.unlock()
-        scheduleSave()
+    func setBurstVerdicts(_ newVerdicts: [String: Bool]) {
+        guard !newVerdicts.isEmpty else { return }
+        verdicts.mutate { data in
+            for (id, verdict) in newVerdicts { data.burstVerdicts[id] = verdict }
+        }
     }
 
     // MARK: - Feature Prints
@@ -105,19 +108,13 @@ final class BlurBurstCacheService {
     /// Cache-first Vision feature print for burst similarity comparison — nil means
     /// "not cached for the current schema version", not "asset has no burst membership".
     func featurePrint(for id: String) -> VNFeaturePrintObservation? {
-        lock.lock()
-        let archived = data.featurePrints[id]
-        lock.unlock()
-        guard let archived else { return nil }
+        guard let archived = featurePrints.read({ $0.prints[id] }) else { return nil }
         return try? NSKeyedUnarchiver.unarchivedObject(ofClass: VNFeaturePrintObservation.self, from: archived)
     }
 
     func setFeaturePrint(_ observation: VNFeaturePrintObservation, for id: String) {
         guard let archived = try? NSKeyedArchiver.archivedData(withRootObject: observation, requiringSecureCoding: true) else { return }
-        lock.lock()
-        data.featurePrints[id] = archived
-        lock.unlock()
-        scheduleSave()
+        featurePrints.mutate { $0.prints[id] = archived }
     }
 
     // MARK: - Invalidation
@@ -131,23 +128,58 @@ final class BlurBurstCacheService {
     /// serving pre-edit analysis, without requiring a full-cache wipe.
     func invalidate(assetIDs: Set<String>) {
         guard !assetIDs.isEmpty else { return }
-        lock.lock()
-        for id in assetIDs {
-            data.blurVerdicts.removeValue(forKey: id)
-            data.burstVerdicts.removeValue(forKey: id)
-            data.featurePrints.removeValue(forKey: id)
+        verdicts.mutate { data in
+            for id in assetIDs {
+                data.blurVerdicts.removeValue(forKey: id)
+                data.burstVerdicts.removeValue(forKey: id)
+            }
         }
-        lock.unlock()
-        scheduleSave()
+        featurePrints.mutate { data in
+            for id in assetIDs { data.prints.removeValue(forKey: id) }
+        }
+    }
+}
+
+/// Generic debounced, lock-protected, disk-backed store for one Codable value.
+/// Reads run synchronously against the in-memory value; `mutate` applies a change
+/// and schedules a single debounced disk write ~2s after the last mutation, so a
+/// burst of writes (e.g. hundreds of per-asset verdicts from a TaskGroup scan)
+/// coalesces into one file write instead of one per call. Not MainActor-isolated —
+/// safe to read/mutate from any thread.
+private final class DebouncedJSONStore<Value: Codable> {
+    private var value: Value
+    private let lock = NSLock()
+    private var isDirty = false
+    private var pendingSave: DispatchWorkItem?
+    private let fileURL: URL
+
+    init(fileURL: URL, defaultValue: Value) {
+        self.fileURL = fileURL
+        if let raw = try? Data(contentsOf: fileURL),
+           let decoded = try? JSONDecoder().decode(Value.self, from: raw) {
+            value = decoded
+        } else {
+            value = defaultValue
+        }
     }
 
-    // MARK: - Persistence
+    func read<R>(_ body: (Value) -> R) -> R {
+        lock.lock(); defer { lock.unlock() }
+        return body(value)
+    }
 
-    private func scheduleSave() {
-        lock.lock(); isDirty = true; lock.unlock()
+    func mutate(_ body: (inout Value) -> Void) {
+        lock.lock()
+        body(&value)
+        isDirty = true
+        // Cancel/reassign happen inside the same lock as the mutation above —
+        // scheduleSave() used to do this outside the lock, which was a real
+        // data race once callers started invoking it from concurrent TaskGroup
+        // children (multiple threads racing on the same class-typed property).
         pendingSave?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.persist() }
         pendingSave = work
+        lock.unlock()
         DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 2, execute: work)
     }
 
@@ -155,10 +187,10 @@ final class BlurBurstCacheService {
         lock.lock()
         guard isDirty else { lock.unlock(); return }
         isDirty = false
-        let snapshot = data
+        let snapshot = value
         lock.unlock()
 
         guard let encoded = try? JSONEncoder().encode(snapshot) else { return }
-        try? encoded.write(to: cacheFileURL, options: .atomic)
+        try? encoded.write(to: fileURL, options: .atomic)
     }
 }
