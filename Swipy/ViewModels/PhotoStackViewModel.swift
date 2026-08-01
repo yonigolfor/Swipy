@@ -808,7 +808,6 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 await scanLocalUniverse(targetCount: initialPageSize, batchSize: 150)
                 stageSnoozedItemsIfReady()
                 isLoading = false
-                if needsInitialCountRefresh { refreshCategoryCounts() }
                 return
             }
 
@@ -822,7 +821,6 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                     self.stageSnoozedItemsIfReady()
                     self.isLoading = false
                 }
-                if self.needsInitialCountRefresh { self.refreshCategoryCounts() }
                 return
             }
 
@@ -858,7 +856,6 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                     self.stageSnoozedItemsIfReady()
                     self.isLoading = false
                 }
-                if self.needsInitialCountRefresh { self.refreshCategoryCounts() }
                 return
             }
 
@@ -881,7 +878,6 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 self.stageSnoozedItemsIfReady()
                 self.isLoading = false
                 if !self.photoStack.isEmpty { self.precacheNextImages() }
-                if self.needsInitialCountRefresh { self.refreshCategoryCounts() }
             }
         }
     }

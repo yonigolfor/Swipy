@@ -113,7 +113,12 @@ final class BlurBurstCacheService {
     }
 
     func setFeaturePrint(_ observation: VNFeaturePrintObservation, for id: String) {
-        guard let archived = try? NSKeyedArchiver.archivedData(withRootObject: observation, requiringSecureCoding: true) else { return }
+        guard let archived = try? NSKeyedArchiver.archivedData(withRootObject: observation, requiringSecureCoding: true) else {
+            #if DEBUG
+            print("[BlurBurstCacheService] ⚠️ Failed to archive feature print for \(id.prefix(8)) — will recompute via Vision every scan.")
+            #endif
+            return
+        }
         featurePrints.mutate { $0.prints[id] = archived }
     }
 
