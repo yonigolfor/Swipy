@@ -26,6 +26,10 @@ struct ReviewGridItemView: View {
     let item: PhotoItem
     let thumbnailPixelSize: CGSize
     let onRestore: () -> Void
+    /// Fires with whatever thumbnail this cell already has decoded (nil if still loading),
+    /// so the full-screen viewer can show it as an instant placeholder instead of a blank
+    /// black screen while it fetches the high-res version.
+    let onTap: (UIImage?) -> Void
     var isBeingRestored: Bool = false
 
     @State private var image: UIImage?
@@ -81,6 +85,7 @@ struct ReviewGridItemView: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .contentShape(Rectangle())
+            .onTapGesture { onTap(image) }
             .scaleEffect(cellScale)
             .opacity(restorePhase == .poofing ? 0 : 1)
             // Particles sit above the clipped, scaled cell without affecting layout.

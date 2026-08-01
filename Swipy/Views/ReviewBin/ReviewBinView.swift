@@ -73,12 +73,13 @@ struct ReviewBinView: View {
                 } message: {
                     Text(String(format: String(localized: "bin.alert_message"), stackViewModel.reviewBin.count))
                 }
-                .fullScreenCover(item: $viewModel.selectedItem) { item in
+                .fullScreenCover(item: $viewModel.selectedMedia) { media in
                     FullScreenMediaView(
-                        item: item,
+                        item: media.item,
+                        thumbnail: media.thumbnail,
                         onClose: { viewModel.deselectItem() },
                         onRestore: {
-                            let id = item.id
+                            let id = media.item.id
                             viewModel.deselectItem()
                             Task { @MainActor in
                                 // Wait for fullScreenCover dismiss (~420ms) before
@@ -132,9 +133,9 @@ struct ReviewBinView: View {
                                 restoringItemID = nil
                                 stackViewModel.restoreFromBin(item)
                             },
+                            onTap: { thumbnail in viewModel.selectItem(item, thumbnail: thumbnail) },
                             isBeingRestored: restoringItemID == item.id
                         )
-                        .onTapGesture { viewModel.selectItem(item) }
                     }
                 }
                 .padding()
@@ -197,30 +198,38 @@ struct FullScreenMediaView: View {
     let onClose: () -> Void
     let onRestore: () -> Void
 
+    /// Seeded from the grid cell's already-decoded thumbnail (see init) so this view
+    /// never opens on a blank black screen — it shows that immediately, then `load()`
+    /// silently upgrades it to a screen-resolution image. Doubles as the video poster
+    /// frame while the AVPlayer is still preparing.
     @State private var image: UIImage?
     @State private var player: AVPlayer?
-    @State private var isLoading = true
+
+    init(item: PhotoItem, thumbnail: UIImage?, onClose: @escaping () -> Void, onRestore: @escaping () -> Void) {
+        self.item = item
+        self.onClose = onClose
+        self.onRestore = onRestore
+        _image = State(initialValue: thumbnail)
+    }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            if item.isVideo {
-                if let player = player {
-                    VideoPlayer(player: player)
-                        .ignoresSafeArea()
-                } else if isLoading {
+            if item.isVideo, let player {
+                VideoPlayer(player: player)
+                    .ignoresSafeArea()
+            } else if let image {
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .ignoresSafeArea()
+                if item.isVideo {
+                    // Poster frame is up; player is still preparing behind it.
                     ProgressView().tint(.white)
                 }
             } else {
-                if let image = image {
-                    Image(uiImage: image)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .ignoresSafeArea()
-                } else if isLoading {
-                    ProgressView().tint(.white)
-                }
+                ProgressView().tint(.white)
             }
 
             // Toolbar overlay
@@ -261,22 +270,24 @@ struct FullScreenMediaView: View {
             options.deliveryMode = .automatic
             options.isNetworkAccessAllowed = true
             PHImageManager.default().requestPlayerItem(forVideo: item.asset, options: options) { playerItem, _ in
-                guard let playerItem = playerItem else {
-                    DispatchQueue.main.async { isLoading = false }
-                    return
-                }
+                guard let playerItem else { return }
                 DispatchQueue.main.async {
                     self.player = AVPlayer(playerItem: playerItem)
                     self.player?.play()
-                    self.isLoading = false
                 }
             }
         } else {
-            PhotoLibraryService.shared.loadImage(
-                for: item.asset,
-                targetSize: PHImageManagerMaximumSize
-            ) { loaded in
-                withAnimation { self.image = loaded; self.isLoading = false }
+            // Screen-resolution target, not PHImageManagerMaximumSize — a 12MP+ original
+            // takes multiple seconds to decode for a view nobody can zoom into. Opportunistic
+            // delivery lands a fast frame almost immediately, upgrading in place; the initial
+            // thumbnail placeholder means there's nothing to wait on regardless.
+            let scale = UIScreen.main.scale
+            let targetSize = CGSize(
+                width: UIScreen.main.bounds.width * scale,
+                height: UIScreen.main.bounds.height * scale
+            )
+            PhotoLibraryService.shared.loadFullScreenImage(for: item.asset, targetSize: targetSize) { loaded in
+                withAnimation(.easeInOut(duration: 0.2)) { self.image = loaded }
             }
         }
     }

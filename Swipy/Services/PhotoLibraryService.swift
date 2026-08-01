@@ -523,6 +523,34 @@ class PhotoLibraryService: ObservableObject {
         )
     }
 
+    /// Loads a screen-sized image for a full-screen preview (Review Bin's detail view).
+    /// `.opportunistic` delivers a fast frame first (often near-instant, from PHKit's own
+    /// cache), then a higher-quality one — unlike `loadImage`'s single-callback
+    /// `.highQualityFormat`, which targets card display where there's no thumbnail already
+    /// on screen to bridge the wait. Callers should seed their `@State` with the grid
+    /// thumbnail they already have so this only ever has to upgrade an already-visible
+    /// image, never populate a blank one.
+    /// `.aspectFit` (not `.aspectFill`) so the whole image is preserved, never cropped —
+    /// unlike `PHImageManagerMaximumSize`, a bounded targetSize does NOT ignore contentMode.
+    func loadFullScreenImage(
+        for asset: PHAsset,
+        targetSize: CGSize,
+        completion: @escaping (UIImage?) -> Void
+    ) {
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .opportunistic
+        options.isNetworkAccessAllowed = !isOfflineMode
+        options.isSynchronous = false
+
+        imageManager.requestImage(
+            for: asset, targetSize: targetSize,
+            contentMode: .aspectFit, options: options
+        ) { image, _ in
+            guard let image else { return }
+            completion(image)
+        }
+    }
+
     /// Loads a fast local thumbnail — never touches iCloud.
     /// Used as the immediate placeholder for video cards while the AVPlayer warms up.
     /// Returns the PHImageRequestID so callers can cancel the request (e.g. on cell disappear).

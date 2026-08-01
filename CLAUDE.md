@@ -85,9 +85,8 @@ Swipy/
 │   ├── Filters/
 │   │   └── SmartFiltersView.swift  # 6 categories + 2-phase counts
 │   ├── ReviewBin/
-│   │   ├── ReviewBinView.swift     # 3-column grid
-│   │   ├── ReviewGridItemView.swift
-│   │   └── FullScreenMediaView.swift
+│   │   ├── ReviewBinView.swift     # 3-column grid + FullScreenMediaView (detail viewer, same file)
+│   │   └── ReviewGridItemView.swift
 │   ├── Paywall/
 │   │   └── PaywallView.swift       # 3-tier pricing (Monthly/Yearly/Lifetime), gold-glow selection, dynamic CTA
 │   └── Components/
@@ -209,6 +208,8 @@ Deep linking:
 ```
 
 No `NavigationStack` or `NavigationView` is used at the root level. Tab switching is the primary navigation. `fullScreenCover` is used for full-screen media preview only.
+
+**Review Bin detail viewer — progressive loading:** `ReviewGridItemView`'s tap handler passes its own already-decoded thumbnail (`onTap: (UIImage?) -> Void`) into `ReviewBinViewModel.SelectedMedia`, which `FullScreenMediaView` seeds its `image` `@State` with at `init` — the viewer never opens on a blank black screen. `load()` then calls `PhotoLibraryService.loadFullScreenImage()` (`.opportunistic` delivery, screen-resolution `targetSize`, `.aspectFit` contentMode) to upgrade in place. This replaced a prior version that requested `PHImageManagerMaximumSize` via `.highQualityFormat` — a multi-second decode of the full original for a view nobody can zoom into, with no placeholder shown while it loaded. For video, the same `image` state doubles as the poster frame shown (with a spinner overlay) while the `AVPlayer` prepares.
 
 The tab bar is the native iOS `TabView` — on iOS 18 it renders automatically as the floating capsule style (as in WhatsApp / Instagram). Content views stop above the tab bar via the safe area injected by `TabView`; no manual height math needed.
 
