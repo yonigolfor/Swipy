@@ -217,6 +217,18 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     var topCard: PhotoItem? { photoStack.first }
     var remainingCount: Int { photoStack.count }
 
+    /// True until Phase 1 has populated every category this session — NOT
+    /// `categoryCounts.isEmpty`. Cold start no longer pre-warms counts, but
+    /// `loadCachedAccurateCounts()` still seeds `categoryCounts` from disk with
+    /// the 3 persisted Phase-2 categories (large videos/blurry/burst), which
+    /// makes the dict non-empty while `.all`/`.screenshots`/`.screenRecordings`
+    /// (never persisted — always computed fresh by Phase 1) are still unset for
+    /// a returning user. `.isEmpty` would wrongly treat that partial state as
+    /// "already loaded" and skip a refresh that's actually still needed.
+    var needsInitialCountRefresh: Bool {
+        FilterCategory.allCases.contains { categoryCounts[$0] == nil }
+    }
+
     var spaceSavedText: String {
         formatBytes(totalSpaceSaved)
     }
@@ -361,14 +373,19 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 service.count(for: .largeVideos, excluding: processed)
             }.value
 
-            let (accurateBlurry, accurateBurst): (Int?, Int?) = await {
+            // .background (not inherited .userInitiated) — this drives up to 6-way
+            // concurrent CIFilter/Vision pipelines (BlurBurstScanEngine/BurstAnalyzer),
+            // which at a higher QoS competes with the main thread for the same
+            // performance cores and was the direct cause of dropped frames during
+            // swipe gestures in the first ~10s after a cold start.
+            let (accurateBlurry, accurateBurst): (Int?, Int?) = await Task.detached(priority: .background) {
                 guard await self.tryAcquireBlurBurstScan() else { return (nil, nil) }
                 async let blurryCount = self.accurateBlurryCount(excluding: processed)
                 async let burstCount = self.accurateBurstCount(excluding: processed)
                 let result = await (blurryCount, burstCount)
                 await self.releaseBlurBurstScan()
                 return result
-            }()
+            }.value
 
             let accurateLargeVideoCount = await largeVideoCount
             await self.saveAccurateCount(accurateLargeVideoCount, for: .largeVideos)
@@ -611,14 +628,6 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     nonisolated func photoLibraryDidChange(_ changeInstance: PHChange) {
         Task { @MainActor in
-            // Library changed — invalidate the accurate-count cache so Phase 2
-            // runs fresh and the user sees accurate counts. Recomputing this is
-            // now cheap even for a fresh cache miss since the per-asset blur/burst
-            // verdict cache (BlurBurstCacheService) below is invalidated
-            // incrementally, not wiped — only genuinely new/removed assets cost anything.
-            self.cachedAccurateCounts = [:]
-            try? FileManager.default.removeItem(at: self.categoryCountCacheFileURL)
-
             guard let oldResult = self.photoService.fetchResult else {
                 // No prior fetch — do a full initial load.
                 self.photoService.fetchAllPhotos()
@@ -632,14 +641,42 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             guard let details = changeInstance.changeDetails(for: oldResult) else { return }
             guard details.hasIncrementalChanges else { return }
 
-            // Removed assets — drop their verdicts so the cache doesn't accumulate
-            // entries for photos that no longer exist.
             let removedIDs = Set(details.removedObjects.map { $0.localIdentifier })
-            if !removedIDs.isEmpty {
-                BlurBurstCacheService.shared.invalidate(removedIDs: removedIDs)
+            let insertedIndexes = details.insertedIndexes ?? IndexSet()
+
+            // hasIncrementalChanges alone doesn't distinguish a metadata-only
+            // change (favorite toggle, edit, iCloud sync bookkeeping — all
+            // deliver a changedObjects-only update with hasIncrementalChanges
+            // == true) from an actual insertion/removal. Only a real insertion
+            // or removal can change which/how-many assets fall into a category,
+            // so only that invalidates the accurate-count cache — a metadata-
+            // only change no longer wipes an already-accurate cached count back
+            // to a Phase-1 estimate + spinner. Recomputing this is cheap since
+            // the per-asset blur/burst verdict cache (BlurBurstCacheService)
+            // below is invalidated incrementally, not wiped — only genuinely
+            // new/removed/changed assets cost anything.
+            if !removedIDs.isEmpty || !insertedIndexes.isEmpty {
+                self.cachedAccurateCounts = [:]
+                try? FileManager.default.removeItem(at: self.categoryCountCacheFileURL)
             }
 
-            guard let insertedIndexes = details.insertedIndexes, !insertedIndexes.isEmpty else { return }
+            // Removed assets — drop their verdicts so the cache doesn't accumulate
+            // entries for photos that no longer exist.
+            if !removedIDs.isEmpty {
+                BlurBurstCacheService.shared.invalidate(assetIDs: removedIDs)
+            }
+
+            // Changed assets (in-place edits — crop/filter/markup) keep the same
+            // localIdentifier but change pixel content, so a cached blur/burst
+            // verdict or feature print computed before the edit is now stale.
+            // changedObjects is empty for pure insertions/removals, so this is
+            // additive to, not a duplicate of, the removedIDs invalidation above.
+            let changedIDs = Set(details.changedObjects.map { $0.localIdentifier })
+            if !changedIDs.isEmpty {
+                BlurBurstCacheService.shared.invalidate(assetIDs: changedIDs)
+            }
+
+            guard !insertedIndexes.isEmpty else { return }
 
             // Newly inserted assets arrive at the top (newest-first sort).
             // Collect only those not already seen.
@@ -771,7 +808,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 await scanLocalUniverse(targetCount: initialPageSize, batchSize: 150)
                 stageSnoozedItemsIfReady()
                 isLoading = false
-                if categoryCounts.isEmpty { refreshCategoryCounts() }
+                if needsInitialCountRefresh { refreshCategoryCounts() }
                 return
             }
 
@@ -785,7 +822,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                     self.stageSnoozedItemsIfReady()
                     self.isLoading = false
                 }
-                if self.categoryCounts.isEmpty { self.refreshCategoryCounts() }
+                if self.needsInitialCountRefresh { self.refreshCategoryCounts() }
                 return
             }
 
@@ -821,7 +858,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                     self.stageSnoozedItemsIfReady()
                     self.isLoading = false
                 }
-                if self.categoryCounts.isEmpty { self.refreshCategoryCounts() }
+                if self.needsInitialCountRefresh { self.refreshCategoryCounts() }
                 return
             }
 
@@ -844,7 +881,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 self.stageSnoozedItemsIfReady()
                 self.isLoading = false
                 if !self.photoStack.isEmpty { self.precacheNextImages() }
-                if self.categoryCounts.isEmpty { self.refreshCategoryCounts() }
+                if self.needsInitialCountRefresh { self.refreshCategoryCounts() }
             }
         }
     }

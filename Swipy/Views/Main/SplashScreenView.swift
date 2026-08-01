@@ -1,5 +1,4 @@
 import SwiftUI
-import Photos
 
 struct SplashScreenView: View {
     // ViewModel lives here so it is created once and survives the entire app session.
@@ -84,14 +83,13 @@ struct SplashScreenView: View {
                         opacity = 1.0
                     }
                     Task {
-                        // Only pre-warm counts if permission is already granted.
-                        // First-time users haven't granted access yet — fetching now
-                        // would populate categoryCounts with zeros and prevent the
-                        // lazy .task in SmartFiltersView from triggering a real refresh.
-                        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-                        if status == .authorized || status == .limited {
-                            stackViewModel.refreshCategoryCounts()
-                        }
+                        // Category counts are NOT refreshed here on purpose — the Swipe
+                        // screen (the very next thing the user sees) is the #1 priority
+                        // and must stay at 0 CPU contention from Vision/CIFilter work.
+                        // PhotoStackViewModel.init()'s loadCachedAccurateCounts() already
+                        // seeds categoryCounts from disk synchronously, so Smart Filters
+                        // still shows last-known numbers instantly if the user gets there
+                        // first — a fresh scan only fires from SmartFiltersView itself.
                         try? await Task.sleep(for: .seconds(1.3))
                         withAnimation { isActive = true }
                     }

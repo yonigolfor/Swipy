@@ -275,7 +275,8 @@ refreshCategoryCounts()  [guarded by isRefreshingCounts — re-entry no-ops]
   Phase 1: countFast() לכל קטגוריה במקביל (capped ל-100, כולל .blurryPhotos/.burstPhotos)
   Phase 2: async let, במקביל:
     service.count(for: .largeVideos)  — תמיד רץ (זול, metadata בלבד)
-    accurateBlurryCount() + accurateBurstCount() — רק אם tryAcquireBlurBurstScan() הצליח
+    accurateBlurryCount() + accurateBurstCount() — רק אם tryAcquireBlurBurstScan() הצליח,
+      עטופים ב-Task.detached(priority: .background) (תוקן — ראו "Cold-start jank" למטה)
       accurateBlurryCount()  — pagination + BlurBurstScanEngine.countBlurry, cache-first
       accurateBurstCount()   — pagination + BurstAnalyzer.analyze, cache-first
       releaseBlurBurstScan() בסיום
@@ -288,7 +289,16 @@ refreshCategoryCounts()  [guarded by isRefreshingCounts — re-entry no-ops]
   → תוצאות נשמרות ל-Documents/categoryCounts.json (מחליף את largeVideoCount.json הישן)
 ```
 
-`SmartFiltersView` קורא ל-`refreshCategoryCounts()` רק בשלושה מקרים: טעינה ראשונה (`categoryCounts.isEmpty`), אחרי שפעולת swipe/undo סימנה `hasPendingCountUpdate` והמשתמש חזר לטאב, או pull-to-refresh מפורש — לא בכל `onAppear`.
+`SmartFiltersView` קורא ל-`refreshCategoryCounts()` רק בשלושה מקרים: טעינה ראשונה ה-session (`stackViewModel.needsInitialCountRefresh` — property ב-`PhotoStackViewModel`, `FilterCategory.allCases.contains { categoryCounts[$0] == nil }` — **לא** `categoryCounts.isEmpty`, ראו הסבר למטה), אחרי שפעולת swipe/undo סימנה `hasPendingCountUpdate` והמשתמש חזר לטאב, או pull-to-refresh מפורש — לא בכל `onAppear`. `needsInitialCountRefresh` הוא source-of-truth יחיד — `resetAndLoad()`'s ארבעת ה-fallbacks הפנימיים (`if needsInitialCountRefresh { refreshCategoryCounts() }`, רצים מ-`init()` עצמו) משתמשים באותה בדיקה בדיוק, לא בעותק נפרד.
+
+### Cold-start jank (תוקן — בשני שלבים)
+**שלב 1 (חלקי):** `SplashScreenView.onAppear` היה קורא ל-`refreshCategoryCounts()` בכל cold start (אם ההרשאה כבר ניתנה), ו-`ContentView` נפתח על `selectedTab = 1` (SwipeStackView) — כך שהמשתמש כבר מחליק כרטיסים בזמן ש-Phase 2 עדיין רץ ברקע. `accurateBlurryCount`/`accurateBurstCount` רצו בתוך ה-`async let` **בלי** עטיפה עצמאית ב-`Task.detached`, ולכן ירשו את ה-priority של ה-Task החיצוני — `.userInitiated`. תיקון ראשון: עטיפת שני ה-`async let` שלהם ב-`Task.detached(priority: .background)` משלהם (כמו `largeVideoCount`) — הוריד את ה-jank מ-~8-10 שניות ל-~5, אבל לא ביטל אותו: `BurstAnalyzer.analyze()` לא היה עם cache באותו שלב, אז כל cold start עדיין הריץ Vision אמיתי על מאות מועמדים (עמודים של 500 ב-`accurateBurstCount`) — עומס מרובה-ליבות מספיק גדול כדי לגרום ל-thermal throttling ותחרות GPU/ANE גם ב-QoS נכון.
+
+**שלב 2 (התיקון האמיתי):** הסרת הקריאה ל-`refreshCategoryCounts()` מ-`SplashScreenView.onAppear` **לגמרי**. `PhotoStackViewModel.init()`'s `loadCachedAccurateCounts()` עדיין ממלא את `categoryCounts` מהדיסק באופן סינכרוני (0ms), כך ש-Smart Filters עדיין מציג מספרים אחרונים-ידועים אם המשתמש מגיע לשם ראשון — אבל סריקה טרייה נורית **רק** מ-`SmartFiltersView` עצמו, כשהמשתמש בפועל נמצא שם. יחד עם ה-feature-print cache ב-`BurstAnalyzer` (למעלה), גם הסריקה הזו זולה בביקורים חוזרים.
+
+**באג משני שנתפס תוך כדי:** אחרי הסרת הקריאה מה-Splash, משתמש חוזר מגיע ל-`SmartFiltersView` עם `categoryCounts` שכבר לא ריק (3/6 קטגוריות מהדיסק) — אז ה-`.task` guard המקורי (`categoryCounts.isEmpty`) היה מדלג בטעות ומשאיר את `.all`/`.screenshots`/`.screenRecordings` (שלעולם לא נשמרות לדיסק) תקועות על 0. תוקן ע"י בדיקה מדויקת יותר: האם *כל* 6 הקטגוריות כבר מולאו הפעם.
+
+**באג שלישי, קריטי יותר, שנתפס ב-code review:** התיקון למעלה תוקן רק ב-`SmartFiltersView`'s `.task` — אבל `resetAndLoad()` (שרץ מ-`init()` עצמו, בכל cold start!) היה עם **4 מקומות נוספים** (`if categoryCounts.isEmpty { refreshCategoryCounts() }`) עם אותו באג בדיוק, לא תוקנו. עבור משתמש ראשון-אי-פעם (או כל cache-miss — קובץ `categoryCounts.json` נמחק/פגום), `categoryCounts` ריק באמת ב-`init()`, אז ה-`isEmpty` שם היה עדיין `true` ומריץ Phase 2 מלא — vision/CIFilter כבד — **ישר ב-cold start**, בדיוק מה שכל התיקון הזה נועד למנוע. תוקן ע"י מיצוי הבדיקה ל-property יחיד ומשותף על ה-ViewModel — `needsInitialCountRefresh` — שגם `SmartFiltersView` וגם ארבעת המקומות הפנימיים ב-`resetAndLoad()` קוראים לו במקום כל אחד לשכפל את הביטוי בנפרד.
 
 ### Pre-scan ברקע + Invalidation
 `startBackgroundBlurBurstPrescan()` נקרא מתוך הסוף של `startOnboardingScan()` עצמו (**לא** במקביל אליו!) — ראו "CPU spike" למטה. `.background` priority, `maxConcurrency: 3` (נמוך מה-default של 6 שמשמש נתיבים אינטראקטיביים), pagination זהה ל-`scanUntilFull`. עד שהמשתמש מגיע בפועל לקטגוריה, רוב הספרייה כבר verified. Cache-first הופך ריצות חוזרות לזולות כמעט לחינם.
@@ -298,7 +308,9 @@ refreshCategoryCounts()  [guarded by isRefreshingCounts — re-entry no-ops]
 
 **נעילה משותפת:** ה-prescan ו-Phase 2 (למעלה) חולקים דגל בודד — `isBlurBurstScanActive`, דרך `tryAcquireBlurBurstScan()`/`releaseBlurBurstScan()` — כדי שלא ירוצו שני סריקות blur/burst על `BlurBurstScanEngine`/`BurstAnalyzer` במקביל. מי שתופס ראשון ממשיך; השני מדלג על העבודה הזו לסבב הזה (הערך הקיים ב-cache/badge נשאר, הסבב הבא ישלים).
 
-`photoLibraryDidChange`: assets שנמחקו → `BlurBurstCacheService.invalidate(removedIDs:)` (לא wipe מלא!). assets חדשים → `startBackgroundBlurBurstPrescan()` נקרא שוב — מהיר כי כל ה-assets הישנים כבר ב-cache.
+`photoLibraryDidChange`: assets שנמחקו או ששונו in-place (עריכה — crop/פילטר/markup, אותו `localIdentifier`, פיקסלים אחרים) → `BlurBurstCacheService.invalidate(assetIDs:)` (לא wipe מלא!) — כולל `details.changedObjects`, לא רק `removedObjects`, אחרת feature print/verdict שחושבו לפני עריכה יישארו ב-cache לצמיתות ויתנו תוצאה שגויה. assets חדשים → `startBackgroundBlurBurstPrescan()` נקרא שוב — מהיר כי כל ה-assets הישנים כבר ב-cache.
+
+ה-cache של הספירות המדויקות (`cachedAccurateCounts` + `categoryCounts.json`) נמחק **רק** כש-`removedIDs`/`insertedIndexes` בפועל לא ריקים — **לא** רק לפי `details.hasIncrementalChanges`. גרסה קודמת של התיקון הזה הסתמכה על `hasIncrementalChanges` בלבד וטענה שזה מסנן שינויי מטא-דאטה כמו favorite toggle — זה שגוי: לפי תיעוד Apple, `hasIncrementalChanges` הוא `false` רק במקרה הנדיר שבו צריך להחליף את כל ה-fetch result, לא בכל פעם ששינוי הוא "רק מטא-דאטה". שינוי `changedObjects` גרידא (favorite toggle) עדיין `hasIncrementalChanges == true`, אז הגרסה הקודמת עדיין מחקה את ה-cache על כל עריכה טריוויאלית. הבדיקה הנכונה: רק insertion/removal אמיתיים יכולים לשנות אילו/כמה assets נופלים לכל קטגוריה.
 
 ---
 

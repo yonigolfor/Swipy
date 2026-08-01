@@ -100,13 +100,27 @@ class BurstAnalyzer {
 
     /// Computes feature prints for every item concurrently, bounded to avoid decoding
     /// too many images at once. Order-independent — the grouping pass looks these up by ID.
+    /// Cache-first: a feature print is reused instead of re-running Vision, which is
+    /// what keeps the on-demand Smart Filters scan cheap on repeat visits. This relies
+    /// on PhotoStackViewModel.photoLibraryDidChange invalidating the cached entry via
+    /// BlurBurstCacheService.invalidate(assetIDs:) whenever PHChange reports the asset
+    /// in changedObjects — a PHAsset's localIdentifier survives in-app edits (crop/
+    /// filter/markup) even though the pixels don't, so without that invalidation a
+    /// cached print would silently go stale.
     private func featurePrints(for items: [PhotoItem], maxConcurrency: Int) async -> [String: VNFeaturePrintObservation] {
         var result: [String: VNFeaturePrintObservation] = [:]
         await withTaskGroup(of: (String, VNFeaturePrintObservation?).self) { group in
             var iterator = items.makeIterator()
             func addNext() {
                 guard let item = iterator.next() else { return }
-                group.addTask { (item.id, await self.featurePrint(for: item.asset)) }
+                group.addTask {
+                    if let cached = BlurBurstCacheService.shared.featurePrint(for: item.id) {
+                        return (item.id, cached)
+                    }
+                    guard let computed = await self.featurePrint(for: item.asset) else { return (item.id, nil) }
+                    BlurBurstCacheService.shared.setFeaturePrint(computed, for: item.id)
+                    return (item.id, computed)
+                }
             }
             for _ in 0..<maxConcurrency { addNext() }
             while let (id, fp) = await group.next() {

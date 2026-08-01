@@ -67,8 +67,7 @@ struct SmartFiltersView: View {
             .task {
                 // .task is lifecycle-aware: it cancels automatically if the
                 // user leaves the screen before counting finishes.
-                // Only runs if counts have never been loaded.
-                if stackViewModel.categoryCounts.isEmpty {
+                if stackViewModel.needsInitialCountRefresh {
                     stackViewModel.refreshCategoryCounts()
                 }
             }

@@ -10,6 +10,7 @@
 //
 
 import Foundation
+import Vision
 
 /// Thread-safe, disk-backed cache of blur/burst verdicts keyed by PHAsset localIdentifier.
 /// Not MainActor-isolated — read/write from any thread (background scan tasks included).
@@ -19,12 +20,30 @@ final class BlurBurstCacheService {
     private struct CacheData: Codable {
         var blurVerdicts: [String: Bool] = [:]
         var burstVerdicts: [String: Bool] = [:]
+        /// Serialized VNFeaturePrintObservation per asset (NSKeyedArchiver), so
+        /// BurstAnalyzer can skip re-running Vision for previously-seen assets.
+        /// Only valid for the OS version recorded in `featurePrintSchemaVersion` —
+        /// see the invalidation check in `init()`.
+        var featurePrints: [String: Data] = [:]
+        var featurePrintSchemaVersion: String = ""
     }
 
     private var data: CacheData
     private let lock = NSLock()
     private var isDirty = false
     private var pendingSave: DispatchWorkItem?
+
+    /// Proxy for the Vision feature-print model in use — Apple ships updated Vision
+    /// models with OS updates, and a feature print computed under one model isn't
+    /// guaranteed comparable to one computed under another. `computeDistance` failing
+    /// on a mismatch silently falls through to "treat as similar" in BurstAnalyzer
+    /// (try? leaves distance at its initial 0, which is < the similarity threshold) —
+    /// so a stale cross-version vector could silently mis-group unrelated photos into
+    /// a burst instead of throwing a visible error. Wiping featurePrints alone (not
+    /// blurVerdicts/burstVerdicts, which don't carry this risk) on every OS version
+    /// change is a small correctness cost, not a performance one — it only forces the
+    /// first Smart Filters visit after an OS update to recompute prints.
+    private static let currentFeaturePrintSchemaVersion = ProcessInfo.processInfo.operatingSystemVersionString
 
     /// Caches directory, not Documents — this is a rebuildable index, not user data,
     /// and shouldn't be backed up or synced.
@@ -42,6 +61,11 @@ final class BlurBurstCacheService {
         if let raw = try? Data(contentsOf: url),
            let decoded = try? JSONDecoder().decode(CacheData.self, from: raw) {
             data = decoded
+        }
+        if data.featurePrintSchemaVersion != Self.currentFeaturePrintSchemaVersion {
+            data.featurePrints = [:]
+            data.featurePrintSchemaVersion = Self.currentFeaturePrintSchemaVersion
+            scheduleSave()
         }
     }
 
@@ -76,17 +100,42 @@ final class BlurBurstCacheService {
         scheduleSave()
     }
 
+    // MARK: - Feature Prints
+
+    /// Cache-first Vision feature print for burst similarity comparison — nil means
+    /// "not cached for the current schema version", not "asset has no burst membership".
+    func featurePrint(for id: String) -> VNFeaturePrintObservation? {
+        lock.lock()
+        let archived = data.featurePrints[id]
+        lock.unlock()
+        guard let archived else { return nil }
+        return try? NSKeyedUnarchiver.unarchivedObject(ofClass: VNFeaturePrintObservation.self, from: archived)
+    }
+
+    func setFeaturePrint(_ observation: VNFeaturePrintObservation, for id: String) {
+        guard let archived = try? NSKeyedArchiver.archivedData(withRootObject: observation, requiringSecureCoding: true) else { return }
+        lock.lock()
+        data.featurePrints[id] = archived
+        lock.unlock()
+        scheduleSave()
+    }
+
     // MARK: - Invalidation
 
-    /// Drops verdicts for assets no longer in the library (deleted externally).
-    /// Called from photoLibraryDidChange — keeps the cache from growing stale
-    /// entries forever without requiring a full-cache wipe on every library edit.
-    func invalidate(removedIDs: Set<String>) {
-        guard !removedIDs.isEmpty else { return }
+    /// Drops all cached verdicts/feature prints for the given assets — called
+    /// from photoLibraryDidChange both for assets removed from the library
+    /// (deleted externally) and for assets whose content changed in place
+    /// (crop/filter/markup edits keep the same localIdentifier but change
+    /// pixel content, so a verdict/feature print computed before the edit is
+    /// stale). Keeps the cache from growing stale entries forever, or silently
+    /// serving pre-edit analysis, without requiring a full-cache wipe.
+    func invalidate(assetIDs: Set<String>) {
+        guard !assetIDs.isEmpty else { return }
         lock.lock()
-        for id in removedIDs {
+        for id in assetIDs {
             data.blurVerdicts.removeValue(forKey: id)
             data.burstVerdicts.removeValue(forKey: id)
+            data.featurePrints.removeValue(forKey: id)
         }
         lock.unlock()
         scheduleSave()
