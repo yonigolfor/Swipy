@@ -10,6 +10,13 @@ import UIKit
 
 extension PHAsset {
     /// גודל הקובץ ב-bytes
+    /// ⚠️ NOT O(1) — calls `PHAssetResource.assetResources(for:)`, a real Photos-framework
+    /// query, not a cheap property read. Never use inside `Equatable`/`==`, a SwiftUI `body`
+    /// that re-evaluates frequently, a sort comparator, or any other hot/frequently-called
+    /// path. (A prior version of `PhotoCardView.Equatable` did exactly this and caused a
+    /// measured CPU regression — see `CLAUDE.md` → "Swipe Gesture Performance".) Fine for
+    /// one-shot reads (badge display, filter matching on a small snoozed-item list, a
+    /// background-task large-video count).
     var fileSize: Int64 {
         let primaryTypes: [PHAssetResourceType] = mediaType == .video
             ? [.video, .fullSizeVideo]

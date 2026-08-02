@@ -413,10 +413,10 @@ Items in this section are not user-facing features — they're internal architec
 
 ### The Real Problem
 
-`CardStackView` (this logic moved out of `SwipeStackView` as part of the swipe-gesture performance work — see `CLAUDE.md` → "Swipe Gesture Performance") still drives the swipe-away animation with a **single shared `@State private var dragOffset`**, applied only to whichever card has `isTop == true` in the `ForEach` (`CardStackView.swift:63`, applied via `.visualEffect` in `cardStack(cardW:cardH:)`). This still forces an awkward two-step choreography on every swipe:
+`CardStackView` (this logic moved out of `SwipeStackView` as part of the swipe-gesture performance work — see `CLAUDE.md` → "Swipe Gesture Performance") still drives the swipe-away animation with a **single shared `@State private var dragOffset`**, applied only to whichever card has `isTop == true` in the `ForEach` (`CardStackView.swift:82`, applied via `.visualEffect` in `cardStack(cardW:cardH:)`). This still forces an awkward two-step choreography on every swipe:
 
 1. `onEnded` animates `dragOffset` to `±500` (spring, card flies off-screen).
-2. A `DispatchQueue.main.asyncAfter(deadline: .now() + 0.3)` (`CardStackView.swift:446`) waits ~0.3s — roughly until the exit animation is visually done — before mutating `photoStack` (removing the swiped card) and resetting `dragOffset = .zero` **without animation**.
+2. A `DispatchQueue.main.asyncAfter(deadline: .now() + 0.3)` (`CardStackView.swift:470`) waits ~0.3s — roughly until the exit animation is visually done — before mutating `photoStack` (removing the swiped card) and resetting `dragOffset = .zero` **without animation**.
 
 The delay exists purely to prevent the *next* card (which shifts into `index == 0` the instant the array mutates) from momentarily inheriting the outgoing `±500` offset and visibly flashing off-screen before springing back.
 

@@ -46,20 +46,10 @@ struct CardStackView: View {
     /// `viewModel.undoLastAction()` has already re-inserted the restored item at the
     /// front of `photoStack`. This view reacts by flying the new top card in from the
     /// edge/tilt matching the undone action — it owns `dragOffset`/`dragRotation`, so
-    /// the entry animation has to run here, not in the parent.
-    ///
-    /// A later revision briefly moved the whole undo pipeline (guard checks +
-    /// `viewModel.undoLastAction()`) into `CardStackView` itself, triggered by a plain
-    /// `undoTrigger: Int` bump, specifically to close a code-review-flagged PLAUSIBLE
-    /// (not confirmed) risk that the two-hop version below could show a promoted card's
-    /// first frame before its off-screen position was set. That change was reverted —
-    /// a reported on-device drag-smoothness regression appeared immediately after it
-    /// shipped. Static analysis couldn't find a mechanism by which it should have
-    /// affected the drag hot path (`undoTrigger`/`pendingUndoRequest` are both read only
-    /// in a rare `.onChange`, never in `cardStack()`'s `ForEach` body or either
-    /// `.visualEffect` closure) — but the on-device report takes priority over a
-    /// theoretical fix for a low-severity, unconfirmed finding, so it was reverted
-    /// pending further investigation rather than kept on the strength of that analysis.
+    /// the entry animation has to run here, not in the parent. This two-hop design (vs.
+    /// a single synchronous function) was deliberately kept after an attempt to collapse
+    /// it caused an on-device regression — see CLAUDE.md → "Swipe Gesture Performance"
+    /// (Round 4) for the full history.
     let pendingUndoRequest: UndoRequest?
 
     /// Shuffle / offline-mode fly-out-fly-in transform, driven by SwipeStackView's own
@@ -186,36 +176,21 @@ struct CardStackView: View {
             : nil
     }
 
-    /// A single `ForEach` over the visible window, keyed by item id — the same shape as
-    /// the pre-refactor architecture. This matters for more than code size: because every
-    /// card (including the top one) is now tracked by ONE identity-preserving `ForEach`,
-    /// a card promoted from index 1 to index 0 (the next card, after a swipe removes the
-    /// old top card) is recognized by SwiftUI as *the same view* whose index changed — not
-    /// a new view replacing an old one. That's what makes the index-driven scale/offset/
-    /// rotation/opacity modifiers below actually animatable: a `withAnimation`/`.animation(value:)`
-    /// can only interpolate a *persisting* view's changing properties, never "animate
-    /// between two different views." A prior version of this file split background cards
-    /// (a separate `ForEach`) from the top card (a separate `if let` with a manual
-    /// `.id()`) for type-checker reasons — but that put the promoted card in a genuinely
-    /// different structural tree position each time, which SwiftUI always treats as
-    /// destroy-old/create-new regardless of matching ids across that boundary. That
-    /// architecture could only "pop" a promoted card into place, never interpolate it —
-    /// which is why an earlier attempt at this used a custom `.transition()` (removed;
-    /// transitions animate insertion/removal, not a persisting view's property changes,
-    /// so it couldn't actually smooth this case either).
+    /// A single `ForEach` over the visible window, keyed by item id, covering every card
+    /// including the top one. This is required, not just tidier: a card promoted from
+    /// index 1 to index 0 must be the *same persisting view* (only its index changed) for
+    /// `.animation(value:)` to interpolate its scale/offset/rotation below — SwiftUI can't
+    /// animate "between two different views." Full history of why this is the shape it is
+    /// (two prior architectures broke this identity and silently killed the promotion
+    /// animation) is in CLAUDE.md → "Swipe Gesture Performance".
     ///
-    /// **Every modifier in this row — including gesture/`.visualEffect` attachment — must
-    /// stay structurally identical across all indices, varying only by *value* (ternaries
-    /// as arguments), never by *branch* (`if/else` wrapping the card differently per
-    /// index).** An earlier version of this fix routed index-0-only gestures through
-    /// `if index == 0 { applyTopCardGestures(base) } else { base }` — that `if/else` is a
-    /// `_ConditionalContent` structural branch, and a card crossing from the `else` side to
-    /// the `if` side (exactly what happens when it's promoted to index 0) is a destroy-old/
-    /// create-new event to SwiftUI, identical in kind to the `if let`/`ForEach` split bug
-    /// documented above — it silently re-broke the exact identity continuity this
-    /// architecture exists to provide, so the promotion animation never played. Gestures
-    /// are applied unconditionally below, neutralized to a no-op for background cards via
-    /// ternary *values* instead.
+    /// **The operative rule going forward**: every modifier in this row — including
+    /// gesture/`.visualEffect` attachment — must stay structurally identical across all
+    /// indices, varying only by *value* (ternaries as arguments, e.g. `isTop ? a : b`),
+    /// never by *branch* (`if index == 0 { A } else { B }`). An `if/else` here is a
+    /// `_ConditionalContent` structural branch — SwiftUI treats a card crossing from one
+    /// branch to the other (exactly what promotion to index 0 does) as destroy-old/
+    /// create-new, breaking the identity continuity this whole function exists to provide.
     @ViewBuilder
     private func cardStack(cardW: CGFloat, cardH: CGFloat) -> some View {
         ForEach(
@@ -244,8 +219,10 @@ struct CardStackView: View {
             // opacity spring from the index-1 look to the index-0 look, because — per the
             // identity note above — it never stopped being the same view.
             .scaleEffect(isTop ? 1.0 : 1.0 - CGFloat(index) * 0.05)
-            .offset(y: isTop ? 0 : CGFloat(index * 8))
-            .rotationEffect(.degrees(isTop ? 0 : item.rotation))
+            .stackRotation(
+                isTop ? 0 : item.rotation,
+                offset: CGSize(width: 0, height: isTop ? 0 : CGFloat(index * 8))
+            )
             .opacity(isTop ? 1.0 : 1.0 - Double(index) * 0.2)
             // Only the card *arriving* at index 0 gets the spring — every other card
             // (e.g. index 2 → 1, or a freshly-paginated card entering at index 2) snaps
@@ -507,6 +484,16 @@ struct CardStackView: View {
     private func runUndoEntry(for action: SwipeAction) {
         undoGeneration += 1
         let generation = undoGeneration
+
+        // performUndo()'s guard only checks the discrete isPinching flag, not the
+        // continuous pinchScale/pinchOffset values — those can still be mid-spring-back
+        // (isPinching flips false immediately in pinchGesture.onEnded, but the actual
+        // values take ~0.3s to settle via onChange(of: isPinching)). Since the restored
+        // card is a fresh top-card identity that reads these same CardStackView-level
+        // values through its own .visualEffect, force them to rest now — otherwise a
+        // shake right after releasing a pinch would show the undo card mid-zoom/pan.
+        pinchScale = 1.0
+        pinchOffset = .zero
 
         let entryRotation = Double(cardFlingDistance / cardRotationDivisor)
         switch action {

@@ -18,7 +18,7 @@ PhotoStackViewModel.photoStack: [PhotoItem]
   (@Published array, full app session lifetime)
       │
       ▼
-CardStackView — background cards via ForEach(photoStack.dropFirst().prefix(2)), top card rendered separately (gestured)
+CardStackView — single ForEach(photoStack.prefix(3), id: \.element.id) covering all 3 cards (top included), scale/offset/rotation/opacity + gesture attachment driven by ternary *values* keyed on isTop, never a structural branch — see cardStack(cardW:cardH:)'s doc comment for why identity must stay unified across all cards
       │
       ├── viewModel.image(for: item.id)           ← photoService.cachedImage() — synchronous
       ├── viewModel.finalImageIDs.contains(id)    ← is this the final version?
@@ -416,48 +416,16 @@ Pool entries **אינם** מתפנים ב-`onDisappear` של `PhotoCardView`. ה
 > עדיין `@State` ב-`SwipeStackView` (מועברים ל-`CardStackView` כ-`@Binding`) — הם רק
 > "מתהפכים" פעם-פעמיים לגסטורה, אז שיתוף ה-storage לא עולה כלום.
 >
-> **סבב 2**: גם אחרי הבידוד הזה, `CardStackView.body` עצמו עדיין רץ מחדש בכל frame —
-> כי `dragOffset`/`pinchScale`/`pinchOffset`/`dragRotation` נקראו ישירות בתוך
-> `.offset()`/`.scaleEffect()`/`.rotationEffect()` שבנויים בתוך ה-`ViewBuilder`. התיקון:
-> כל הטרנספורם של הקלף העליון עבר ל-`.visualEffect { content, _ in ... }` (iOS 17+) —
-> ה-closure הזה מוערך בשלב ה-layout, לא כחלק מבניית `body`, אז קריאה ל-state בתוכו לא
-> נרשמת כתלות של `body`. גם ה-opacity/scale של `SwipeIndicator` עברו לאותו מנגנון (דרך
-> `.visualEffect` חיצוני), בעוד שבחירת הכיוון (איזה אייקון) עברה ל-`@State private var
-> swipeDirection` שמתעדכן רק כשהוא באמת משתנה (חציית סף 80pt), לא בכל פיקסל. כתוצאה מכך
-> הוסרו modifiers של `.animation(value:)` שהיו קיימים בעבר — שני מקומות שנשענו עליהם
-> באופן משתמע (`dragGesture.onEnded`'s pinch-discard branch, ו-`onChange(of: isPinching)`'s
-> pinch-release reset) קיבלו `withAnimation` מפורש במקומם. פירוט מלא ב-CLAUDE.md.
->
-> **סבב 3**: קלף מקודם (index 1→0 אחרי swipe) היה "קופץ" ישר לגודל מלא, גם אחרי הכל
-> למעלה. ניסיון ראשון עם `AnyTransition` מותאם אישית לא עבד — `.transition()` מנפיש רק
-> *הכנסה/הסרה* של view, לא שינוי במאפיינים של view שכבר קיים; והקלף העליון (`if let`
-> נפרד עם `.id()` ידני) והקלפים ברקע (`ForEach` נפרד) היו במיקום מבני שונה בעץ, אז
-> SwiftUI תמיד ראה בקידום קלף הרס-ישן/יצירה-חדשה, לא אותו view שמשנה index — כלומר
-> אין מה "לאנימש". התיקון האמיתי: איחוד לכל הקלפים (כולל העליון) ל-`ForEach` יחיד
-> (`id: \.element.id`), עם scale/offset/rotation/opacity שהם פונקציה טהורה של `index`,
-> מונפשים ב-`.animation(value: index)` — כך קלף שעולה מ-index 1 ל-0 הוא **אותו view
-> נמשך**, וSwiftUI כן יכול לאנימש את שינוי המאפיינים שלו. `AnyTransition.cardElevation`
-> הוסרה לגמרי — לא רלוונטית יותר. גם תיקנה בונוס: קלף מקודם כבר לא מקבל זהות/`@State`
-> טרייה (היה גורם ל-`onAppear` לירות שוב ולטעון מחדש תמונה שכבר נטענה כרקע). **תיקון
-> נוסף**: ה-`.animation(value: index)` הוחל בהתחלה ללא תנאי על כל שורה ב-`ForEach` —
-> כלומר כל שינוי index באיזשהו קלף הונפש, לא רק זה שמגיע ל-index 0. תוצאה: swipe אחד
-> היה מניע גם את הקלף שעולה לחזית (רצוי) וגם את הקלף שזז מ-index 2 ל-1 (לא רצוי —
-> תזוזה מיותרת ומסיחה). תוקן ע"י התנאה על ה-index **היעד**:
-> `.animation(index == 0 ? .spring(...) : nil, value: index)` — רק הקלף שמגיע ל-0
-> מקבל spring; כל השאר קופצים מיידית בלי תנועה.
->
-> **תיקון שלישי — הבאג חזר, הפעם דרך ה-gestures**: כדי לצרף `.visualEffect`/`.gesture`
-> רק לקלף העליון, השורה ב-`ForEach` נכתבה כ-`if index == 0 { applyTopCardGestures(base) }
-> else { base }`. זה נראה סביר, אבל `if/else` בתוך `ViewBuilder` הוא ענף מבני
-> (`_ConditionalContent`) — בדיוק כמו ה-`if let`/`ForEach` שכבר תיעדנו למעלה. כשקלף
-> מתקדם ל-index 0 הוא עובר בדיוק את המעבר `else`→`if` — כלומר SwiftUI הורס ובונה
-> מחדש את ה-view **באותו הרגע** שהאנימציה הייתה אמורה לרוץ, וממוטט את רצף ה-identity
-> שכל התיקון נשען עליו. התוצאה: שום קלף לא אנימש יותר, כאילו לא עשינו כלום. תוקן
-> ע"י הסרת ה-`if/else` המבני לגמרי — כל ה-modifiers (`.visualEffect`, `.gesture`,
-> `.simultaneousGesture`) מוחלים **תמיד** על כל שורה, עם `isTop` כערך (לא ענף) בתוך
-> הפרמטרים (`.gesture(isTop ? dragGesture : nil)` וכו') — כך שקלפי רקע מקבלים ערכים
-> ניטרליים, לא שהם מודרים מבנית. ה-`SwipeIndicator` בתוך `.overlay { if isTop && ... }`
-> נשאר בטוח כענף — הוא שכבה דקורטיבית נפרדת, לא עוטף את הקלף עצמו. פירוט מלא ב-CLAUDE.md.
+> **סבבים 2-3 (תמצית — הסיפור המלא ב-CLAUDE.md → "Swipe Gesture Performance")**:
+> `CardStackView.body` המשיך לרוץ מחדש בכל frame גם אחרי הבידוד הראשוני — תוקן ע"י
+> העברת הטרנספורם של הקלף העליון ל-`.visualEffect` (מוערך בשלב ה-layout, לא נרשם
+> כתלות של `body`), ו-`swipeDirection` הופרד מ-`dragOffset` הגולמי לצורך בחירת האייקון.
+> בנפרד, אנימציית קידום הקלף (index 1→0) לא עבדה בגלל שני באגי identity שונים —
+> ארכיטקטורת ForEach מפוצלת (רקע/עליון בנפרד) וענף `if/else` מבני סביב ה-gestures —
+> ששניהם שברו את רצף ה-identity ש-SwiftUI צריך כדי לאנימש שינוי במאפיינים של view
+> קיים. הפתרון הסופי: `ForEach` יחיד לכל הקלפים, עם `isTop` כ**ערך** בכל modifier
+> (אף פעם לא כענף), ו-`.animation(value: index)` מותנה ביעד כדי שרק הקלף שמגיע
+> ל-index 0 יונפש.
 
 ```
 DragGesture.onChanged (offset > 30pt — פעם אחת)
@@ -512,34 +480,14 @@ DragGesture.onEnded (swipe בוטל — חזר למרכז)
 (דרך `pendingUndoRequest`) שמריץ בפועל את אנימציית הכניסה — כי `dragOffset`/
 `dragRotation` חיים שם:
 
-> **ניסיון שהוחזר (reverted)**: code review העלה חשש (PLAUSIBLE, לא אושר כברייק
-> בפועל) שהרינדור הראשון של הקלף החדש-בראש עלול לשקף את ה-`photoStack.first` החדש
-> *לפני* ש-`dragOffset` הוזז off-screen, כי שתי המוטציות (מוטציית ה-stack ומיקום
-> ה-off-screen) קורות בפונקציות נפרדות עם קפיצה ריאקטיבית (`.onChange`) ביניהן. בוצע
-> תיקון: איחוד כל הפייפליין (guard checks + `undoLastAction()` + מיקום off-screen)
-> לפונקציה סינכרונית אחת ב-`CardStackView`, מופעלת ע"י `undoTrigger: Int` פשוט
-> במקום `pendingUndoRequest`. **התיקון הוחזר** — מיד אחרי שהוא עלה, דווחה רגרסיה
-> בחלקות ה-swipe על מכשיר אמיתי. ניתוח סטטי של הקוד לא מצא מנגנון שדרכו השינוי הזה
-> אמור היה להשפיע על ה-hot path של הגרירה (`undoTrigger`/`pendingUndoRequest` שניהם
-> נקראים רק בתוך `.onChange` נדיר, אף פעם לא בתוך גוף ה-`ForEach` של `cardStack()`
-> או באחד מה-`.visualEffect` closures — ו-`SwipeStackView.body` בכלל לא תלוי ב-drag
-> state, אז הפרמטרים של `CardStackView` לא even נבנים-מחדש בכל frame של גרירה, לא
-> משנה איזה מנגנון undo עומד מאחוריהם) — אבל הדיווח מהמכשיר האמיתי גובר על תיקון
-> תיאורטי לממצא בחומרה נמוכה ולא-מאושר, אז הפייפליין הדו-שלבי למטה הוא מה שבפועל
-> בקוד. אם בעתיד יימצא הגורם *האמיתי* לרגרסיה (משהו שלא נגעו בו בשינוי הספציפי הזה),
-> אפשר לנסות את התיקון הסינכרוני שוב.
->
-> **הגורם האמיתי לרגרסיה נמצא בסוף — זה לא היה קשור ל-undo בכלל.** אותו code review
-> מצא גם ש-`PhotoCardView.Equatable`'s `==` חסר `item.fileSize` (ה-badge של גודל
-> הקובץ, `body` קורא לו אבל הוא לא היה חלק מהבדיקה). התיקון (`lhs.item.fileSize ==
-> rhs.item.fileSize`) הוא מה שבאמת שבר את הביצועים: `PHAsset.fileSize` **לא** property
-> זול — כל קריאה מפעילה `PHAssetResource.assetResources(for:)`, שאילתה אמיתית ל-Photos
-> framework. `CardStackView.body` (וה-`ForEach` שבתוכו) רץ מחדש מדי פעם **בלי קשר
-> למצב הגרירה** — בכל פעם ש-`viewModel` מפרסם שינוי `@Published` **כלשהו** (טעינת
-> תמונות/ציונים מתפרסמת ברציפות תוך כדי swipe פעיל, כי `dragGesture` עצמו מפעיל
-> prefetching). כל ריצה כזו שילמה עכשיו על עד 6 קריאות `PHAssetResource` (2 לכל קלף
-> × 3 קלפים) שלא היו קיימות קודם — זה מה שגרם לרגרסיה האמיתית. תוקן ע"י הסרת
-> `item.fileSize` מה-`==` לגמרי. פירוט מלא ב-CLAUDE.md.
+> **ניסיון שהוחזר (reverted) — תמצית, הסיפור המלא ב-CLAUDE.md**: נוסה איחוד הפייפליין
+> (guard checks + `undoLastAction()` + מיקום off-screen) לפונקציה סינכרונית אחת
+> ב-`CardStackView` (`undoTrigger: Int` במקום `pendingUndoRequest`), כדי לסגור חשש
+> PLAUSIBLE-בלבד מ-code review. **הוחזר** אחרי שדווחה רגרסיה בחלקות ה-swipe — ניתוח
+> סטטי לא מצא מנגנון שמסביר את זה, אבל הדיווח מהמכשיר גבר על תיקון תיאורטי. **הגורם
+> האמיתי לרגרסיה** התברר בסוף כלא-קשור ל-undo בכלל: `PhotoCardView.Equatable` השווה
+> זמנית את `item.fileSize`, ו-`PHAsset.fileSize` הוא לא property זול (קורא ל-
+> `PHAssetResource.assetResources(for:)`) — תוקן ע"י הסרתו מה-`==`.
 
 ```
 SwipeStackView.performUndo()

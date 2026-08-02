@@ -422,6 +422,10 @@ This project uses **zero third-party packages** (no CocoaPods, SPM, Carthage). U
   - `PhotoStackViewModel` intercepts the payload and rebuilds `photoStack` anchored at the target asset's `creationDate` (sorted fetch, same as `loadPhotos(filter:)` but seeded with a start anchor instead of a `FilterCategory`), then pages forward 30 at a time per the existing pagination rules.
   - Photos permission must already be authorized for the extension to resolve the asset — if not, fall back to opening the app at the default queue rather than a dead end (same philosophy as the existing permission-denied handling).
 
+### Future Optimization Opportunities
+
+- **Scope `PhotoStackViewModel`'s `@Published` surface for `CardStackView`.** The `item.fileSize`-in-Equatable regression (see "Swipe Gesture Performance" → Round 4) was caused by a specific expensive field, but the fix only capped cost-per-comparison — it didn't touch *why* the comparison runs as often as it does. `CardStackView.body`'s `ForEach` re-runs whenever `viewModel` publishes **any** `@Published` change (22+ distinct properties — `categoryCounts`, `onboardingPhotoCount`, `isShowingShareSheet`, `totalSpaceSaved`, etc. — most unrelated to card rendering), because `ObservableObject` invalidation is per-object, not per-property, and several of those properties (image/score loading) publish continuously during active swiping. A future field added to `PhotoCardView.Equatable`, even one that's individually cheap, is running inside a comparison that can fire many times per second. Deliberately not addressed now — 20% CPU during drag is already a large win over the 125-130% starting point, and splitting the ViewModel (or adding a narrower, card-specific `ObservableObject`) is a real architectural change with its own risk; not worth taking on without a concrete symptom driving it. Revisit if a similar regression resurfaces with a different field.
+
 ---
 
 ## Building the App

@@ -718,34 +718,21 @@ class PlayerUIView: UIView {
 // MARK: - Equatable
 
 /// Lets callers wrap instances in `.equatable()` so SwiftUI can skip re-invoking `body`
-/// when nothing rendering-relevant changed — critical for the top card, which is
-/// reconstructed by CardStackView's body on every `.onChanged` drag frame (needed so its
-/// `.offset`/`.rotationEffect` modifiers track the finger) even though `item`/`cachedImage`/
-/// etc. never change mid-drag. Without this, SwiftUI has no way to know the reconstruction
-/// was a no-op — a View isn't Equatable by default, and `onShare` (a fresh closure every
-/// frame) can't be compared at all — so it conservatively re-runs `body` on every frame:
-/// rebuilding the badge rows, the image ZStack, and re-rasterizing `cardShadow()`'s
-/// shadow silhouette over the whole card, 100+ times/sec. `cachedImage` is intentionally
-/// not part of this comparison — it's only read once, in `init`, to seed `@State`, so it
-/// can never differ between two constructions of the same already-established identity.
-/// Caution for future edits: any new `body` content driven by a field not listed in `==`
-/// below (e.g. a new badge keyed off another mutable `PhotoItem`/`asset` property) will
-/// silently stop updating once `.equatable()` decides nothing changed — add it here too.
-/// EXCEPT `item.fileSize`/`item.asset.fileSize` — deliberately excluded. `PHAsset.fileSize`
-/// (`PHAsset+Extensions.swift`) is not a cheap stored property; every read calls
-/// `PHAssetResource.assetResources(for:)`, a real Photos-framework/database query. A prior
-/// version compared it here to close a rare, low-severity staleness gap (the size badge
-/// not refreshing if iCloud sync changes an asset's size while it's on screen) — but
-/// `CardStackView.body` re-runs periodically regardless of drag state, whenever `viewModel`
-/// publishes *any* `@Published` change (image/score loading is @Published and fires
-/// continuously during active swiping, since `dragGesture` itself triggers prefetching) —
-/// `ObservableObject` invalidation is per-object, not per-property. Each such re-run
-/// reconstructs all 3 visible `PhotoCardView`s and runs `==` on each, so adding an
-/// expensive framework call here made an already-frequent comparison measurably expensive
-/// enough to cause a real, reported drag-performance regression. Not worth it for this
-/// staleness edge case — if it needs fixing later, do it via a lighter-weight signal (e.g.
-/// a `@Published` set the ViewModel updates only when it actually detects a size change),
-/// not by putting `PHAssetResource` calls in a hot comparison path.
+/// when nothing rendering-relevant changed — a plain `View` isn't Equatable by default,
+/// and `CardStackView` reconstructs this card on every `.onChanged` drag frame regardless
+/// (needed so its `.offset`/`.rotationEffect` modifiers track the finger), so without this
+/// SwiftUI conservatively re-runs `body` every frame: badge rows, image `ZStack`,
+/// `cardShadow()`'s silhouette, 100+ times/sec. `cachedImage` is intentionally excluded —
+/// it's only read once, in `init`, to seed `@State`.
+///
+/// **Caution for future edits**: any new `body` content driven by a field not listed in
+/// `==` below will silently stop updating once `.equatable()` decides nothing changed —
+/// add it here too. But first confirm the field is actually cheap to read: `item.fileSize`
+/// was briefly compared here and caused a real, measured performance regression, because
+/// `PHAsset.fileSize` secretly calls `PHAssetResource.assetResources(for:)` (a Photos-
+/// framework query) instead of being a stored property — see `PHAsset+Extensions.swift`'s
+/// warning on that property, and `CLAUDE.md` → "Swipe Gesture Performance" for the full
+/// incident writeup.
 extension PhotoCardView: Equatable {
     static func == (lhs: PhotoCardView, rhs: PhotoCardView) -> Bool {
         lhs.item.id == rhs.item.id &&
