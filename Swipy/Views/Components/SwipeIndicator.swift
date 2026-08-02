@@ -7,38 +7,30 @@
 
 import SwiftUI
 
+/// Pure content — no longer computes its own opacity/scale from `offset`. Callers (see
+/// CardStackView) apply those via `.visualEffect` from outside instead, since reading a
+/// per-frame drag value directly inside this view's own `body` would force a re-diff of
+/// whatever ancestor constructs it on every `.onChanged` frame. `direction` is expected
+/// to change rarely (only at threshold crossings), unlike a raw offset/magnitude.
 struct SwipeIndicator: View {
     let direction: SwipeDirection
-    let offset: CGSize
-    
-    private var opacity: Double {
-        let distance = offset.magnitude
-        return min(distance / 100, 1.0)
-    }
-    
-    private var scale: CGFloat {
-    let distance = offset.magnitude
-    return min(distance / 100, 1.0)
-}
-    
+
     var body: some View {
         Group {
             switch direction {
             case .left:
                 deleteIndicator
-                
+
             case .right:
                 keepIndicator
-                
+
             case .up:
                 starIndicator
-                
+
             case .none:
                 EmptyView()
             }
         }
-        .opacity(opacity)
-        .scaleEffect(scale)
         .frame(
             maxWidth: .infinity,
             maxHeight: direction == .up ? .infinity : nil,
@@ -49,7 +41,6 @@ struct SwipeIndicator: View {
         )
         .padding(.horizontal, 40)
         .padding(.top, direction == .up ? 60 : 0)
-        .animation(nil, value: scale)
     }
     
     // MARK: - Indicators
@@ -111,20 +102,9 @@ struct SwipeIndicator: View {
         Color.gray.opacity(0.3)
         
         VStack(spacing: 40) {
-            SwipeIndicator(
-                direction: .left,
-                offset: CGSize(width: -100, height: 0)
-            )
-            
-            SwipeIndicator(
-                direction: .right,
-                offset: CGSize(width: 100, height: 0)
-            )
-            
-            SwipeIndicator(
-                direction: .up,
-                offset: CGSize(width: 0, height: -100)
-            )
+            SwipeIndicator(direction: .left)
+            SwipeIndicator(direction: .right)
+            SwipeIndicator(direction: .up)
         }
     }
 }

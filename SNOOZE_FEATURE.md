@@ -48,7 +48,7 @@ private struct SnoozedPhoto {
     let snoozeCount: Int
 }
 
-/// Insertion depth — SwipeStackView.cardStackSize - 1.
+/// Insertion depth — CardStackView.cardStackSize - 1.
 /// Item enters at the bottom of the visible ZStack and reaches index 0
 /// after snoozeStageDepth more swipes.
 private let snoozeStageDepth = 2

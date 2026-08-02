@@ -413,10 +413,10 @@ Items in this section are not user-facing features — they're internal architec
 
 ### The Real Problem
 
-`SwipeStackView` currently drives the swipe-away animation with a **single shared `@State private var dragOffset`**, applied only to whichever card sits at `index == 0` in the `ZStack` (`SwipeStackView.swift:129-130`). This forces an awkward two-step choreography on every swipe:
+`CardStackView` (this logic moved out of `SwipeStackView` as part of the swipe-gesture performance work — see `CLAUDE.md` → "Swipe Gesture Performance") still drives the swipe-away animation with a **single shared `@State private var dragOffset`**, applied only to whichever card has `isTop == true` in the `ForEach` (`CardStackView.swift:63`, applied via `.visualEffect` in `cardStack(cardW:cardH:)`). This still forces an awkward two-step choreography on every swipe:
 
 1. `onEnded` animates `dragOffset` to `±500` (spring, card flies off-screen).
-2. A `DispatchQueue.main.asyncAfter(deadline: .now() + 0.3)` (`SwipeStackView.swift:947`) waits ~0.3s — roughly until the exit animation is visually done — before mutating `photoStack` (removing the swiped card) and resetting `dragOffset = .zero` **without animation**.
+2. A `DispatchQueue.main.asyncAfter(deadline: .now() + 0.3)` (`CardStackView.swift:446`) waits ~0.3s — roughly until the exit animation is visually done — before mutating `photoStack` (removing the swiped card) and resetting `dragOffset = .zero` **without animation**.
 
 The delay exists purely to prevent the *next* card (which shifts into `index == 0` the instant the array mutates) from momentarily inheriting the outgoing `±500` offset and visibly flashing off-screen before springing back.
 
@@ -437,12 +437,12 @@ Each card in the stack owns its own drag offset (scoped to its own view identity
 
 ### Architecture Notes
 
-- Move `dragOffset` (and the gesture that drives it) from `SwipeStackView` down into `PhotoCardView` (or a thin wrapper), scoped per-card via `@State`, keyed by `ForEach`'s existing `PhotoItem.id` identity.
+- Move `dragOffset` (and the gesture that drives it) from `CardStackView` down into `PhotoCardView` (or a thin wrapper), scoped per-card via `@State`, keyed by `ForEach`'s existing `PhotoItem.id` identity. Note this cuts against the current (post swipe-gesture-performance-work) architecture in one respect: `CardStackView` deliberately keeps drag/pinch state centralized specifically so `.equatable()` + `.visualEffect` can isolate per-frame updates from `body` — moving `dragOffset` into `PhotoCardView` itself would need to preserve that isolation (e.g. `PhotoCardView` would need its own `.visualEffect`/`.equatable()` story), not just relocate the `@State`.
 - Replace the manual `±500` exit offset + delayed removal with `withAnimation(.spring(...)) { photoStack.removeAll { $0.id == swipedItem.id } }` combined with `.transition(.move(edge:))` (or a custom asymmetric transition per direction: left/right/up) on the card view — SwiftUI animates the removal natively.
 - **Also touches, and must be re-homed per-card:**
-  - Pinch-to-zoom state (`pinchScale`, `pinchOffset`, `pinchAnchor` — currently also gated on `index == 0`, `SwipeStackView.swift:132-136`).
-  - `swipeIndicatorOverlay`, which currently reads the shared `dragOffset` directly — needs to bind to whichever card is actively being dragged instead.
-  - The `NotificationCenter.stopCurrentVideo` post (`SwipeStackView.swift:946`) and the shake-hint-toast counter, both currently sequenced off the same `asyncAfter` block — need an equivalent hook off the new transition's completion (or off the `withAnimation` call directly, since the data mutation itself is no longer delayed).
+  - Pinch-to-zoom state (`pinchScale`, `pinchOffset`, `pinchAnchor` — currently gated on `isTop` via ternary *values*, not a structural branch — see `CardStackView.swift`'s `cardStack(cardW:cardH:)` doc comment for why that distinction matters here specifically; a naive re-home must preserve it or risk reintroducing the identity-breaking bug documented there).
+  - The `SwipeIndicator` overlay, which currently reads the shared `dragOffset` via its own `.visualEffect` (in `cardStack(cardW:cardH:)`) — needs to bind to whichever card is actively being dragged instead.
+  - The `NotificationCenter.stopCurrentVideo` post and the shake-hint-toast counter (`onSwipeFinalized` callback), both currently sequenced off the same `asyncAfter` block in `CardStackView.swift` — need an equivalent hook off the new transition's completion (or off the `withAnimation` call directly, since the data mutation itself is no longer delayed).
 - Not urgent: the undo-race fix already removed the correctness risk from the current design. This is a cleanliness/native-first refactor, not a bug fix — do not rush it alongside unrelated feature work.
 
 ---
@@ -452,7 +452,7 @@ Each card in the stack owns its own drag offset (scoped to its own view identity
 | File | Action | Notes |
 |---|---|---|
 | `PhotoCardView.swift` | **Modify** | Own per-card `@State private var dragOffset`, drag gesture, exit transition |
-| `SwipeStackView.swift` | **Modify** | Remove shared `dragOffset`/`asyncAfter` scaffolding; re-home pinch state and `swipeIndicatorOverlay` per-card |
+| `CardStackView.swift` | **Modify** | Remove shared `dragOffset`/`asyncAfter` scaffolding; re-home pinch state and the `SwipeIndicator` overlay per-card |
 | `PhotoStackViewModel.swift` | **Modify** | `performAction`/`keepPhoto`/`deletePhoto`/`snoozePhoto` likely unchanged (already item-based post undo-race fix) — verify call sites still make sense with immediate (non-delayed) invocation |
 | `ARCHITECTURE_SWIPE_LOADING.md` | **Modify** | Update Swipe Flow diagram once implemented — current diagram documents the `asyncAfter` scaffolding this refactor removes |
 

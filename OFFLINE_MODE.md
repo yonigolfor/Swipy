@@ -267,7 +267,7 @@ while photoStack.count < targetCount:
 
 ## UX States in Offline Mode
 
-`SwipeStackView` renders one of four states depending on `isOfflineMode`, `isScanning`, `isLoading`, `photoStack`, and `offlineFoundNoLocalItems`:
+`CardStackView` (`Views/Main/CardStackView.swift` — extracted out of `SwipeStackView` as part of the swipe-gesture performance work; see `CLAUDE.md` → "Swipe Gesture Performance") renders one of four states depending on `isOfflineMode`, `isScanning`, `isLoading`, `photoStack`, and `offlineFoundNoLocalItems`:
 
 | Condition | What the user sees |
 |---|---|

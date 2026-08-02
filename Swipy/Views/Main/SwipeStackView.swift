@@ -13,20 +13,15 @@ struct SwipeStackView: View {
     @EnvironmentObject private var viewModel: PhotoStackViewModel
     @Binding var selectedTab: Int
     @Environment(\.scenePhase) private var scenePhase
-    @State private var dragOffset: CGSize = .zero
-    @State private var dragRotation: Double = 0
     /// True from shake-to-undo until the restored card lands back at center —
     /// blocks the drag gesture so a finger grabbing the card mid-flight can't
-    /// fight the return spring.
+    /// fight the return spring. Mirrored into CardStackView via @Binding — it only
+    /// flips twice per undo (start/landed), so sharing this storage costs nothing.
     @State private var isUndoAnimating = false
-    /// Bumped on every performUndo() call — lets a stale completion/fallback
-    /// from an earlier undo recognize it's no longer current and skip clearing
-    /// isUndoAnimating out from under a newer undo's in-flight animation.
-    @State private var undoGeneration = 0
-    /// Off-screen distance (pt) a card travels on exit fling / undo re-entry.
-    private let cardFlingDistance: CGFloat = 500
-    /// Divisor mapping horizontal drag translation to rotation degrees.
-    private let cardRotationDivisor: CGFloat = 20
+    /// Set once undoLastAction() has already re-inserted the restored item at the
+    /// front of the stack — CardStackView reacts by flying it in from the edge/tilt
+    /// matching the undone action. See CardStackView.runUndoEntry.
+    @State private var pendingUndoRequest: UndoRequest?
 
     /// Tracks the Photos permission status across app foreground/background — lets the
     /// scenePhase hook detect a denied→authorized transition (e.g. user just came back
@@ -55,24 +50,19 @@ struct SwipeStackView: View {
     /// Small label shown above the bold indicator text. Set per-transition type.
     @State private var timeIndicatorHeader = ""
 
-    /// Prevents firing prepareUpcomingCards() more than once per gesture.
-    @State private var hasFiredEarlyPrecache = false
-    /// True between drag start and drag end — used to cancel/resume pre-fetch.
+    /// True between drag start and drag end. Mirrored into CardStackView via @Binding —
+    /// like isPinching/isUndoAnimating, it only flips twice per gesture, so sharing this
+    /// storage costs nothing even though the continuous drag values it gates (dragOffset,
+    /// dragRotation) live entirely inside CardStackView now.
     @State private var isDragging = false
-
-    @State private var pinchScale: CGFloat = 1.0
-    @State private var pinchOffset: CGSize = .zero
-    @State private var pinchAnchor: UnitPoint = .center
+    /// True while a pinch is active. Mirrored into CardStackView via @Binding — drives
+    /// this view's own tab-bar-hide / dim-overlay / zIndex(200) below.
     @State private var isPinching = false
-    @State private var cardSize: CGSize = .zero
-    @State private var pinchPanOrigin: CGSize = .zero
 
     // Shake hint toast — shown once after the user's 3rd swipe (first session only).
     @AppStorage("shakeHintSwipeCount") private var shakeHintSwipeCount = 0
     @AppStorage("hasSeenShakeHint") private var hasSeenShakeHint = false
     @State private var showShakeHintToast = false
-
-    private let cardStackSize = 3 // כמה קלפים מציגים מאחור
 
     var body: some View {
         // Outer ZStack: background | card column | SessionSavingsBarView floating on top.
@@ -91,114 +81,24 @@ struct SwipeStackView: View {
 
                 // Card Stack — force LTR so swipe physics are always consistent:
                 // right = Keep, left = Delete, regardless of device language.
-                GeometryReader { geometry in
-                    let cardW = min(geometry.size.width - 40, geometry.size.height * 9.0 / 16.0)
-                    let cardH = cardW * 16.0 / 9.0
-                    ZStack {
-                        if [.denied, .restricted].contains(PHPhotoLibrary.authorizationStatus(for: .readWrite)) {
-                            EmptyStateView.galleryAccessDenied(onOpenSettings: UIApplication.shared.openSettings)
-                        } else if viewModel.isOfflineMode && viewModel.isScanning && viewModel.photoStack.isEmpty {
-                            offlineScanningView
-                        } else if viewModel.isLoading {
-                            VStack(spacing: 16) {
-                                ProgressView()
-                                    .scaleEffect(1.5)
-                                Text(String(localized: "loading.scanning"))
-                                    .font(.subheadline)
-                                    .foregroundColor(.secondary)
-                            }
-                        } else if viewModel.photoStack.isEmpty {
-                            VictoryView(
-                                onEmptyBin: { selectedTab = 2 },
-                                onImportPhotos: PHPhotoLibrary.authorizationStatus(for: .readWrite) == .limited
-                                    ? UIApplication.shared.openSettings : nil,
-                                onReviewSnoozed: viewModel.pendingSnoozedCount > 0 ? { viewModel.flushSnoozedItemsNow() } : nil,
-                                onExitOfflineMode: viewModel.isOfflineMode ? {
-                                    performOfflineTransition(deactivating: true) { viewModel.deactivateOfflineMode() }
-                                } : nil,
-                                reviewBinCount: viewModel.reviewBin.count,
-                                snoozedCount: viewModel.pendingSnoozedCount,
-                                currentFilter: viewModel.currentFilter,
-                                isOfflineMode: viewModel.isOfflineMode,
-                                offlineFoundNoLocalItems: viewModel.offlineFoundNoLocalItems
-                            )
-                            .id("victory")
-                        } else {
-                            ForEach(
-                                Array(viewModel.photoStack.prefix(cardStackSize).enumerated()),
-                                id: \.element.id
-                            ) { index, item in
-                                PhotoCardView(
-                                    item: item,
-                                    isTopCard: index == 0,
-                                    cachedImage: viewModel.image(for: item.id),
-                                    isCachedImageFinal: viewModel.finalImageIDs.contains(item.id),
-                                    aestheticScore: viewModel.loadedScoreIDs.contains(item.id)
-                                        ? AestheticScoringService.shared.cachedScore(for: item.id)
-                                        : nil,
-                                    onShare: index == 0 ? { [weak viewModel] completion in
-                                        viewModel?.shareItem(item, completion: completion)
-                                    } : nil
-                                )
-                                .frame(width: cardW, height: cardH)
-                                .zIndex(Double(cardStackSize - index))
-                                .offset(
-                                    x: index == 0 ? dragOffset.width : 0,
-                                    y: index == 0 ? dragOffset.height : CGFloat(index * 8)
-                                )
-                                .scaleEffect(
-                                    index == 0 ? pinchScale : (1.0 - CGFloat(index) * 0.05),
-                                    anchor: index == 0 ? pinchAnchor : .center
-                                )
-                                .offset(index == 0 ? pinchOffset : .zero)
-                                .rotationEffect(
-                                    .degrees(index == 0 ? dragRotation : item.rotation)
-                                )
-                                .opacity(index == 0 ? 1.0 : (1.0 - Double(index) * 0.2))
-                                // nil while actively dragging = immediate 1:1 finger tracking (matches
-                                // the pinch pattern below); spring only takes over on release/reset/fling,
-                                // which are already wrapped in their own explicit withAnimation calls.
-                                .animation(
-                                    index == 0 && !isDragging
-                                        ? .spring(response: 0.3, dampingFraction: 0.7) : nil,
-                                    value: dragOffset
-                                )
-                                // During pinch: nil = immediate 1:1 response to gesture.
-                                // After pinch ends: spring returns card to original size/position.
-                                .animation(
-                                    index == 0 && !isPinching
-                                        ? .spring(response: 0.3, dampingFraction: 1.0) : nil,
-                                    value: pinchScale
-                                )
-                                .animation(
-                                    index == 0 && !isPinching
-                                        ? .spring(response: 0.3, dampingFraction: 1.0) : nil,
-                                    value: pinchOffset
-                                )
-                                .gesture(index == 0 ? dragGesture : nil)
-                                .simultaneousGesture(index == 0 && !isUndoAnimating ? pinchGesture : nil)
-                                .overlay {
-                                    if index == 0 && isDragging { swipeIndicatorOverlay }
-                                }
-                            }
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .onAppear { cardSize = CGSize(width: cardW, height: cardH) }
-                    .animation(.easeInOut(duration: 0.35), value: viewModel.isScanning)
-                    // Covers the denied/restricted → loading → cards handoff (scenePhase
-                    // recovery below never wraps the ViewModel reload in withAnimation —
-                    // per the "no withAnimation on @Published mutations" rule, the crossfade
-                    // is scoped here instead, on the container that actually swaps branches).
-                    .animation(.easeInOut(duration: 0.35), value: viewModel.isLoading)
-                    // Shuffle / offline transition modifiers — applied to the whole card area
-                    .offset(y: cardStackOffset)
-                    .scaleEffect(cardStackScale)
-                    .opacity(cardStackOpacity)
-                }
-                .padding(.vertical, 10)
-                .environment(\.layoutDirection, .leftToRight)
-
+                // Drag/pinch continuous state lives entirely inside CardStackView — see
+                // its header comment for why (CPU spike root-caused to that state living
+                // on this view instead, forcing a full re-diff of this whole screen on
+                // every drag frame).
+                CardStackView(
+                    selectedTab: $selectedTab,
+                    isPinching: $isPinching,
+                    isDragging: $isDragging,
+                    isUndoAnimating: $isUndoAnimating,
+                    pendingUndoRequest: pendingUndoRequest,
+                    cardStackOffset: cardStackOffset,
+                    cardStackScale: cardStackScale,
+                    cardStackOpacity: cardStackOpacity,
+                    onExitOfflineMode: {
+                        performOfflineTransition(deactivating: true) { viewModel.deactivateOfflineMode() }
+                    },
+                    onSwipeFinalized: handleSwipeFinalized
+                )
             }
             .zIndex(isPinching ? 200 : 0)
 
@@ -311,16 +211,6 @@ struct SwipeStackView: View {
             }
         }
         .toolbar(isPinching ? .hidden : .visible, for: .tabBar)
-        .onChange(of: isPinching) { _, zooming in
-            if !zooming {
-                pinchScale  = 1.0
-                pinchOffset = .zero
-                // pinchAnchor intentionally not reset here — at scale=1.0 the anchor
-                // is visually irrelevant, and resetting it mid-spring (scale still > 1)
-                // causes a visible position jump. The next DragGesture.onChanged will
-                // set a fresh anchor when a new pinch begins.
-            }
-        }
         .onShake {
             performUndo()
         }
@@ -599,50 +489,6 @@ struct SwipeStackView: View {
                 )
         )
         .shadow(color: .black.opacity(0.25), radius: 10, y: 3)
-    }
-
-    // MARK: - Offline Scanning State
-
-    private var offlineScanningView: some View {
-        VStack(spacing: 24) {
-            ZStack {
-                Circle()
-                    .fill(LinearGradient(
-                        colors: [Color(red: 0.1, green: 0.35, blue: 0.9).opacity(0.18),
-                                 Color(red: 0.3, green: 0.1, blue: 0.75).opacity(0.10)],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    ))
-                    .frame(width: 140, height: 140)
-                Image(systemName: "airplane.circle.fill")
-                    .font(.system(size: 70))
-                    .foregroundColor(Color(red: 0.1, green: 0.35, blue: 0.9))
-                    .shadow(color: Color(red: 0.1, green: 0.35, blue: 0.9).opacity(0.3), radius: 10, x: 0, y: 5)
-            }
-            .padding(.top, 40)
-
-            VStack(spacing: 12) {
-                Text(String(localized: "offline.scanning_title"))
-                    .font(.largeTitle)
-                    .fontWeight(.bold)
-                    .minimumScaleFactor(0.8)
-                    .lineLimit(1)
-                Text(String(localized: "offline.scanning_subtitle"))
-                    .font(.body)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.horizontal)
-            }
-
-            ProgressView()
-                .scaleEffect(1.2)
-                .tint(Color(red: 0.1, green: 0.35, blue: 0.9))
-
-            Spacer()
-        }
-        .padding()
-        .transition(.opacity)
     }
 
     // MARK: - Offline Prompt Banner
@@ -934,181 +780,28 @@ struct SwipeStackView: View {
         return formatter.string(from: date)
     }
 
-    // MARK: - Pinch Gesture
+    // MARK: - Swipe Finalization Callback
 
-    // Pure SwiftUI: MagnificationGesture handles scale, inner DragGesture captures the
-    // anchor (startLocation) and drives pan. Both coexist with the primary DragGesture
-    // (swipe) via .simultaneousGesture — iOS naturally routes 1-finger to DragGesture
-    // and 2-finger to MagnificationGesture without any hitTest tricks.
-    // Spring reset lives in onChange(of: isPinching) so it runs inside SwiftUI's render
-    // cycle where withAnimation is reliable; onEnded only flips the flag.
-    private var pinchGesture: some Gesture {
-        MagnificationGesture()
-            .onChanged { scale in
-                pinchScale = max(1.0, scale)
-                if !isPinching, pinchScale > 1.01 {
-                    isPinching = true
-                    // A single-finger drag may already be mid-flight when the second
-                    // finger lands — dragGesture.onChanged bails out once isPinching
-                    // is true, so without this reset dragOffset/dragRotation would
-                    // stay frozen at their last value and stack underneath pinchOffset
-                    // for the whole gesture instead of the card tracking the pinch.
-                    dragOffset = .zero
-                    dragRotation = 0
-                }
+    /// Called by CardStackView once a swipe has fully committed (after finalizeSwipe
+    /// succeeds) — drives the two UI concerns that live up here: the shake-hint toast
+    /// counter and the large-file delete particle burst. Was previously inline in the
+    /// dragGesture.onEnded closure before that gesture moved into CardStackView.
+    private func handleSwipeFinalized(_ item: PhotoItem, _ action: SwipeAction) {
+        // Show shake hint toast on 3rd swipe (first session only)
+        if !hasSeenShakeHint {
+            shakeHintSwipeCount += 1
+            if shakeHintSwipeCount >= 3 {
+                hasSeenShakeHint = true
+                triggerShakeHintToast()
             }
-            .onEnded { _ in
-                // Spring reset handled by onChange(of: isPinching) below.
-                isPinching = false
-                pinchPanOrigin = .zero
-            }
-            .simultaneously(with:
-                DragGesture(minimumDistance: 0, coordinateSpace: .local)
-                    .onChanged { drag in
-                        if !isPinching {
-                            // Capture anchor from touch start — best approximation of
-                            // centroid available in pure SwiftUI (no 2-finger centroid API).
-                            if cardSize.width > 0 {
-                                pinchAnchor = UnitPoint(
-                                    x: min(1, max(0, drag.startLocation.x / cardSize.width)),
-                                    y: min(1, max(0, drag.startLocation.y / cardSize.height))
-                                )
-                            }
-                            pinchPanOrigin = drag.translation
-                        } else {
-                            // .local coords are in the view's unscaled frame, so multiply
-                            // delta by pinchScale to get 1:1 screen-space movement.
-                            let dx = (drag.translation.width  - pinchPanOrigin.width)  * pinchScale
-                            let dy = (drag.translation.height - pinchPanOrigin.height) * pinchScale
-                            pinchOffset = CGSize(width: dx, height: dy)
-                        }
-                    }
-            )
-    }
+        }
 
-    // MARK: - Swipe Gesture
-
-    // In RTL layout iOS flips the translation.width sign.
-    // We normalize it here so swipe-right always means Keep
-    // and swipe-left always means Delete regardless of locale.
-    private var dragGesture: some Gesture {
-        DragGesture()
-            .onChanged { value in
-                // Pan is handled exclusively by pinchGesture's inner DragGesture.
-                // If this 1-finger recognizer fires during a 2-finger pinch its
-                // translation comes from the wrong touch point and corrupts pinchOffset.
-                guard !isPinching, !isUndoAnimating else { return }
-                if !isDragging {
-                    isDragging = true
-                    viewModel.cancelPrefetch()
-                }
-                dragOffset = value.translation
-                dragRotation = Double(value.translation.width / cardRotationDivisor)
-
-                // Fire early pre-load once the drag clears 30 pt.
-                // This gives us the remainder of the gesture (~300-500 ms) to
-                // pull the next card's image into NSCache before it hits screen.
-                if !hasFiredEarlyPrecache,
-                   abs(value.translation.width) > 30 || abs(value.translation.height) > 30 {
-                    hasFiredEarlyPrecache = true
-                    viewModel.prepareUpcomingCards()
-                }
-            }
-            .onEnded { value in
-                guard !isUndoAnimating else { return }
-                isDragging = false
-                hasFiredEarlyPrecache = false
-                // If a pinch is active or scale hasn't fully reset, discard swipe.
-                // MagnificationGesture.onEnded owns the spring-reset of pinchOffset.
-                guard !isPinching, pinchScale <= 1.01 else {
-                    dragOffset = .zero
-                    dragRotation = 0
-                    return
-                }
-                // SwipeDirection uses the RAW translation (not flipped)
-                // because .left/.right are already correct in RTL context.
-                let direction = SwipeDirection.from(offset: value.translation)
-
-                if let action = direction.action, let swipedItem = viewModel.topCard {
-                    // Block keep/delete swipes when free daily limit is exhausted
-                    if (action == .keep || action == .delete), !viewModel.canSwipe {
-                        withAnimation(.spring(response: 0.35, dampingFraction: 0.52)) {
-                            dragOffset = .zero
-                            dragRotation = 0
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                            viewModel.shouldShowPaywall = true
-                        }
-                        return
-                    }
-
-                    // Animate card off screen
-                    withAnimation(.spring(response: 0.4, dampingFraction: 0.7)) {
-                        switch direction {
-                        case .left:
-                            dragOffset = CGSize(width: -cardFlingDistance, height: value.translation.height)
-                        case .right:
-                            dragOffset = CGSize(width: cardFlingDistance, height: value.translation.height)
-                        case .up:
-                            dragOffset = CGSize(width: value.translation.width, height: -cardFlingDistance)
-                        case .none:
-                            break
-                        }
-                    }
-
-                    // Mark the swipe pending *now*, synchronously — makes canUndo/lastAction
-                    // point at this card immediately instead of the previous one, so a shake
-                    // or Undo tap during the exit-fly below can never restore the wrong photo.
-                    viewModel.beginSwipe(swipedItem, action: action)
-
-                    // Perform the actual removal after exit-animation completes.
-                    // Crucially we reset dragOffset WITHOUT animation so the
-                    // incoming card never inherits the ±500 offset and slides in.
-                    NotificationCenter.default.post(name: .stopCurrentVideo, object: nil)
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        // swipedItem was captured at gesture-end, not re-read here — the
-                        // stack's front can change in the meantime (e.g. shake-to-undo),
-                        // so the action must stay bound to the exact card the user swiped.
-                        // finalizeSwipe no-ops (returns false) if the user already undid this
-                        // exact swipe mid-flight — in that case dragOffset/dragRotation now
-                        // belong to the undo's own landing spring and must not be touched.
-                        guard viewModel.finalizeSwipe(swipedItem, action: action) else { return }
-                        dragOffset = .zero
-                        dragRotation = 0
-
-                        // Show shake hint toast on 3rd swipe (first session only)
-                        if !hasSeenShakeHint {
-                            shakeHintSwipeCount += 1
-                            if shakeHintSwipeCount >= 3 {
-                                hasSeenShakeHint = true
-                                triggerShakeHintToast()
-                            }
-                        }
-
-                        // Trigger particle explosion if this was a delete of a large file
-                        if action == .delete,
-                           swipedItem.fileSize >= largeFileSizeThreshold {
-                            // Particles spawn from the left edge where the card exits
-                            particleOrigin = CGPoint(
-                                x: 0,
-                                y: UIScreen.main.bounds.height / 2
-                            )
-                            showParticles = true
-                        }
-                    }
-                } else {
-                    // Spring back to centre
-                    resetCardPosition()
-                }
-                viewModel.resumePrefetch()
-            }
-    }
-
-    // MARK: - Swipe Indicator Overlay
-
-    private var swipeIndicatorOverlay: some View {
-        let direction = SwipeDirection.from(offset: dragOffset)
-        return SwipeIndicator(direction: direction, offset: dragOffset)
+        // Trigger particle explosion if this was a delete of a large file
+        if action == .delete, item.fileSize >= largeFileSizeThreshold {
+            // Particles spawn from the left edge where the card exits
+            particleOrigin = CGPoint(x: 0, y: UIScreen.main.bounds.height / 2)
+            showParticles = true
+        }
     }
 
     // MARK: - Instructions View
@@ -1142,69 +835,18 @@ struct SwipeStackView: View {
 
     // MARK: - Helper Methods
 
-    private func resetCardPosition() {
-        withAnimation(.spring(response: 0.3, dampingFraction: 0.7)) {
-            dragOffset = .zero
-            dragRotation = 0
-        }
-        // Re-sync the top card's video in case the early warm-up interrupted
-        // playback during the drag (safety net on top of the pool protection).
-        NotificationCenter.default.post(name: .resumeTopCardVideo, object: nil)
-    }
-
-    /// Shake-to-undo: re-enters the restored card from the same edge it exited
-    /// through, tilted the same way it was mid-swipe. The card's first frame is
-    /// rendered off-screen (a freshly-inserted card never animates its initial
-    /// appearance), then a queue hop lets that frame actually commit before the
-    /// spring pulls it back to center — the underdamped spring naturally
-    /// overshoots a few degrees past 0° before settling, giving it real
-    /// deck-landing inertia instead of a flat snap-back. The drag gesture is
-    /// blocked for the duration (isUndoAnimating) so a finger grabbing the
-    /// card mid-flight can't fight the return spring.
+    /// Shake-to-undo entry point: validates the request and hands the actual re-entry
+    /// animation (off-screen start → spring back to center, "deck-landing" overshoot)
+    /// to CardStackView via `pendingUndoRequest`, since it owns dragOffset/dragRotation
+    /// and the drag gesture those need to stay isolated from this view's body. Ignores
+    /// the shake while the user has an active gesture on the top card — inserting the
+    /// restored item would shift that card to index 1 out from under their finger/fingers
+    /// and hijack the drag/pinch state mid-gesture.
     private func performUndo() {
-        // Ignore the shake while the user has an active gesture on the top card —
-        // inserting the restored item would shift that card to index 1 out from
-        // under their finger/fingers and hijack dragOffset/dragRotation or
-        // pinchScale/pinchOffset mid-gesture.
         guard !isDragging, !isPinching else { return }
         guard let action = viewModel.undoLastAction() else { return }
         isUndoAnimating = true
-        undoGeneration += 1
-        let generation = undoGeneration
-
-        let entryRotation = Double(cardFlingDistance / cardRotationDivisor)
-        switch action {
-        case .delete:
-            dragOffset = CGSize(width: -cardFlingDistance, height: 0)
-            dragRotation = -entryRotation
-        case .keep:
-            dragOffset = CGSize(width: cardFlingDistance, height: 0)
-            dragRotation = entryRotation
-        case .snooze:
-            dragOffset = CGSize(width: 0, height: -cardFlingDistance)
-            dragRotation = 0
-        case .undo:
-            break
-        }
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.03) {
-            withAnimation(
-                .spring(response: 0.45, dampingFraction: 0.75),
-                completionCriteria: .logicallyComplete
-            ) {
-                dragOffset = .zero
-                dragRotation = 0
-            } completion: {
-                if undoGeneration == generation { isUndoAnimating = false }
-            }
-        }
-        // Safety net: guarantees the gesture unblocks even if the animation's
-        // completion handler never fires (e.g. app backgrounded mid-flight).
-        // Generation-gated so a stale timer from an earlier undo can't clear
-        // isUndoAnimating while a newer undo's animation is still in flight.
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-            if undoGeneration == generation { isUndoAnimating = false }
-        }
+        pendingUndoRequest = UndoRequest(action: action)
     }
 }
 
