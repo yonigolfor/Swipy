@@ -2,6 +2,18 @@
 # Core & Build Plugins
 agp = "8.5.1"
 kotlin = "2.0.0"                       # Compose Compiler is now the in-tree K2 plugin — see [plugins] below
+ksp = "2.0.0-1.0.24"                   # Kotlin Symbol Processing — used for Hilt's KSP compiler (2.48+), not kapt
+
+# SDK levels — see android/CLAUDE.md "Media & Storage Operations" for why minSdk is 29
+# (Scoped Storage baseline: createTrashRequest/createDeleteRequest exist from API 30, but
+# the legacy pre-Scoped-Storage delete branch can be omitted entirely rather than kept as dead code)
+# compileSdk/targetSdk pinned to 34, not the newer 35/36 platforms also installed on this
+# machine — AGP 8.5.1 (pinned per this project's chosen version) is only tested up to
+# compileSdk 34; a higher value builds only via an unsupported-version override, which is a
+# real risk to take on deliberately, not a default to fall into.
+compileSdk = "34"
+minSdk = "29"
+targetSdk = "34"
 
 # UI & Image Rendering
 composeBom = "2024.06.00"
@@ -49,6 +61,10 @@ hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref
 hilt-android-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }
 androidx-hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hiltNavigationCompose" }
 
+# JSR-330 @Inject — used on :domain use-case constructors so Hilt can construct them
+# once the app-level DI graph exists, without :domain depending on Hilt itself.
+javax-inject = { group = "javax.inject", name = "javax.inject", version = "1" }
+
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }
 android-library = { id = "com.android.library", version.ref = "agp" }
@@ -56,6 +72,7 @@ kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 hilt-android = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
+ksp = { id = "com.google.devtools.ksp", version.ref = "ksp" }
 
 [bundles]
 compose = [

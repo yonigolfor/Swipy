@@ -139,6 +139,8 @@ swipy-android/
 
 **Zero third-party product dependencies beyond the above infra layer** — mirroring the iOS app's "no RevenueCat/Mixpanel" stance: no third-party analytics SDK, no third-party crash reporter beyond Play Console's built-in ANR/crash reporting + Firebase Crashlytics *only if* the team explicitly opts in (not default-on). Telemetry follows the same **on-device-only counters + platform-native aggregation** philosophy as iOS `AnalyticsService` — see Analytics below.
 
+**SDK levels — decided, not placeholders:** `minSdk = 29`, `compileSdk = 34`, `targetSdk = 34` (`gradle/libs.versions.toml`). `compileSdk`/`targetSdk` are pinned to 34 rather than a newer installed platform (35/36 were also available locally) because AGP 8.5.1 — the AGP version this project is pinned to — is only tested up to compileSdk 34; building against 35 succeeds only via an explicit `android.suppressUnsupportedCompileSdk` override, which is a real risk to opt into deliberately later (e.g. once AGP is bumped), not a default to fall into now. `minSdk = 29` is what makes the legacy pre-Scoped-Storage delete branch in "Deletion & Trash" below deletable-on-sight rather than dead code kept "just in case."
+
 ---
 
 ## Color Palette
