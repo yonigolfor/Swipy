@@ -82,9 +82,17 @@ swipy-android/
 │
 ├── domain/                                # Pure Kotlin module — no Android SDK import allowed
 │   ├── model/                             # PhotoItem, FilterCategory, SwipeAction (sealed classes/enums)
-│   ├── repository/                        # Interfaces: PhotoRepository, ReviewBinRepository, PersonaRepository
-│   └── usecase/                           # KeepPhotoUseCase, DeletePhotoUseCase, SnoozePhotoUseCase,
+│   ├── repository/                        # Interfaces: PhotoRepository, PhotoStateRepository, PersonaRepository
+│   │                                       # (PhotoStateRepository is one interface covering kept/review-bin/
+│   │                                       # snoozed state — mirrors iOS's single PersistenceService rather
+│   │                                       # than splitting into a separate ReviewBinRepository; see Persistence)
+│   └── usecase/                           # GetPhotoStackPageUseCase, GetCategoryCountUseCase implemented so far;
+│                                           # KeepPhotoUseCase, DeletePhotoUseCase, SnoozePhotoUseCase,
 │                                           # UndoLastActionUseCase, ScanBlurryBurstUseCase, RefreshCategoryCountsUseCase
+│                                           # still pending — Keep/Delete need :feature-layer PendingIntent/
+│                                           # createTrashRequest UI wiring (see "Deletion & Trash"), not just a
+│                                           # plain suspend function, so they weren't built during the pure
+│                                           # data-layer pass that built PhotoStateRepository.
 │
 ├── data/
 │   ├── mediastore/                        # MediaStore query/pagination impl of PhotoRepository (see below)
