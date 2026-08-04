@@ -28,6 +28,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
+import com.swipy.feature.reviewbin.ReviewBinScreen
 import com.swipy.feature.swipe.SwipeStackScreen
 import dagger.hilt.android.AndroidEntryPoint
 
@@ -57,11 +61,10 @@ private fun hasMediaPermission(context: Context): Boolean =
         ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
     }
 
-/**
- * Gates :feature:swipe's SwipeStackScreen behind the media permission prompt. This is
- * MainActivity's whole job for now — see android/CLAUDE.md "Navigation" for why there's no
- * real NavHost yet (only one feature module exists to route to).
- */
+private const val ROUTE_SWIPE = "swipe"
+private const val ROUTE_REVIEW_BIN = "reviewbin"
+
+/** Gates SwipyNavHost behind the media permission prompt. */
 @Composable
 private fun PermissionGate() {
     val context = LocalContext.current
@@ -74,7 +77,7 @@ private fun PermissionGate() {
     }
 
     if (hasPermission) {
-        SwipeStackScreen()
+        SwipyNavHost()
     } else {
         Column(
             modifier = Modifier
@@ -87,6 +90,23 @@ private fun PermissionGate() {
             Button(onClick = { permissionLauncher.launch(mediaPermissions()) }) {
                 Text("Grant photo access")
             }
+        }
+    }
+}
+
+/**
+ * Two destinations for now (swipe <-> review bin) — see android/CLAUDE.md "Navigation" for
+ * where this grows into a bottom-nav SwipyNavHost once :feature:filters exists too.
+ */
+@Composable
+private fun SwipyNavHost() {
+    val navController = rememberNavController()
+    NavHost(navController = navController, startDestination = ROUTE_SWIPE) {
+        composable(ROUTE_SWIPE) {
+            SwipeStackScreen(onNavigateToReviewBin = { navController.navigate(ROUTE_REVIEW_BIN) })
+        }
+        composable(ROUTE_REVIEW_BIN) {
+            ReviewBinScreen(onBack = { navController.popBackStack() })
         }
     }
 }

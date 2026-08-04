@@ -67,37 +67,48 @@ class MediaStorePhotoRepository @Inject constructor(
             )
         }
 
+        cursor?.use(::readPhotoItems) ?: emptyList()
+    }
+
+    override suspend fun fetchByIds(ids: List<Long>): List<PhotoItem> = withContext(Dispatchers.IO) {
+        if (ids.isEmpty()) return@withContext emptyList()
+
+        val placeholders = ids.joinToString(",") { "?" }
+        val selection = "${MediaStore.Files.FileColumns._ID} IN ($placeholders)"
+        val selectionArgs = ids.map { it.toString() }.toTypedArray()
+
+        val cursor = context.contentResolver.query(collectionUri, pageProjection, selection, selectionArgs, null)
+        cursor?.use(::readPhotoItems) ?: emptyList()
+    }
+
+    private fun readPhotoItems(c: android.database.Cursor): List<PhotoItem> {
+        val idCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
+        val mediaTypeCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
+        val sizeCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
+        val mimeCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MIME_TYPE)
+        val widthCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.WIDTH)
+        val heightCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.HEIGHT)
+        val durationCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DURATION)
+        val dateAddedCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_ADDED)
+
         val items = mutableListOf<PhotoItem>()
-        cursor?.use { c ->
-            val idCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns._ID)
-            val mediaTypeCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MEDIA_TYPE)
-            val sizeCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.SIZE)
-            val mimeCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.MIME_TYPE)
-            val widthCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.WIDTH)
-            val heightCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.HEIGHT)
-            val durationCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DURATION)
-            val dateAddedCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_ADDED)
-
-            while (c.moveToNext()) {
-                val id = c.getLong(idCol)
-                val isVideo = c.getInt(mediaTypeCol) == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
-
-                items += PhotoItem(
-                    id = id,
-                    uriString = ContentUris.withAppendedId(collectionUri, id).toString(),
-                    fileSizeBytes = c.getLong(sizeCol),
-                    mimeType = c.getString(mimeCol) ?: "",
-                    isVideo = isVideo,
-                    width = c.getInt(widthCol),
-                    height = c.getInt(heightCol),
-                    durationMs = c.getLong(durationCol),
-                    // MediaStore's DATE_ADDED is epoch SECONDS (DATE_TAKEN, notoriously, is
-                    // milliseconds instead) — do not treat this value as epoch millis.
-                    dateAddedEpochSeconds = c.getLong(dateAddedCol),
-                )
-            }
+        while (c.moveToNext()) {
+            val id = c.getLong(idCol)
+            items += PhotoItem(
+                id = id,
+                uriString = ContentUris.withAppendedId(collectionUri, id).toString(),
+                fileSizeBytes = c.getLong(sizeCol),
+                mimeType = c.getString(mimeCol) ?: "",
+                isVideo = c.getInt(mediaTypeCol) == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO,
+                width = c.getInt(widthCol),
+                height = c.getInt(heightCol),
+                durationMs = c.getLong(durationCol),
+                // MediaStore's DATE_ADDED is epoch SECONDS (DATE_TAKEN, notoriously, is
+                // milliseconds instead) — do not treat this value as epoch millis.
+                dateAddedEpochSeconds = c.getLong(dateAddedCol),
+            )
         }
-        items
+        return items
     }
 
     override suspend fun countForCategory(filter: FilterCategory, cap: Int): Int =

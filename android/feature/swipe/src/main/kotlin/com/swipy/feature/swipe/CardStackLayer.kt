@@ -76,6 +76,7 @@ fun CardStackLayer(
 
                 PhotoCardComposable(
                     item = item,
+                    isTop = isTop,
                     modifier = Modifier
                         .zIndex((CARD_STACK_SIZE - index).toFloat())
                         .graphicsLayer {

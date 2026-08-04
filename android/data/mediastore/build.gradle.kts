@@ -33,6 +33,8 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.coroutines.core)
 
+    implementation(libs.androidx.media3.exoplayer)
+
     implementation(libs.hilt.android)
     ksp(libs.hilt.android.compiler)
 
