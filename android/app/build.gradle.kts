@@ -1,10 +1,10 @@
 // :app — Application module. Application class, NavHost graph root, DI graph root,
 // manifest merge. Depends on every :feature module. See android/CLAUDE.md "Navigation".
 //
-// For now (no :feature modules wired yet), MainActivity hosts a minimal bring-up screen
-// that exercises the real DI graph -> :domain use cases -> :data:mediastore repository ->
-// Compose rendering pipeline end-to-end, purely to validate the app launches on-device.
-// It will be replaced by SwipyNavHost once :feature:swipe exists.
+// MainActivity currently hosts :feature:swipe's SwipeStackScreen directly (gated behind the
+// media permission prompt) rather than a real SwipyNavHost — there's only one feature module
+// to route to so far. Replace with a proper NavHost once :feature:filters/:feature:reviewbin
+// exist.
 
 plugins {
     alias(libs.plugins.android.application)
@@ -44,6 +44,7 @@ dependencies {
     implementation(project(":domain"))
     implementation(project(":data:mediastore"))
     implementation(project(":data:datastore"))
+    implementation(project(":feature:swipe"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

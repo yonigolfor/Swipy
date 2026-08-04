@@ -10,7 +10,6 @@ import com.swipy.domain.model.FilterCategory
 import com.swipy.domain.model.PhotoItem
 import com.swipy.domain.repository.PhotoRepository
 import dagger.hilt.android.qualifiers.ApplicationContext
-import java.time.Instant
 import javax.inject.Inject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -93,8 +92,8 @@ class MediaStorePhotoRepository @Inject constructor(
                     height = c.getInt(heightCol),
                     durationMs = c.getLong(durationCol),
                     // MediaStore's DATE_ADDED is epoch SECONDS (DATE_TAKEN, notoriously, is
-                    // milliseconds instead) — do not swap this for ofEpochMilli.
-                    dateAdded = Instant.ofEpochSecond(c.getLong(dateAddedCol)),
+                    // milliseconds instead) — do not treat this value as epoch millis.
+                    dateAddedEpochSeconds = c.getLong(dateAddedCol),
                 )
             }
         }

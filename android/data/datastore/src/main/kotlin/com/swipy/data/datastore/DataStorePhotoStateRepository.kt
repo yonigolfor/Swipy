@@ -28,6 +28,12 @@ class DataStorePhotoStateRepository @Inject constructor(
         }
     }
 
+    override suspend fun unmarkKept(id: Long) {
+        dataStore.edit { prefs ->
+            prefs[KEPT_PHOTO_IDS] = prefs[KEPT_PHOTO_IDS].orEmpty() - id.toString()
+        }
+    }
+
     override val reviewBinIds: Flow<List<Long>> = dataStore.data.map { it.reviewBinIds() }
 
     override val reviewBinFileSizes: Flow<Map<Long, Long>> = dataStore.data.map { it.reviewBinFileSizes() }
@@ -61,6 +67,15 @@ class DataStorePhotoStateRepository @Inject constructor(
             prefs[TOTAL_SPACE_SAVED_LIFETIME] = (prefs[TOTAL_SPACE_SAVED_LIFETIME] ?: 0L) + freedBytes
             prefs[REVIEW_BIN_IDS] = json.encodeToString(emptyList<Long>())
             prefs[REVIEW_BIN_FILE_SIZES] = json.encodeToString(emptyMap<Long, Long>())
+        }
+    }
+
+    override suspend fun removeFromReviewBinPermanently(id: Long) {
+        dataStore.edit { prefs ->
+            val freedBytes = prefs.reviewBinFileSizes()[id] ?: 0L
+            prefs[TOTAL_SPACE_SAVED_LIFETIME] = (prefs[TOTAL_SPACE_SAVED_LIFETIME] ?: 0L) + freedBytes
+            prefs[REVIEW_BIN_IDS] = json.encodeToString(prefs.reviewBinIds() - id)
+            prefs[REVIEW_BIN_FILE_SIZES] = json.encodeToString(prefs.reviewBinFileSizes() - id)
         }
     }
 

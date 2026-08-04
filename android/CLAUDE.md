@@ -86,13 +86,20 @@ swipy-android/
 │   │                                       # (PhotoStateRepository is one interface covering kept/review-bin/
 │   │                                       # snoozed state — mirrors iOS's single PersistenceService rather
 │   │                                       # than splitting into a separate ReviewBinRepository; see Persistence)
-│   └── usecase/                           # GetPhotoStackPageUseCase, GetCategoryCountUseCase implemented so far;
-│                                           # KeepPhotoUseCase, DeletePhotoUseCase, SnoozePhotoUseCase,
-│                                           # UndoLastActionUseCase, ScanBlurryBurstUseCase, RefreshCategoryCountsUseCase
-│                                           # still pending — Keep/Delete need :feature-layer PendingIntent/
-│                                           # createTrashRequest UI wiring (see "Deletion & Trash"), not just a
-│                                           # plain suspend function, so they weren't built during the pure
-│                                           # data-layer pass that built PhotoStateRepository.
+│   └── usecase/                           # GetPhotoStackPageUseCase, GetCategoryCountUseCase, KeepPhotoUseCase,
+│                                           # DeletePhotoUseCase, SnoozePhotoUseCase, UndoSwipeUseCase implemented.
+│                                           # DeletePhotoUseCase turned out NOT to need PendingIntent/UI wiring —
+│                                           # see "Deletion & Trash" for why swipe-to-delete is a plain
+│                                           # PhotoStateRepository call with zero Android dependency; the actual
+│                                           # PendingIntent/createDeleteRequest flow lives in :data:mediastore's
+│                                           # MediaStoreDeletionRequests instead, called from :feature:swipe.
+│                                           # ScanBlurryBurstUseCase/RefreshCategoryCountsUseCase still pending
+│                                           # (belong to :feature:filters, not built yet). SnoozePhotoUseCase is
+│                                           # intentionally a simplified stub — see its own doc comment — it
+│                                           # persists a snooze count and the card is hidden, but the full
+│                                           # absolute-milestone re-injection schedule from SNOOZE_FEATURE.md
+│                                           # (stagingMilestone/targetMilestone against globalActionCounter) is
+│                                           # not ported yet.
 │
 ├── data/
 │   ├── mediastore/                        # MediaStore query/pagination impl of PhotoRepository (see below)
@@ -101,15 +108,20 @@ swipy-android/
 │   └── vision/                            # ML Kit / on-device analysis wrappers (blur, burst, aesthetic score)
 │
 ├── feature/
-│   ├── swipe/                             # Main card-stack experience
+│   ├── swipe/                             # Main card-stack experience — IMPLEMENTED (flat package,
+│   │   │                                   # no ui/ subpackage — small deliberate deviation from an
+│   │   │                                   # earlier draft of this doc; not worth a re-layout for)
 │   │   ├── PhotoStackViewModel.kt
 │   │   ├── PhotoStackUiState.kt           # Immutable state data class
 │   │   ├── PhotoStackIntent.kt            # Sealed class of user intents
 │   │   ├── PhotoStackEffect.kt            # Sealed class of one-shot effects
-│   │   └── ui/
-│   │       ├── SwipeStackScreen.kt        # Screen chrome — savings bar, FAB row, badges (analogue of SwipeStackView)
-│   │       ├── CardStackLayer.kt          # Gesture-isolated card stack — see Performance section, isolated for perf
-│   │       └── PhotoCardComposable.kt     # Image or video card
+│   │   ├── SwipeStackScreen.kt            # Screen chrome — deliberately minimal so far (Undo + a
+│   │   │                                   # temporary Empty Trash button only; no savings bar/FAB
+│   │   │                                   # row/badges yet — those need :core:designsystem components
+│   │   │                                   # that don't exist)
+│   │   ├── CardStackLayer.kt              # Gesture-isolated card stack — see Performance section, isolated for perf
+│   │   └── PhotoCardComposable.kt         # Image card (Coil); isVideo renders a text placeholder —
+│   │                                       # real Media3/VideoPlayerPool wiring is a separate pass
 │   ├── filters/                           # Smart Filters screen (2-phase counts — see below)
 │   ├── reviewbin/                         # Review Bin grid + full-screen media viewer
 │   ├── paywall/                           # Billing/paywall screen
@@ -381,11 +393,16 @@ val mediaPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
 
 ### Deletion & Trash — Scoped Storage Compliance
 
-- **Android 11+ (`API 30`)**: use `MediaStore.createTrashRequest()` for the Review Bin's "soft delete" semantic — this is the *exact* platform-native analogue of the iOS Review Bin (items are recoverable, not gone) and should be preferred over a custom app-level trash table wherever the OS mechanism suffices. `createTrashRequest()` returns a `PendingIntent` that must be launched via `rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult())` — this is a **user-consent-gated, batchable** operation; batch the full "Empty Trash" confirmation into one `createDeleteRequest()` call rather than one syscall-adjacent request per item, both for the obvious throughput reason and because each request surfaces a system confirmation dialog.
-- **Android 10 (`API 29`)**: `createTrashRequest()`/`createDeleteRequest()` don't exist yet — Scoped Storage on 29 still permits direct delete of the app's *own* media, but for foreign-app media (the common case — most gallery content wasn't created by Swipy) fall back to `MediaStore.Images.Media.EXTERNAL_CONTENT_URI` delete + catch `RecoverableSecurityException`, then launch its embedded `PendingIntent` via `startIntentSenderForResult` — this is the exact mechanism `RecoverableSecurityException` exists for.
-- **Below API 29**: legacy direct `File.delete()` on the resolved file path is acceptable (pre-Scoped-Storage), gated behind `WRITE_EXTERNAL_STORAGE` — but confirm this codepath is still reachable given the app's actual `minSdk`; if `minSdk` is 29+, delete this branch and the permission entirely rather than keeping dead defensive code (Iron Principle: no defensive code for scenarios that can't occur).
-- **Video safety, ported directly:** never issue a delete/trash request for a video whose `Uri` is currently loaded into a pooled `ExoPlayer` without first calling `player.stop()` / releasing that pool slot — the exact rationale as the iOS rule ("never delete a video from PHPhotoLibrary without first draining its AVPlayer from VideoPlayerPool — this prevents crashes"); on Android the failure mode is more likely a lingering `MediaCodec`/`Surface` reference than a hard crash, but the same drain-before-delete discipline applies.
-- The "Empty Trash" *confirm* action maps to a single `createDeleteRequest()` covering every `Uri` currently in the Review Bin — always batch, never loop-per-item, both for correctness (avoids partial-completion states if the user backs out of the system dialog partway) and for the obvious performance reason.
+**Swipe-to-delete never touches MediaStore.** A left swipe is a silent, local-only `PhotoStateRepository.addToReviewBin()` call — the exact same "recoverable, not gone" semantic as iOS's Review Bin, achieved by simply not deleting anything yet, not by calling an OS trash API per swipe. An earlier draft of this doc suggested `MediaStore.createTrashRequest()` at swipe time as the "platform-native" choice; that was wrong and was never implemented — `createTrashRequest()` surfaces a system confirmation dialog, so calling it on every left swipe would pop that dialog on every left swipe, which breaks the continuous-swipe UX this app depends on. `DeletePhotoUseCase` (`:domain`) is the actual implementation: one line, no Android import, no PendingIntent.
+
+Permanent deletion only happens once, in a single batched confirmation, when the user explicitly empties the bin:
+
+- **Android 11+ (`API 30`)**: `MediaStoreDeletionRequests.createBatchDeleteRequest(ids)` (`:data:mediastore`) — a single `MediaStore.createDeleteRequest()` covering every id in the Review Bin, launched via `rememberLauncherForActivityResult(ActivityResultContracts.StartIntentSenderForResult())` from `SwipeStackScreen`. `PhotoStateRepository.emptyReviewBin()` (crediting `totalSpaceSavedLifetime`, clearing the bin) only runs *after* the launcher reports `RESULT_OK` — never optimistically, since the user can cancel the system dialog.
+- **A real bug found only by running this on-device, not from reading the docs**: `createDeleteRequest()`/`RecoverableSecurityException` both reject the generic `MediaStore.Files` collection URI (`content://media/external/file/<id>`) that `MediaStorePhotoRepository`'s own fetch path uses for reads — `ContentResolver.openInputStream`/Coil don't care about collection membership, but the delete-request system APIs validate it strictly and throw `IllegalArgumentException: All requested items must be Media items`. `MediaStoreDeletionRequests.typedUriFor(id)` queries `MEDIA_TYPE` for the id first and builds the correctly-typed `Images.Media`/`Video.Media` URI before requesting deletion — a plain `ContentUris.withAppendedId` against the generic Files collection (which is exactly what reads use) is not interchangeable with what deletion needs.
+- **Android 10 (`API 29`)**: `createDeleteRequest()` doesn't exist yet, and Scoped Storage on 29 requires a *separate* confirmation per foreign-app item, not one batched dialog. `MediaStoreDeletionRequests.deleteOrGetRecoveryIntent(id)` attempts a direct delete, catching `RecoverableSecurityException` and returning its `PendingIntent` when the system needs confirmation. Given API 29's shrinking real-world share, `PhotoStackViewModel` deliberately processes the bin **one item per "Empty Trash" tap** on this path rather than chaining a multi-step confirmation sequence — a known, documented simplification, not an oversight.
+- **Below API 29**: not applicable — `minSdk = 29` (see Core Tech Stack), so this legacy branch was never written. No dead code to delete later.
+- **Video safety**: not yet exercised — the current card UI shows a text placeholder for `isVideo` items rather than a real `ExoPlayer`/`VideoPlayerPool` (see "Video via Media3 ExoPlayer, pooled" above), so there's no pooled player to drain before a delete request yet. Revisit this rule once video playback is actually wired.
+- The "Empty Trash" trigger currently lives as a plain `TextButton` in `SwipeStackScreen`'s chrome (`:feature:swipe`), not in a dedicated Review Bin screen — `:feature:reviewbin` is still an empty module. It's there so the deletion flow above has a real, tappable, validated call site instead of shipping untested; move it once `:feature:reviewbin` exists.
 
 ---
 

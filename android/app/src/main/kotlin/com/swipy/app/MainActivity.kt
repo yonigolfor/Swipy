@@ -14,15 +14,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,8 +28,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
-import androidx.hilt.navigation.compose.hiltViewModel
-import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.swipy.feature.swipe.SwipeStackScreen
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -43,7 +38,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    BringUpScreen()
+                    PermissionGate()
                 }
             }
         }
@@ -62,10 +57,14 @@ private fun hasMediaPermission(context: Context): Boolean =
         ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
     }
 
+/**
+ * Gates :feature:swipe's SwipeStackScreen behind the media permission prompt. This is
+ * MainActivity's whole job for now — see android/CLAUDE.md "Navigation" for why there's no
+ * real NavHost yet (only one feature module exists to route to).
+ */
 @Composable
-private fun BringUpScreen(viewModel: MainViewModel = hiltViewModel()) {
+private fun PermissionGate() {
     val context = LocalContext.current
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     var hasPermission by remember { mutableStateOf(hasMediaPermission(context)) }
 
     val permissionLauncher = rememberLauncherForActivityResult(
@@ -74,34 +73,19 @@ private fun BringUpScreen(viewModel: MainViewModel = hiltViewModel()) {
         hasPermission = results.values.any { it }
     }
 
-    LaunchedEffect(hasPermission) {
-        if (hasPermission) viewModel.loadPhotos()
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text("Swipy — Android bring-up", style = MaterialTheme.typography.headlineSmall)
-        Spacer(Modifier.height(16.dp))
-
-        when {
-            !hasPermission -> Button(onClick = { permissionLauncher.launch(mediaPermissions()) }) {
+    if (hasPermission) {
+        SwipeStackScreen()
+    } else {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text("Swipy needs access to your photos and videos", style = MaterialTheme.typography.headlineSmall)
+            Spacer(Modifier.height(16.dp))
+            Button(onClick = { permissionLauncher.launch(mediaPermissions()) }) {
                 Text("Grant photo access")
-            }
-
-            uiState.isLoading -> CircularProgressIndicator()
-
-            else -> {
-                Text("Found ${uiState.totalCount} photos/videos (Phase-1 estimate)")
-                Spacer(Modifier.height(8.dp))
-                LazyColumn {
-                    items(uiState.photos, key = { it.id }) { item ->
-                        Text("#${item.id} — ${item.mimeType} — ${item.fileSizeBytes / 1024} KB")
-                    }
-                }
             }
         }
     }
