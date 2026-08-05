@@ -365,6 +365,8 @@ Current log sites: `PhotoStackViewModel` (`keepPhoto`/`deletePhoto`/`snoozePhoto
 ### Localization
 Always use `String(localized: "key")` — never raw string literals for user-facing text. Keys live in `Localizable.xcstrings`. Example keys: `"filter.screenshots"`, `"meter.space_saved"`, `"victory.title"`.
 
+**System permission strings** (`Info.plist` usage-description keys, e.g. `NSPhotoLibraryUsageDescription`) are localized separately, via `Swipy/InfoPlist.xcstrings` (same String Catalog format as `Localizable.xcstrings`) — add new locales/keys there. The `INFOPLIST_KEY_*` build setting in `project.pbxproj` must still carry the matching English string: with `GENERATE_INFOPLIST_FILE = YES`, the base/development-language (`en`) Info.plist value is always sourced from the build setting, never from the catalog — `InfoPlist.xcstrings` only generates the *other* locales' `InfoPlist.strings` overrides (confirmed by blanking the build setting and rebuilding: the base key came back empty even with the catalog populated). Keep both in sync manually; there is no single source of truth here, it's an inherent limitation of mixing `GENERATE_INFOPLIST_FILE` with a String Catalog. Any new locale also needs its language added to `knownRegions` in `project.pbxproj`.
+
 ### Haptics
 Use `HapticService` for all haptic feedback. Each swipe direction has its own haptic pattern — do not use `UIImpactFeedbackGenerator` directly in views.
 

@@ -1,0 +1,23 @@
+{
+  "sourceLanguage" : "en",
+  "strings" : {
+    "NSPhotoLibraryUsageDescription" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Swipy requires access to your photo library to display your photos and videos, allow you to organize them into swipe stacks, and delete unwanted files to free up storage space."
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Swipy זקוקה לגישה לספריית התמונות שלך כדי להציג תמונות וסרטונים, לאפשר לך לארגן אותם בערמות החלקה, ולמחוק קבצים מיותרים כדי לפנות מקום אחסון."
+          }
+        }
+      }
+    }
+  },
+  "version" : "1.1"
+}
