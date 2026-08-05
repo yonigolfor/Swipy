@@ -2003,14 +2003,33 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     // MARK: - Demo Mode (DEMO BRANCH ONLY — delete before merging to main)
 
-    /// Pins the given demo assets to the front of the stack in the given order. Removes
-    /// any prior occurrence of them first, so repeat shakes during a demo re-stage the
-    /// same 6 cards instead of duplicating them. Reuses the standard PHAsset pipeline —
-    /// no new image-loading path needed, just a photoStack mutation + the same
+    /// Pins the given demo assets to the front of the stack, regardless of which state
+    /// they're currently sitting in (mid-stack, Review Bin, snoozed, or kept) — every
+    /// mutation below is scoped to `demoIDs` only, so real user photos in the bin/queue
+    /// are never touched. Without the reviewBin/snoozeQueue/processedAssetIDs cleanup, a
+    /// demo item swiped left would sit in reviewBin AND get a fresh copy re-inserted into
+    /// photoStack on the next shake; swiping it left again then appended a *second* entry
+    /// with the same id into reviewBin, and reviewBinFileSizes' `Dictionary(uniqueKeysWithValues:)`
+    /// (line ~1790) fatals on the resulting duplicate key. Reusing the standard PHAsset
+    /// pipeline (no new image-loading path) — just state resets + the same
     /// precacheNextImages() every other stack mutation already calls.
     func pinDemoAssets(_ assets: [PHAsset]) {
         let demoIDs = Set(assets.map { $0.localIdentifier })
+
+        let removedFromBin = reviewBin.filter { demoIDs.contains($0.id) }
+        if !removedFromBin.isEmpty {
+            reviewBin.removeAll { demoIDs.contains($0.id) }
+            totalSpaceSaved = max(0, totalSpaceSaved - removedFromBin.reduce(0) { $0 + $1.storedFileSize })
+            saveBinToDisk()
+        }
+        snoozeQueue.removeAll { demoIDs.contains($0.item.id) }
+        for id in demoIDs {
+            processedAssetIDs.remove(id)
+            persistence.removeKeptID(id)
+            persistence.clearSnoozedID(id)
+        }
         photoStack.removeAll { demoIDs.contains($0.id) }
+
         photoStack.insert(contentsOf: assets.map { PhotoItem(asset: $0) }, at: 0)
         precacheNextImages()
     }
