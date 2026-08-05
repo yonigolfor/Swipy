@@ -2001,6 +2001,20 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         evictStaleCacheEntries(keeping: nextItems)
     }
 
+    // MARK: - Demo Mode (DEMO BRANCH ONLY — delete before merging to main)
+
+    /// Pins the given demo assets to the front of the stack in the given order. Removes
+    /// any prior occurrence of them first, so repeat shakes during a demo re-stage the
+    /// same 6 cards instead of duplicating them. Reuses the standard PHAsset pipeline —
+    /// no new image-loading path needed, just a photoStack mutation + the same
+    /// precacheNextImages() every other stack mutation already calls.
+    func pinDemoAssets(_ assets: [PHAsset]) {
+        let demoIDs = Set(assets.map { $0.localIdentifier })
+        photoStack.removeAll { demoIDs.contains($0.id) }
+        photoStack.insert(contentsOf: assets.map { PhotoItem(asset: $0) }, at: 0)
+        precacheNextImages()
+    }
+
     /// Scores all cards currently in the image cache.
     /// Called once after persona finishes building — catches cards that were cached
     /// before the persona was ready and therefore skipped the scoring guard.

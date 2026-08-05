@@ -212,7 +212,12 @@ struct SwipeStackView: View {
         }
         .toolbar(isPinching ? .hidden : .visible, for: .tabBar)
         .onShake {
-            performUndo()
+            // DEMO BRANCH ONLY — shake re-stages the 6 bundled demo assets at the
+            // front of the stack instead of undo. Revert to `performUndo()` before
+            // merging back to main.
+            DemoModeService.loadDemoAssets { assets in
+                viewModel.pinDemoAssets(assets)
+            }
         }
         .toolbarBackground(.visible, for: .tabBar)
         .onAppear {
