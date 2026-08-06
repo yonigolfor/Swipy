@@ -33,7 +33,7 @@ enum DemoModeService {
 
     /// Toggle this to switch which preset the shake gesture restages. Change and rebuild
     /// to switch demo video scenarios.
-    static var activeSession: DemoSession = .demo1
+    static var activeSession: DemoSession = .demo2
 
     /// Resolves the active session's demo PHAssets, importing them into Photos on first
     /// call only. Every later call (each shake) just re-fetches the same 6 assets by their
