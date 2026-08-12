@@ -93,7 +93,19 @@ enum DemoModeService {
     }
 
     private static func importAndLoad(session: DemoSession, cache: [String: String], completion: @escaping ([PHAsset]) -> Void) {
-        let missing = session.assets.filter { cache[$0.cacheKey] == nil }
+        // A cache entry alone isn't enough — the localIdentifier it points to may no
+        // longer resolve (e.g. the demo asset was deleted from Photos directly), so treat
+        // that the same as never having been imported and re-create it.
+        var resolvedIDs: Set<String> = []
+        let cachedIDs = Array(Set(cache.values))
+        if !cachedIDs.isEmpty {
+            let result = PHAsset.fetchAssets(withLocalIdentifiers: cachedIDs, options: nil)
+            result.enumerateObjects { asset, _, _ in resolvedIDs.insert(asset.localIdentifier) }
+        }
+        let missing = session.assets.filter { asset in
+            guard let id = cache[asset.cacheKey] else { return true }
+            return !resolvedIDs.contains(id)
+        }
         print("[Demo] importing \(missing.count) missing asset(s): \(missing.map { $0.cacheKey })")
         var placeholders: [String: PHObjectPlaceholder] = [:]
         PHPhotoLibrary.shared().performChanges({
