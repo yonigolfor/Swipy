@@ -67,8 +67,11 @@ enum DemoModeService {
     /// the same assets by their stored localIdentifier — nothing is re-imported.
     static func loadDemoAssets(completion: @escaping ([PHAsset]) -> Void) {
         let session = activeSession
+        let authStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         let cache = (UserDefaults.standard.dictionary(forKey: session.identifiersKey) as? [String: String]) ?? [:]
+        print("[Demo] authStatus=\(authStatus.rawValue) cachedCount=\(cache.count)/\(session.assets.count)")
         if let ordered = orderedAssets(for: session, cache: cache) {
+            print("[Demo] serving \(ordered.count) cached asset(s)")
             completion(ordered)
             return
         }
@@ -91,34 +94,47 @@ enum DemoModeService {
 
     private static func importAndLoad(session: DemoSession, cache: [String: String], completion: @escaping ([PHAsset]) -> Void) {
         let missing = session.assets.filter { cache[$0.cacheKey] == nil }
+        print("[Demo] importing \(missing.count) missing asset(s): \(missing.map { $0.cacheKey })")
         var placeholders: [String: PHObjectPlaceholder] = [:]
         PHPhotoLibrary.shared().performChanges({
             for asset in missing {
                 switch asset {
                 case .image(let name):
-                    guard let image = UIImage(named: name) else { continue }
+                    guard let image = UIImage(named: name) else {
+                        print("[Demo] ⚠️ UIImage(named: \(name)) returned nil — check it's in Assets.xcassets")
+                        continue
+                    }
                     if let placeholder = PHAssetChangeRequest.creationRequestForAsset(from: image).placeholderForCreatedAsset {
                         placeholders[asset.cacheKey] = placeholder
                     }
                 case .video(let resource, let ext):
-                    guard let url = Bundle.main.url(forResource: resource, withExtension: ext),
-                          let request = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url) else { continue }
+                    guard let url = Bundle.main.url(forResource: resource, withExtension: ext) else {
+                        print("[Demo] ⚠️ Bundle.main.url(forResource: \(resource), withExtension: \(ext)) returned nil — not bundled")
+                        continue
+                    }
+                    guard let request = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url) else {
+                        print("[Demo] ⚠️ creationRequestForAssetFromVideo failed for \(url)")
+                        continue
+                    }
                     if let placeholder = request.placeholderForCreatedAsset {
                         placeholders[asset.cacheKey] = placeholder
                     }
                 }
             }
-        }, completionHandler: { success, _ in
+        }, completionHandler: { success, error in
             guard success else {
+                print("[Demo] ⚠️ performChanges failed: \(error?.localizedDescription ?? "unknown error")")
                 DispatchQueue.main.async { completion([]) }
                 return
             }
+            print("[Demo] performChanges succeeded, created \(placeholders.count)/\(missing.count) placeholder(s)")
             var updatedCache = cache
             for (key, placeholder) in placeholders {
                 updatedCache[key] = placeholder.localIdentifier
             }
             UserDefaults.standard.set(updatedCache, forKey: session.identifiersKey)
             let ordered = orderedAssets(for: session, cache: updatedCache) ?? []
+            print("[Demo] resolved \(ordered.count)/\(session.assets.count) final asset(s)")
             DispatchQueue.main.async { completion(ordered) }
         })
     }

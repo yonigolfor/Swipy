@@ -215,7 +215,9 @@ struct SwipeStackView: View {
             // DEMO BRANCH ONLY — shake re-stages the 6 bundled demo assets at the
             // front of the stack instead of undo. Revert to `performUndo()` before
             // merging back to main.
+            print("[Demo] shake detected, loading \(DemoModeService.activeSession) assets…")
             DemoModeService.loadDemoAssets { assets in
+                print("[Demo] loadDemoAssets returned \(assets.count) asset(s)")
                 viewModel.pinDemoAssets(assets)
             }
         }
