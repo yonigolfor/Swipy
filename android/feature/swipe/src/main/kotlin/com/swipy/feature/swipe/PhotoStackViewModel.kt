@@ -6,6 +6,8 @@ import com.swipy.domain.model.FilterCategory
 import com.swipy.domain.model.PhotoItem
 import com.swipy.domain.model.SwipeAction
 import com.swipy.domain.repository.PhotoStateRepository
+import com.swipy.domain.usecase.ActivateShuffleUseCase
+import com.swipy.domain.usecase.DeactivateShuffleUseCase
 import com.swipy.domain.usecase.DeletePhotoUseCase
 import com.swipy.domain.usecase.GetPhotoStackPageUseCase
 import com.swipy.domain.usecase.KeepPhotoUseCase
@@ -13,6 +15,7 @@ import com.swipy.domain.usecase.SnoozePhotoUseCase
 import com.swipy.domain.usecase.UndoSwipeUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
+import kotlinx.collections.immutable.toPersistentList
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -38,6 +41,8 @@ class PhotoStackViewModel @Inject constructor(
     private val deletePhotoUseCase: DeletePhotoUseCase,
     private val snoozePhotoUseCase: SnoozePhotoUseCase,
     private val undoSwipeUseCase: UndoSwipeUseCase,
+    private val activateShuffleUseCase: ActivateShuffleUseCase,
+    private val deactivateShuffleUseCase: DeactivateShuffleUseCase,
     private val photoStateRepository: PhotoStateRepository,
 ) : ViewModel() {
 
@@ -56,6 +61,14 @@ class PhotoStackViewModel @Inject constructor(
     private var isFetching = false
     private var hasMore = true
     private var lastSwipe: LastSwipe? = null
+    private var currentFilter: FilterCategory = FilterCategory.All
+
+    // Shuffle Mode state — see android/CLAUDE.md and ActivateShuffleUseCase's doc for why this
+    // is a random SEEK (snapshot + saved offset), not a full shuffled-index map.
+    // Snapshot of the stack at the moment shuffle was first activated — restored on exit.
+    private var preShuffleStack: List<PhotoItem>? = null
+    // nextOffset at the moment shuffle was first activated — restored on exit.
+    private var savedOffset = 0
 
     init {
         viewModelScope.launch {
@@ -76,6 +89,9 @@ class PhotoStackViewModel @Inject constructor(
         when (intent) {
             is PhotoStackIntent.Swipe -> handleSwipe(intent.item, intent.action)
             PhotoStackIntent.Undo -> handleUndo()
+            PhotoStackIntent.ActivateShuffle -> handleActivateShuffle()
+            PhotoStackIntent.DeactivateShuffle -> exitShuffle(silent = false)
+            is PhotoStackIntent.LoadPhotos -> handleLoadPhotos(intent.filter)
         }
     }
 
@@ -86,7 +102,15 @@ class PhotoStackViewModel @Inject constructor(
         // must leave the stack immediately so a shake/undo during that window always targets
         // the swipe just made. Mirrors iOS's beginSwipe-before-the-exit-delay ordering.
         _uiState.update { state ->
-            state.copy(stack = state.stack.remove(item), canUndo = true)
+            state.copy(
+                stack = state.stack.remove(item),
+                canUndo = true,
+                sessionSpaceSavedMB = if (action == SwipeAction.Delete) {
+                    state.sessionSpaceSavedMB + item.fileSizeBytes.toMbDelta()
+                } else {
+                    state.sessionSpaceSavedMB
+                },
+            )
         }
 
         viewModelScope.launch {
@@ -109,14 +133,129 @@ class PhotoStackViewModel @Inject constructor(
         lastSwipe = null
         excludedIds -= last.item.id
         _uiState.update { state ->
-            state.copy(stack = state.stack.add(0, last.item), canUndo = false)
+            state.copy(
+                stack = state.stack.add(0, last.item),
+                canUndo = false,
+                sessionSpaceSavedMB = if (last.action == SwipeAction.Delete) {
+                    (state.sessionSpaceSavedMB - last.item.fileSizeBytes.toMbDelta()).coerceAtLeast(0.0)
+                } else {
+                    state.sessionSpaceSavedMB
+                },
+            )
         }
         viewModelScope.launch { undoSwipeUseCase(last.item, last.action) }
     }
 
     private suspend fun maybeLoadMore() {
-        if (_uiState.value.stack.size <= WATERMARK) {
-            loadPage(minCount = PAGE_SIZE)
+        val state = _uiState.value
+        if (state.stack.size > WATERMARK) return
+        // Shuffle segment exhausted (ran off the end of the library from the random seek) —
+        // silently return to the linear stream, mirroring iOS shuffleExhausted().
+        if (state.isShuffleModeActive && !hasMore && state.stack.isEmpty()) {
+            exitShuffle(silent = true)
+            return
+        }
+        loadPage(minCount = PAGE_SIZE)
+    }
+
+    // Shuffle Mode
+
+    /** User-triggered: jump to a random point in the timeline. */
+    private fun handleActivateShuffle() {
+        val alreadyActive = _uiState.value.isShuffleModeActive
+        if (!alreadyActive) {
+            // Save the snapshot/offset only on first activation — re-shuffling while already
+            // active must not overwrite the original position the user will return to.
+            preShuffleStack = _uiState.value.stack
+            savedOffset = nextOffset
+        }
+        lastSwipe = null
+        _uiState.update { it.copy(canUndo = false, isLoading = true) }
+
+        viewModelScope.launch {
+            val randomOffset = activateShuffleUseCase(currentFilter)
+            if (randomOffset == null) {
+                // Empty library — matches iOS's `guard totalAssetCount > 0`; nothing to seek into.
+                _uiState.update { it.copy(isLoading = false) }
+                return@launch
+            }
+
+            _uiState.update { it.copy(stack = it.stack.clear()) }
+            isFetching = false
+            nextOffset = randomOffset
+            hasMore = true
+            loadPage(minCount = INITIAL_LOAD)
+
+            // Wrap around once if the random landing spot turned up nothing.
+            if (_uiState.value.stack.isEmpty() && randomOffset > 0) {
+                nextOffset = 0
+                hasMore = true
+                loadPage(minCount = INITIAL_LOAD)
+            }
+
+            val landedStack = _uiState.value.stack
+            if (landedStack.isEmpty()) {
+                // Still empty after wraparound — no unprocessed items anywhere; exit gracefully.
+                exitShuffle(silent = true)
+            } else {
+                _uiState.update { it.copy(isShuffleModeActive = true, isLoading = false) }
+                _effects.trySend(PhotoStackEffect.ShuffleLanded(landedStack.first().dateAddedEpochSeconds))
+            }
+        }
+    }
+
+    /**
+     * Exits shuffle mode, restoring the pre-shuffle snapshot. [silent] distinguishes the
+     * user-tapped exit (fires [PhotoStackEffect.ShuffleLanded] so the screen can show a
+     * "back home" indicator) from an auto-triggered one — either shuffle never found any
+     * matching items to land on, or the shuffled segment ran off the end of the library
+     * (see [maybeLoadMore]) — where no extra chrome should appear.
+     */
+    private fun exitShuffle(silent: Boolean) {
+        val snapshot = preShuffleStack
+        val restored = if (snapshot != null) {
+            deactivateShuffleUseCase(snapshot, excludedIds).toPersistentList()
+        } else {
+            _uiState.value.stack.clear()
+        }
+        nextOffset = savedOffset
+        hasMore = true
+        isFetching = false
+        preShuffleStack = null
+        lastSwipe = null
+        _uiState.update {
+            it.copy(isShuffleModeActive = false, isLoading = false, stack = restored, canUndo = false)
+        }
+        if (!silent) {
+            _effects.trySend(PhotoStackEffect.ShuffleLanded(landedAtEpochSeconds = null))
+        }
+        viewModelScope.launch { maybeLoadMore() }
+    }
+
+    /**
+     * Selected from the Categories screen — the port of iOS `resetAndLoad(filter:)`. A filter
+     * change wholesale-replaces the stack context, so shuffle and any pending undo are reset
+     * exactly like [exitShuffle]/a fresh cold start would, not merely swapped in place.
+     */
+    private fun handleLoadPhotos(filter: FilterCategory) {
+        currentFilter = filter
+        nextOffset = 0
+        hasMore = true
+        isFetching = false
+        preShuffleStack = null
+        savedOffset = 0
+        lastSwipe = null
+        _uiState.update {
+            it.copy(
+                isLoading = true,
+                stack = it.stack.clear(),
+                canUndo = false,
+                isShuffleModeActive = false,
+            )
+        }
+        viewModelScope.launch {
+            loadPage(minCount = INITIAL_LOAD)
+            _uiState.update { it.copy(isLoading = false) }
         }
     }
 
@@ -127,7 +266,7 @@ class PhotoStackViewModel @Inject constructor(
             val collected = mutableListOf<PhotoItem>()
             var attempts = 0
             while (collected.size < minCount && hasMore && attempts < MAX_FETCH_ATTEMPTS) {
-                val page = getPhotoStackPageUseCase(FilterCategory.All, nextOffset, PAGE_SIZE)
+                val page = getPhotoStackPageUseCase(currentFilter, nextOffset, PAGE_SIZE)
                 attempts++
                 if (page.isEmpty()) {
                     hasMore = false
@@ -153,3 +292,7 @@ class PhotoStackViewModel @Inject constructor(
         const val MAX_FETCH_ATTEMPTS = 20
     }
 }
+
+private const val BYTES_PER_MB = 1_048_576.0
+
+private fun Long.toMbDelta(): Double = this / BYTES_PER_MB

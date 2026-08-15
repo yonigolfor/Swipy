@@ -16,4 +16,8 @@ data class PhotoStackUiState(
     val stack: PersistentList<PhotoItem> = persistentListOf(),
     val canUndo: Boolean = false,
     val reviewBinCount: Int = 0,
+    /** Cumulative MB freed by delete swipes this session — mirrors iOS sessionSpaceSavedMB. */
+    val sessionSpaceSavedMB: Double = 0.0,
+    /** True when the user has jumped to a random point in the timeline. Mirrors iOS isShuffleModeActive. */
+    val isShuffleModeActive: Boolean = false,
 )

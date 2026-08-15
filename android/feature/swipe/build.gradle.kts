@@ -35,6 +35,7 @@ android {
 dependencies {
     implementation(project(":domain"))
     implementation(project(":data:mediastore"))
+    implementation(project(":core:designsystem"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

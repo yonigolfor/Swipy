@@ -7,6 +7,6 @@ import javax.inject.Inject
 class GetCategoryCountUseCase @Inject constructor(
     private val photoRepository: PhotoRepository,
 ) {
-    suspend operator fun invoke(filter: FilterCategory, cap: Int = 100): Int =
-        photoRepository.countForCategory(filter, cap)
+    suspend operator fun invoke(filter: FilterCategory, cap: Int = 100, excludedIds: Set<Long> = emptySet()): Int =
+        photoRepository.countForCategory(filter, cap, excludedIds)
 }

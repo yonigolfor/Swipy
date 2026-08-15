@@ -25,7 +25,18 @@ interface PhotoRepository {
      * Phase-1 fast count for Smart Filters — a cheap COUNT(*) projection, capped at [cap]
      * (matches the "99+" display ceiling). For BlurryPhotos/BurstPhotos this is only a
      * candidate-pool estimate, not a verified match count — see android/CLAUDE.md
-     * "Smart Filter Counting (2-Phase)".
+     * "Smart Filter Counting (2-Phase)". [excludedIds] (already-swiped items) are filtered
+     * client-side in bounded batches — never pushed into a SQL "NOT IN", same convention as
+     * [fetchPage]'s own exclusion handling.
      */
-    suspend fun countForCategory(filter: FilterCategory, cap: Int): Int
+    suspend fun countForCategory(filter: FilterCategory, cap: Int, excludedIds: Set<Long> = emptySet()): Int
+
+    /**
+     * Uncapped row count for [filter] — used by Shuffle to pick a random valid offset
+     * (`Random.nextInt(totalCount(...))`). Unlike [countForCategory] this is never capped;
+     * it still avoids materializing PhotoItems (only the id column is projected), matching
+     * the "no eager full enumeration" spirit for the expensive part — row-to-object mapping —
+     * even though the underlying query does walk the full result set to produce a real count.
+     */
+    suspend fun totalCount(filter: FilterCategory): Int
 }

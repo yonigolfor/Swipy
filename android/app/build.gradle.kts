@@ -1,8 +1,10 @@
 // :app — Application module. Application class, NavHost graph root, DI graph root,
 // manifest merge. Depends on every :feature module. See android/CLAUDE.md "Navigation".
 //
-// MainActivity hosts a minimal 2-destination NavHost (swipe <-> review bin) behind the media
-// permission prompt. Grows into a bottom-nav SwipyNavHost once :feature:filters exists too.
+// MainActivity hosts a 3-destination NavHost (filters <-> swipe <-> review bin) behind the
+// media permission prompt, with PhotoStackViewModel obtained once at NavHost scope and shared
+// between the Filters and Swipe destinations — the Android analogue of iOS's single
+// @EnvironmentObject VM shared by SmartFiltersView and SwipeStackView.
 
 plugins {
     alias(libs.plugins.android.application)
@@ -44,6 +46,7 @@ dependencies {
     implementation(project(":data:datastore"))
     implementation(project(":feature:swipe"))
     implementation(project(":feature:reviewbin"))
+    implementation(project(":feature:filters"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
