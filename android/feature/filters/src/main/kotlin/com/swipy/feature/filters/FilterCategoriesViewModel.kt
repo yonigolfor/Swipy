@@ -3,9 +3,13 @@ package com.swipy.feature.filters
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.swipy.domain.model.FilterCategory
+import com.swipy.domain.model.PhotoItem
 import com.swipy.domain.repository.CategoryCountCacheRepository
 import com.swipy.domain.repository.PhotoStateRepository
+import com.swipy.domain.usecase.FilterBlurryPhotosUseCase
+import com.swipy.domain.usecase.FilterBurstPhotosUseCase
 import com.swipy.domain.usecase.GetCategoryCountUseCase
+import com.swipy.domain.usecase.GetPhotoStackPageUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.async
@@ -32,6 +36,9 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class FilterCategoriesViewModel @Inject constructor(
     private val getCategoryCountUseCase: GetCategoryCountUseCase,
+    private val getPhotoStackPageUseCase: GetPhotoStackPageUseCase,
+    private val filterBlurryPhotosUseCase: FilterBlurryPhotosUseCase,
+    private val filterBurstPhotosUseCase: FilterBurstPhotosUseCase,
     private val categoryCountCacheRepository: CategoryCountCacheRepository,
     private val photoStateRepository: PhotoStateRepository,
 ) : ViewModel() {
@@ -72,10 +79,66 @@ class FilterCategoriesViewModel @Inject constructor(
             }
             _uiState.update { it.copy(counts = counts) }
             categoryCountCacheRepository.saveCounts(counts)
+
+            // Phase 2 — real accurate counts for Blurry/Burst via :data:vision, replacing the
+            // Phase 1 candidate-pool estimate. LargeVideos needs no separate pass on Android —
+            // MediaStore's SIZE column is already exact from Phase 1 (see android/CLAUDE.md).
+            //
+            // Simplification vs iOS: the dim+spinner shows on every recompute here, not only
+            // the first-ever one — telling "first computation" from "silent re-verify" would
+            // need a cache-schema change (tracking which persisted counts were Phase-2-verified)
+            // that's out of scope for standing up the analysis engine itself.
+            _uiState.update {
+                it.copy(categoriesRecalculating = setOf(FilterCategory.BlurryPhotos, FilterCategory.BurstPhotos))
+            }
+            val accurateBlurryDeferred = async {
+                accurateCount(FilterCategory.BlurryPhotos, excludedIds) { filterBlurryPhotosUseCase(it) }
+            }
+            val accurateBurstDeferred = async {
+                accurateCount(FilterCategory.BurstPhotos, excludedIds) { filterBurstPhotosUseCase(it) }
+            }
+            val accurateBlurry = accurateBlurryDeferred.await()
+            val accurateBurst = accurateBurstDeferred.await()
+
+            val updatedCounts = counts + mapOf(
+                FilterCategory.BlurryPhotos to accurateBlurry,
+                FilterCategory.BurstPhotos to accurateBurst,
+            )
+            _uiState.update { it.copy(counts = updatedCounts, categoriesRecalculating = emptySet()) }
+            categoryCountCacheRepository.saveCounts(updatedCounts)
         }
+    }
+
+    /**
+     * Pages through [filter]'s candidate pool, running [analyze] (FilterBlurryPhotosUseCase or
+     * FilterBurstPhotosUseCase) over each batch, until [CAP] matches are found or candidates
+     * run out. Mirrors iOS's accurateBlurryCount/accurateBurstCount paginated-scan structure —
+     * SCAN_PAGE_SIZE (300) matches iOS's own batch size for this exact scan.
+     */
+    private suspend fun accurateCount(
+        filter: FilterCategory,
+        excludedIds: Set<Long>,
+        analyze: suspend (List<PhotoItem>) -> List<PhotoItem>,
+    ): Int {
+        var offset = 0
+        var count = 0
+        var attempts = 0
+        while (count < CAP && attempts < MAX_SCAN_ATTEMPTS) {
+            val page = getPhotoStackPageUseCase(filter, offset, SCAN_PAGE_SIZE)
+            attempts++
+            if (page.isEmpty()) break
+            offset += page.size
+            val candidates = page.filterNot { it.id in excludedIds }
+            if (candidates.isNotEmpty()) {
+                count += analyze(candidates).size
+            }
+        }
+        return count.coerceAtMost(CAP)
     }
 
     private companion object {
         const val CAP = 100
+        const val SCAN_PAGE_SIZE = 300
+        const val MAX_SCAN_ATTEMPTS = 20
     }
 }

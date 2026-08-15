@@ -9,6 +9,8 @@ import com.swipy.domain.repository.PhotoStateRepository
 import com.swipy.domain.usecase.ActivateShuffleUseCase
 import com.swipy.domain.usecase.DeactivateShuffleUseCase
 import com.swipy.domain.usecase.DeletePhotoUseCase
+import com.swipy.domain.usecase.FilterBlurryPhotosUseCase
+import com.swipy.domain.usecase.FilterBurstPhotosUseCase
 import com.swipy.domain.usecase.GetPhotoStackPageUseCase
 import com.swipy.domain.usecase.KeepPhotoUseCase
 import com.swipy.domain.usecase.SnoozePhotoUseCase
@@ -43,6 +45,8 @@ class PhotoStackViewModel @Inject constructor(
     private val undoSwipeUseCase: UndoSwipeUseCase,
     private val activateShuffleUseCase: ActivateShuffleUseCase,
     private val deactivateShuffleUseCase: DeactivateShuffleUseCase,
+    private val filterBlurryPhotosUseCase: FilterBlurryPhotosUseCase,
+    private val filterBurstPhotosUseCase: FilterBurstPhotosUseCase,
     private val photoStateRepository: PhotoStateRepository,
 ) : ViewModel() {
 
@@ -270,17 +274,38 @@ class PhotoStackViewModel @Inject constructor(
         if (isFetching || !hasMore) return
         isFetching = true
         try {
+            // Blurry/Burst need a wider window per MediaStore fetch than the default page size —
+            // burst chain analysis in particular needs real chronological context to find
+            // clusters, matching iOS's own larger initial/batch sizes for these two filters
+            // (200/500 — see android/CLAUDE.md "Pagination & Image Loading"). Using the plain
+            // PAGE_SIZE here would starve the analyzer of enough candidates per fetch to ever
+            // find a burst.
+            val fetchPageSize = when (currentFilter) {
+                FilterCategory.BurstPhotos -> BURST_FETCH_PAGE_SIZE
+                FilterCategory.BlurryPhotos -> BLURRY_FETCH_PAGE_SIZE
+                else -> PAGE_SIZE
+            }
+
             val collected = mutableListOf<PhotoItem>()
             var attempts = 0
             while (collected.size < minCount && hasMore && attempts < MAX_FETCH_ATTEMPTS) {
-                val page = getPhotoStackPageUseCase(currentFilter, nextOffset, PAGE_SIZE)
+                val page = getPhotoStackPageUseCase(currentFilter, nextOffset, fetchPageSize)
                 attempts++
                 if (page.isEmpty()) {
                     hasMore = false
                     break
                 }
                 nextOffset += page.size
-                collected += page.filterNot { it.id in excludedIds }
+                val candidates = page.filterNot { it.id in excludedIds }
+                // Real analysis, not just the MediaStore candidate-pool query — without this,
+                // selecting "Blurry Photos"/"Burst Photos" would show every non-screenshot
+                // photo, not just the ones actually verified blurry/part of a burst.
+                val matched = when (currentFilter) {
+                    FilterCategory.BlurryPhotos -> filterBlurryPhotosUseCase(candidates)
+                    FilterCategory.BurstPhotos -> filterBurstPhotosUseCase(candidates)
+                    else -> candidates
+                }
+                collected += matched
             }
             if (collected.isNotEmpty()) {
                 _uiState.update { it.copy(stack = it.stack.addAll(collected)) }
@@ -295,6 +320,8 @@ class PhotoStackViewModel @Inject constructor(
     private companion object {
         const val INITIAL_LOAD = 50
         const val PAGE_SIZE = 30
+        const val BLURRY_FETCH_PAGE_SIZE = 200
+        const val BURST_FETCH_PAGE_SIZE = 500
         const val WATERMARK = 15
         const val MAX_FETCH_ATTEMPTS = 20
     }

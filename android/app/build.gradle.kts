@@ -44,6 +44,7 @@ dependencies {
     implementation(project(":domain"))
     implementation(project(":data:mediastore"))
     implementation(project(":data:datastore"))
+    implementation(project(":data:vision"))
     implementation(project(":feature:swipe"))
     implementation(project(":feature:reviewbin"))
     implementation(project(":feature:filters"))
