@@ -72,15 +72,37 @@ class PhotoStackViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            excludedIds += photoStateRepository.keptPhotoIds.first()
-            excludedIds += photoStateRepository.reviewBinIds.first()
-            excludedIds += photoStateRepository.snoozedPhotos.first().keys
+            val keptIds = photoStateRepository.keptPhotoIds.first()
+            val binIds = photoStateRepository.reviewBinIds.first()
+            val snoozedIds = photoStateRepository.snoozedPhotos.first().keys
+            excludedIds += keptIds
+            excludedIds += binIds
+            excludedIds += snoozedIds
             loadPage(minCount = INITIAL_LOAD)
             _uiState.update { it.copy(isLoading = false) }
+
+            // Reactive reconciliation from here on — an id that drops out of the bin (restored
+            // from the Review Bin's full-screen viewer, or via single-swipe Undo) must resurface
+            // via pagination; excludedIds is otherwise a plain in-memory set with no other way
+            // to learn about a Review Bin restore. Seeded with the snapshot just taken above so
+            // this collector's first emission (the current bin, unchanged) is a no-op.
+            var previousBinIds = binIds.toSet()
+            photoStateRepository.reviewBinIds.collect { ids ->
+                val currentBinIds = ids.toSet()
+                excludedIds -= (previousBinIds - currentBinIds)
+                excludedIds += (currentBinIds - previousBinIds)
+                previousBinIds = currentBinIds
+                _uiState.update { it.copy(reviewBinCount = ids.size) }
+            }
         }
         viewModelScope.launch {
-            photoStateRepository.reviewBinIds.collect { ids ->
-                _uiState.update { it.copy(reviewBinCount = ids.size) }
+            // sessionSpaceSavedMB mirrors the Review Bin's CURRENT pending size, not a
+            // monotonic session counter — see android/CLAUDE.md. Deriving it from this Flow
+            // (instead of hand-mutating it in handleSwipe/handleUndo) makes it automatically
+            // correct across delete-swipe, undo, Review Bin restore, and empty-trash alike,
+            // since reviewBinSpaceSaved is already reactively derived from reviewBinFileSizes.
+            photoStateRepository.reviewBinSpaceSaved.collect { bytes ->
+                _uiState.update { it.copy(sessionSpaceSavedMB = bytes.toMb()) }
             }
         }
     }
@@ -101,17 +123,10 @@ class PhotoStackViewModel @Inject constructor(
         // Optimistic, synchronous removal — the use-case call below is async, but the card
         // must leave the stack immediately so a shake/undo during that window always targets
         // the swipe just made. Mirrors iOS's beginSwipe-before-the-exit-delay ordering.
-        _uiState.update { state ->
-            state.copy(
-                stack = state.stack.remove(item),
-                canUndo = true,
-                sessionSpaceSavedMB = if (action == SwipeAction.Delete) {
-                    state.sessionSpaceSavedMB + item.fileSizeBytes.toMbDelta()
-                } else {
-                    state.sessionSpaceSavedMB
-                },
-            )
-        }
+        // sessionSpaceSavedMB is NOT set here — it's derived reactively from
+        // photoStateRepository.reviewBinSpaceSaved (see init), which updates once
+        // deletePhotoUseCase's addToReviewBin call below actually persists.
+        _uiState.update { state -> state.copy(stack = state.stack.remove(item), canUndo = true) }
 
         viewModelScope.launch {
             when (action) {
@@ -132,17 +147,9 @@ class PhotoStackViewModel @Inject constructor(
         }
         lastSwipe = null
         excludedIds -= last.item.id
-        _uiState.update { state ->
-            state.copy(
-                stack = state.stack.add(0, last.item),
-                canUndo = false,
-                sessionSpaceSavedMB = if (last.action == SwipeAction.Delete) {
-                    (state.sessionSpaceSavedMB - last.item.fileSizeBytes.toMbDelta()).coerceAtLeast(0.0)
-                } else {
-                    state.sessionSpaceSavedMB
-                },
-            )
-        }
+        // sessionSpaceSavedMB again derives reactively from reviewBinSpaceSaved — undoing a
+        // delete calls restoreFromReviewBin below, which the collector in init picks up.
+        _uiState.update { state -> state.copy(stack = state.stack.add(0, last.item), canUndo = false) }
         viewModelScope.launch { undoSwipeUseCase(last.item, last.action) }
     }
 
@@ -295,4 +302,4 @@ class PhotoStackViewModel @Inject constructor(
 
 private const val BYTES_PER_MB = 1_048_576.0
 
-private fun Long.toMbDelta(): Double = this / BYTES_PER_MB
+private fun Long.toMb(): Double = this / BYTES_PER_MB

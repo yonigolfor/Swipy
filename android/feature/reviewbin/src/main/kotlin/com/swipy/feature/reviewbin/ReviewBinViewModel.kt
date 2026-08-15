@@ -4,6 +4,7 @@ import android.os.Build
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.swipy.data.mediastore.MediaStoreDeletionRequests
+import com.swipy.domain.model.PhotoItem
 import com.swipy.domain.repository.PhotoStateRepository
 import com.swipy.domain.usecase.GetReviewBinItemsUseCase
 import com.swipy.domain.usecase.RestoreFromReviewBinUseCase
@@ -39,7 +40,16 @@ class ReviewBinViewModel @Inject constructor(
     private val _effects = Channel<ReviewBinEffect>(Channel.BUFFERED)
     val effects = _effects.receiveAsFlow()
 
+    // API 30+ batch path — captured at request time so the celebration summary reflects
+    // what's about to be deleted, read back once the system dialog reports RESULT_OK.
+    private var pendingBatchSummary: Pair<Long, Int>? = null
+
+    // API 29 legacy path — see deleteNextLegacyItem's doc for why this can span at most one
+    // pending confirmation per "Empty Trash" tap.
     private var pendingLegacyDeleteId: Long? = null
+    private var pendingLegacyFileSize: Long = 0L
+    private var pendingLegacySoFarBytes: Long = 0L
+    private var pendingLegacySoFarCount: Int = 0
 
     init {
         viewModelScope.launch {
@@ -55,14 +65,28 @@ class ReviewBinViewModel @Inject constructor(
                     }
                 }
         }
+        viewModelScope.launch {
+            photoStateRepository.totalSpaceSavedLifetime.collect { lifetime ->
+                _uiState.update { it.copy(lifetimeSpaceSaved = lifetime) }
+            }
+        }
     }
 
     fun onIntent(intent: ReviewBinIntent) {
         when (intent) {
-            is ReviewBinIntent.Restore -> viewModelScope.launch { restoreFromReviewBinUseCase(intent.item.id) }
+            is ReviewBinIntent.Restore -> handleRestore(intent.item)
             ReviewBinIntent.RequestEmptyTrash -> handleRequestEmptyTrash()
             ReviewBinIntent.ConfirmEmptyTrash -> handleConfirmEmptyTrash()
+            is ReviewBinIntent.SelectItem -> _uiState.update { it.copy(selectedItem = intent.item) }
+            ReviewBinIntent.DismissPreview -> _uiState.update { it.copy(selectedItem = null) }
         }
+    }
+
+    private fun handleRestore(item: PhotoItem) {
+        if (_uiState.value.selectedItem?.id == item.id) {
+            _uiState.update { it.copy(selectedItem = null) }
+        }
+        viewModelScope.launch { restoreFromReviewBinUseCase(item.id) }
     }
 
     private fun handleRequestEmptyTrash() {
@@ -71,30 +95,49 @@ class ReviewBinViewModel @Inject constructor(
             if (ids.isEmpty()) return@launch
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                pendingBatchSummary = _uiState.value.totalSpaceSaved to ids.size
                 val pendingIntent = deletionRequests.createBatchDeleteRequest(ids)
                 _effects.trySend(ReviewBinEffect.LaunchDeleteConfirmation(pendingIntent))
             } else {
-                deleteNextLegacyItem(ids)
+                val fileSizes = photoStateRepository.reviewBinFileSizes.first()
+                deleteNextLegacyItem(ids, fileSizes, soFarBytes = 0L, soFarCount = 0)
             }
         }
     }
 
     /**
-     * API 29 fallback — one Review Bin item per call (see MediaStoreDeletionRequests for why
-     * this can't be a single batched dialog pre-30). Deletes outright wherever possible;
-     * only pauses for a system confirmation on the first item that actually needs one.
+     * API 29 fallback — resolves items that don't need confirmation automatically, then
+     * pauses at the first one that does (see MediaStoreDeletionRequests) rather than chaining
+     * further confirmations within one "Empty Trash" tap — a deliberate, documented
+     * simplification, not an oversight. [soFarBytes]/[soFarCount] accumulate what THIS tap
+     * actually deletes, since a single tap on this path doesn't necessarily clear the whole bin.
      */
-    private suspend fun deleteNextLegacyItem(remainingIds: List<Long>) {
+    private suspend fun deleteNextLegacyItem(
+        remainingIds: List<Long>,
+        fileSizes: Map<Long, Long>,
+        soFarBytes: Long,
+        soFarCount: Int,
+    ) {
         val id = remainingIds.firstOrNull() ?: run {
-            _effects.trySend(ReviewBinEffect.ReviewBinEmpty)
+            if (soFarCount > 0) {
+                _effects.trySend(ReviewBinEffect.EmptyTrashCompleted(soFarBytes, soFarCount))
+            }
             return
         }
         val recoveryIntent = deletionRequests.deleteOrGetRecoveryIntent(id)
         if (recoveryIntent == null) {
             photoStateRepository.removeFromReviewBinPermanently(id)
-            deleteNextLegacyItem(remainingIds.drop(1))
+            deleteNextLegacyItem(
+                remainingIds.drop(1),
+                fileSizes,
+                soFarBytes = soFarBytes + (fileSizes[id] ?: 0L),
+                soFarCount = soFarCount + 1,
+            )
         } else {
             pendingLegacyDeleteId = id
+            pendingLegacyFileSize = fileSizes[id] ?: 0L
+            pendingLegacySoFarBytes = soFarBytes
+            pendingLegacySoFarCount = soFarCount
             _effects.trySend(ReviewBinEffect.LaunchDeleteConfirmation(recoveryIntent))
         }
     }
@@ -107,10 +150,19 @@ class ReviewBinViewModel @Inject constructor(
                 // The recovery intent only grants permission — the delete must be retried.
                 deletionRequests.deleteOrGetRecoveryIntent(legacyId)
                 photoStateRepository.removeFromReviewBinPermanently(legacyId)
+                _effects.trySend(
+                    ReviewBinEffect.EmptyTrashCompleted(
+                        spaceSavedBytes = pendingLegacySoFarBytes + pendingLegacyFileSize,
+                        itemCount = pendingLegacySoFarCount + 1,
+                    ),
+                )
             } else {
+                val summary = pendingBatchSummary
+                    ?: (_uiState.value.totalSpaceSaved to _uiState.value.items.size)
+                pendingBatchSummary = null
                 photoStateRepository.emptyReviewBin()
+                _effects.trySend(ReviewBinEffect.EmptyTrashCompleted(summary.first, summary.second))
             }
-            _effects.trySend(ReviewBinEffect.ReviewBinEmpty)
         }
     }
 }

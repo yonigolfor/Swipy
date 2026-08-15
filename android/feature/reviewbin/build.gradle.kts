@@ -1,6 +1,7 @@
 // :feature:reviewbin — Review Bin grid + full-screen media viewer (createTrashRequest/
 // createDeleteRequest flows). See android/CLAUDE.md "Deletion & Trash — Scoped Storage
-// Compliance". No full-screen detail viewer yet — grid + restore + Empty Trash only.
+// Compliance". Grid + single-item full-screen preview (image via Coil, video via Media3) +
+// restore + Empty Trash + Trash Celebration overlay.
 
 plugins {
     alias(libs.plugins.android.library)
@@ -35,6 +36,7 @@ android {
 dependencies {
     implementation(project(":domain"))
     implementation(project(":data:mediastore"))
+    implementation(project(":core:designsystem"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
@@ -46,6 +48,9 @@ dependencies {
     implementation(libs.bundles.compose)
     implementation(libs.coil.compose)
     implementation(libs.kotlinx.collections.immutable)
+
+    implementation(libs.androidx.media3.exoplayer)
+    implementation(libs.androidx.media3.ui)
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.android.compiler)

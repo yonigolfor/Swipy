@@ -8,4 +8,10 @@ sealed interface ReviewBinIntent {
 
     /** The system delete/recovery confirmation returned RESULT_OK. */
     data object ConfirmEmptyTrash : ReviewBinIntent
+
+    /** Tapped a grid tile — opens the full-screen preview. */
+    data class SelectItem(val item: PhotoItem) : ReviewBinIntent
+
+    /** Closed the full-screen preview without restoring. */
+    data object DismissPreview : ReviewBinIntent
 }
