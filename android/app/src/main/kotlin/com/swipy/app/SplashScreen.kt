@@ -23,6 +23,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -69,7 +70,7 @@ fun SplashScreen(onFinished: () -> Unit) {
             Spacer(Modifier.height(20.dp))
             Text(text = "Swipy", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))
-            Text(text = "Declutter your memories", color = Color.Gray, fontSize = 14.sp)
+            Text(text = stringResource(R.string.splash_tagline), color = Color.Gray, fontSize = 14.sp)
         }
     }
 }

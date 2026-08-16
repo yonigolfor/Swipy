@@ -16,6 +16,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -36,7 +38,7 @@ fun PendingSummaryHeader(spaceSavedBytes: Long, itemCount: Int, modifier: Modifi
         Spacer(Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = "Space saved",
+                text = stringResource(R.string.reviewbin_space_saved_label),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -54,7 +56,11 @@ fun PendingSummaryHeader(spaceSavedBytes: Long, itemCount: Int, modifier: Modifi
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                 Text(text = "$itemCount", style = MaterialTheme.typography.titleMedium, color = androidx.compose.ui.graphics.Color.White)
-                Text(text = "items", fontSize = 10.sp, color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.8f))
+                Text(
+                    text = pluralStringResource(R.plurals.reviewbin_items_word, itemCount, itemCount),
+                    fontSize = 10.sp,
+                    color = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.8f),
+                )
             }
         }
     }
@@ -71,7 +77,7 @@ fun LifetimeSavingsHeader(lifetimeSpaceSavedBytes: Long, modifier: Modifier = Mo
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text(
-            text = "Total Storage Freed",
+            text = stringResource(R.string.reviewbin_total_storage_freed),
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,

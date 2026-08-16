@@ -1,0 +1,8 @@
+<resources>
+    <string name="swipe_empty_state">No more photos</string>
+    <string name="swipe_shuffle_landed_home">Back home</string>
+    <string name="swipe_shuffle_mode_label">Shuffle Mode</string>
+    <string name="swipe_review_bin_button">Review Bin (%1$d)</string>
+    <string name="swipe_badge_screenshot">Screenshot</string>
+    <string name="swipe_badge_recording">Recording</string>
+</resources>

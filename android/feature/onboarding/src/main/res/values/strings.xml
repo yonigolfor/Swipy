@@ -1,0 +1,38 @@
+<resources>
+    <string name="onboarding_hook_title">Your phone is carrying\nunnecessary weight.</string>
+    <string name="onboarding_hook_subtitle">Let\'s free up some space, together.</string>
+    <string name="onboarding_hook_stat_number">10,000+</string>
+    <string name="onboarding_hook_stat_label">photos &amp; videos</string>
+    <string name="onboarding_hook_cta">Get Started</string>
+
+    <string name="onboarding_permission_title">So we can work our magic</string>
+    <string name="onboarding_permission_subtitle">We need access to your gallery.\nEverything stays on your device only 🔒</string>
+    <string name="onboarding_permission_cta">Grant Access to Gallery</string>
+    <string name="onboarding_permission_local">Stays on your device</string>
+    <string name="onboarding_permission_private">Completely private</string>
+    <string name="onboarding_permission_control">You\'re in control</string>
+    <string name="permission_denied_message">Access was denied. You can grant it anytime from Settings.</string>
+    <string name="permission_denied_cta">Open Settings</string>
+
+    <string name="onboarding_demo_title">Cleanup in style.</string>
+    <string name="onboarding_demo_subtitle">Left to trash, right to keep.</string>
+    <string name="onboarding_demo_hint">Try dragging the card</string>
+    <string name="onboarding_demo_cta">Got it!</string>
+
+    <string name="onboarding_snooze_title">Not Sure? No Problem</string>
+    <string name="onboarding_snooze_subtitle">Swipe UP to snooze!</string>
+    <string name="onboarding_snooze_body">We will show it to you later, so you can keep swiping!</string>
+    <string name="onboarding_snooze_cta">Next</string>
+
+    <string name="onboarding_scan_title">Scanning your gallery…</string>
+    <string name="onboarding_scan_photos">Photos</string>
+    <string name="onboarding_scan_videos">Videos</string>
+    <string name="onboarding_scan_large_videos">Large Videos</string>
+    <string name="onboarding_scan_privacy">Everything stays private, on your device</string>
+    <string name="onboarding_scan_cta">Let\'s Clean Up!</string>
+    <string name="onboarding_scan_skip">Skip for now</string>
+
+    <string name="onboarding_quickwin_title">You\'re all set!</string>
+    <string name="onboarding_quickwin_subtitle">Time to reclaim your storage.</string>
+    <string name="onboarding_quickwin_cta">Start Swiping</string>
+</resources>

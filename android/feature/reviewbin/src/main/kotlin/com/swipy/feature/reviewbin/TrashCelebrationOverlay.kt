@@ -35,6 +35,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -127,12 +129,12 @@ fun TrashCelebrationOverlay(
             Text(text = "🎉", fontSize = 62.sp)
             Spacer(Modifier.height(20.dp))
             Text(
-                text = "Space Reclaimed! 🚀",
+                text = stringResource(R.string.reviewbin_celebration_title),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
             )
             Spacer(Modifier.height(8.dp))
-            Text(text = "You freed up", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(text = stringResource(R.string.reviewbin_celebration_subtitle), color = MaterialTheme.colorScheme.onSurfaceVariant)
             Text(
                 text = spaceSavedLabel,
                 style = TextStyle(
@@ -142,7 +144,7 @@ fun TrashCelebrationOverlay(
                 ),
             )
             Text(
-                text = "by deleting $itemCount item${if (itemCount == 1) "" else "s"}",
+                text = pluralStringResource(R.plurals.reviewbin_items_deleted_sentence, itemCount, itemCount),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(24.dp))
@@ -152,7 +154,7 @@ fun TrashCelebrationOverlay(
                 shape = CircleShape,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                Text(text = "Awesome! 💪", color = Color.White, fontWeight = FontWeight.SemiBold)
+                Text(text = stringResource(R.string.reviewbin_celebration_cta), color = Color.White, fontWeight = FontWeight.SemiBold)
             }
         }
     }

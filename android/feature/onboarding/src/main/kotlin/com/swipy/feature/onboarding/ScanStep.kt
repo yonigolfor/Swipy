@@ -35,6 +35,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -76,7 +77,12 @@ fun ScanStep(scanCounts: ScanCountsUi?, onNext: () -> Unit) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(text = "🔍", fontSize = 20.sp)
                     Spacer(Modifier.width(8.dp))
-                    Text(text = "Scanning your gallery…", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
+                    Text(
+                        text = stringResource(R.string.onboarding_scan_title),
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White,
+                    )
                     Spacer(Modifier.weight(1f))
                     if (scanCounts != null) {
                         Text(text = "✅", fontSize = 16.sp)
@@ -86,9 +92,27 @@ fun ScanStep(scanCounts: ScanCountsUi?, onNext: () -> Unit) {
                 HorizontalDivider(color = Color.White.copy(alpha = 0.15f))
                 Spacer(Modifier.height(16.dp))
                 Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                    ScanRow(glyph = "📷", label = "Photos", value = displayedPhoto, isScanning = scanCounts == null, color = FilterScreenshots)
-                    ScanRow(glyph = "🎬", label = "Videos", value = displayedVideo, isScanning = scanCounts == null, color = FilterScreenRecordings)
-                    ScanRow(glyph = "🎞️", label = "Large Videos", value = displayedLarge, isScanning = scanCounts == null, color = FilterLargeVideos)
+                    ScanRow(
+                        glyph = "📷",
+                        label = stringResource(R.string.onboarding_scan_photos),
+                        value = displayedPhoto,
+                        isScanning = scanCounts == null,
+                        color = FilterScreenshots,
+                    )
+                    ScanRow(
+                        glyph = "🎬",
+                        label = stringResource(R.string.onboarding_scan_videos),
+                        value = displayedVideo,
+                        isScanning = scanCounts == null,
+                        color = FilterScreenRecordings,
+                    )
+                    ScanRow(
+                        glyph = "🎞️",
+                        label = stringResource(R.string.onboarding_scan_large_videos),
+                        value = displayedLarge,
+                        isScanning = scanCounts == null,
+                        color = FilterLargeVideos,
+                    )
                 }
             }
         }
@@ -98,16 +122,20 @@ fun ScanStep(scanCounts: ScanCountsUi?, onNext: () -> Unit) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.Center) {
             Text(text = "🔒", fontSize = 11.sp)
             Spacer(Modifier.width(6.dp))
-            Text(text = "Everything stays private, on your device", fontSize = 11.sp, color = Color.Gray)
+            Text(text = stringResource(R.string.onboarding_scan_privacy), fontSize = 11.sp, color = Color.Gray)
         }
 
         Spacer(Modifier.weight(1f))
 
         if (ctaReady) {
-            GoldCapsuleButton(text = "Let's Clean Up!", onClick = onNext, modifier = Modifier.padding(start = 32.dp, end = 32.dp, bottom = 48.dp))
+            GoldCapsuleButton(
+                text = stringResource(R.string.onboarding_scan_cta),
+                onClick = onNext,
+                modifier = Modifier.padding(start = 32.dp, end = 32.dp, bottom = 48.dp),
+            )
         } else {
             Text(
-                text = "Skip for now",
+                text = stringResource(R.string.onboarding_scan_skip),
                 fontSize = 14.sp,
                 color = Color.Gray,
                 modifier = Modifier

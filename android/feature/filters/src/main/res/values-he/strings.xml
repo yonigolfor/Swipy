@@ -1,0 +1,19 @@
+<resources>
+    <string name="filters_top_bar_title">מסננים חכמים</string>
+    <string name="filters_subtitle">נקו בקלות עומס נפוץ</string>
+    <string name="filters_count_capped">99+</string>
+    <string name="filters_count_empty">ריק</string>
+
+    <string name="filter_all_title">כל התמונות</string>
+    <string name="filter_all_description">כל תמונה וסרטון בספרייה שלך</string>
+    <string name="filter_screenshots_title">צילומי מסך</string>
+    <string name="filter_screenshots_description">צילומי מסך שתופסים מקום בשקט</string>
+    <string name="filter_screen_recordings_title">הקלטות מסך</string>
+    <string name="filter_screen_recordings_description">הקלטות שכנראה כבר לא צריך</string>
+    <string name="filter_large_videos_title">סרטונים גדולים</string>
+    <string name="filter_large_videos_description">הסרטונים שתופסים הכי הרבה מקום</string>
+    <string name="filter_blurry_photos_title">תמונות מטושטשות</string>
+    <string name="filter_blurry_photos_description">תמונות לא ממוקדות ששווה לבדוק שוב</string>
+    <string name="filter_burst_photos_title">תמונות רצף</string>
+    <string name="filter_burst_photos_description">תמונות כמעט זהות ממצב רצף</string>
+</resources>

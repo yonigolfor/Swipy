@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -61,8 +62,13 @@ fun VisualHookStep(onNext: () -> Unit) {
                         fontSize = 60.sp,
                     )
                     Spacer(Modifier.height(12.dp))
-                    Text(text = "10,000+", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text(text = "photos & videos", fontSize = 14.sp, color = Color.Gray)
+                    Text(
+                        text = stringResource(R.string.onboarding_hook_stat_number),
+                        fontSize = 28.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                    )
+                    Text(text = stringResource(R.string.onboarding_hook_stat_label), fontSize = 14.sp, color = Color.Gray)
                 }
             }
         }
@@ -72,7 +78,7 @@ fun VisualHookStep(onNext: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = "Your phone is carrying\nunnecessary weight.",
+                text = stringResource(R.string.onboarding_hook_title),
                 fontSize = 32.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
@@ -81,7 +87,7 @@ fun VisualHookStep(onNext: () -> Unit) {
             )
             Spacer(Modifier.height(16.dp))
             Text(
-                text = "Let's free up some space, together.",
+                text = stringResource(R.string.onboarding_hook_subtitle),
                 fontSize = 14.sp,
                 color = Color.Gray,
                 textAlign = TextAlign.Center,
@@ -91,7 +97,7 @@ fun VisualHookStep(onNext: () -> Unit) {
         Spacer(Modifier.weight(1f))
 
         GoldCapsuleButton(
-            text = "Get Started",
+            text = stringResource(R.string.onboarding_hook_cta),
             onClick = onNext,
             modifier = Modifier.padding(start = 32.dp, end = 32.dp, bottom = 48.dp),
         )

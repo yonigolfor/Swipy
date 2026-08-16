@@ -1,0 +1,14 @@
+<resources>
+    <!-- Shared between :feature:swipe's real SwipeIndicator and :feature:onboarding's demo
+         cards (SwipeDemoStep/SnoozeIntroStep) — both modules already depend on
+         :core:designsystem, and iOS's Localizable.xcstrings uses the exact same swipe.keep/
+         swipe.delete/swipe.later keys for both real and demo labels, so keeping one source of
+         truth here (instead of duplicating the string per-module) avoids translation drift. -->
+    <string name="swipe_action_keep">Keep</string>
+    <string name="swipe_action_delete">Delete</string>
+    <string name="swipe_action_later">Later</string>
+
+    <!-- SessionSavingsBar's default spaceSavedLabel — its only current call site
+         (SwipeStackScreen) never overrides this, so it's the real production string. -->
+    <string name="designsystem_space_saved">Space saved</string>
+</resources>

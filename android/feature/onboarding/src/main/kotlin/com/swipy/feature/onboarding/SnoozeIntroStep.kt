@@ -35,6 +35,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -59,9 +60,15 @@ fun SnoozeIntroStep(onNext: () -> Unit) {
             modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(text = "Not Sure? No Problem", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            Text(text = stringResource(R.string.onboarding_snooze_title), fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color.White)
             Spacer(Modifier.height(8.dp))
-            Text(text = "Swipe UP to snooze!", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = SwipeBlue, textAlign = TextAlign.Center)
+            Text(
+                text = stringResource(R.string.onboarding_snooze_subtitle),
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Bold,
+                color = SwipeBlue,
+                textAlign = TextAlign.Center,
+            )
         }
 
         Spacer(Modifier.height(24.dp))
@@ -79,7 +86,7 @@ fun SnoozeIntroStep(onNext: () -> Unit) {
 
         Spacer(Modifier.height(24.dp))
         Text(
-            text = "We will show it to you later, so you can keep swiping!",
+            text = stringResource(R.string.onboarding_snooze_body),
             fontSize = 14.sp,
             color = Color.Gray,
             textAlign = TextAlign.Center,
@@ -89,7 +96,11 @@ fun SnoozeIntroStep(onNext: () -> Unit) {
 
         Spacer(Modifier.weight(1f))
 
-        GoldCapsuleButton(text = "Next", onClick = onNext, modifier = Modifier.padding(start = 32.dp, end = 32.dp, bottom = 48.dp))
+        GoldCapsuleButton(
+            text = stringResource(R.string.onboarding_snooze_cta),
+            onClick = onNext,
+            modifier = Modifier.padding(start = 32.dp, end = 32.dp, bottom = 48.dp),
+        )
     }
 }
 
@@ -182,7 +193,7 @@ private fun SnoozeDemoCard() {
         }
         if (showLabel) {
             Text(
-                text = "Later",
+                text = stringResource(com.swipy.core.designsystem.R.string.swipe_action_later),
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Bold,
                 color = SwipeBlue,

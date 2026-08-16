@@ -15,9 +15,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.swipy.core.designsystem.R
 import com.swipy.core.designsystem.theme.SwipeBlue
 import com.swipy.core.designsystem.theme.SwipeGreen
 import com.swipy.core.designsystem.theme.SwipeRed
@@ -59,9 +61,21 @@ fun SwipeIndicator(direction: SwipeAction?, modifier: Modifier = Modifier) {
         contentAlignment = alignment,
     ) {
         when (direction) {
-            SwipeAction.Delete -> IndicatorCapsule(glyph = "🗑", label = "Delete", color = SwipeRed)
-            SwipeAction.Keep -> IndicatorCapsule(glyph = "✓", label = "Keep", color = SwipeGreen)
-            SwipeAction.Snooze -> IndicatorCapsule(glyph = "🤷", label = "Later", color = SwipeBlue)
+            SwipeAction.Delete -> IndicatorCapsule(
+                glyph = "🗑",
+                label = stringResource(R.string.swipe_action_delete),
+                color = SwipeRed,
+            )
+            SwipeAction.Keep -> IndicatorCapsule(
+                glyph = "✓",
+                label = stringResource(R.string.swipe_action_keep),
+                color = SwipeGreen,
+            )
+            SwipeAction.Snooze -> IndicatorCapsule(
+                glyph = "🤷",
+                label = stringResource(R.string.swipe_action_later),
+                color = SwipeBlue,
+            )
             SwipeAction.Undo -> Unit
         }
     }

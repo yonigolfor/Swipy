@@ -1,0 +1,19 @@
+<resources>
+    <string name="filters_top_bar_title">Smart Filters</string>
+    <string name="filters_subtitle">Quickly clear out common clutter</string>
+    <string name="filters_count_capped">99+</string>
+    <string name="filters_count_empty">Empty</string>
+
+    <string name="filter_all_title">All Photos</string>
+    <string name="filter_all_description">Every photo and video in your library</string>
+    <string name="filter_screenshots_title">Screenshots</string>
+    <string name="filter_screenshots_description">Screenshots quietly taking up space</string>
+    <string name="filter_screen_recordings_title">Screen Recordings</string>
+    <string name="filter_screen_recordings_description">Recordings you probably don\'t need anymore</string>
+    <string name="filter_large_videos_title">Large Videos</string>
+    <string name="filter_large_videos_description">Videos using the most storage</string>
+    <string name="filter_blurry_photos_title">Blurry Photos</string>
+    <string name="filter_blurry_photos_description">Out-of-focus shots worth a second look</string>
+    <string name="filter_burst_photos_title">Burst Photos</string>
+    <string name="filter_burst_photos_description">Near-duplicate shots from burst mode</string>
+</resources>

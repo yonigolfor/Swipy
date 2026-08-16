@@ -44,9 +44,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.swipy.core.designsystem.R
 import com.swipy.core.designsystem.theme.LavaGradientBottom
 import com.swipy.core.designsystem.theme.LavaGradientTop
 import com.swipy.core.designsystem.theme.SavingsBarGradientEnd
@@ -65,9 +67,11 @@ import kotlinx.coroutines.launch
  * SessionSavingsBarView.swift. [sessionSpaceSavedMB] is cumulative and monotonically
  * increasing; crossing [milestoneThresholdMB] plays the star "lava-fill" celebration.
  *
- * Labels are passed in (not hardcoded/stringResource'd here) — this module has no strings.xml
- * yet; the feature module call site is expected to supply localized text, matching the
- * android/CLAUDE.md "always use string resources, never raw literals" rule at the call site.
+ * [milestoneUnitLabel]/[spaceUnitLabel] default to bare SI unit abbreviations ("GB"/"MB"),
+ * deliberately not localized — unit abbreviations are conventionally left untranslated.
+ * [spaceSavedLabel] defaults to a real localized string ([R.string.designsystem_space_saved])
+ * since the only current call site (SwipeStackScreen) never overrides it — this default is the
+ * actual production value, not just a decorative fallback.
  */
 @Composable
 fun SessionSavingsBar(
@@ -76,7 +80,7 @@ fun SessionSavingsBar(
     milestoneThresholdMB: Double = 1000.0,
     milestoneUnitLabel: String = "GB",
     spaceUnitLabel: String = "MB",
-    spaceSavedLabel: String = "Space saved",
+    spaceSavedLabel: String = stringResource(R.string.designsystem_space_saved),
     onMilestoneReached: () -> Unit = {},
 ) {
     val progressFraction = ((sessionSpaceSavedMB % milestoneThresholdMB) / milestoneThresholdMB).toFloat()

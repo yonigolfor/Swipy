@@ -1,3 +1,11 @@
 <resources>
     <string name="app_name">Swipy</string>
+
+    <!-- "Swipy" itself is a brand name, deliberately never translated (same convention as
+         app_name above) — only the tagline is localized here, matching root CLAUDE.md's
+         "Declutter your memories" tagline. -->
+    <string name="splash_tagline">Declutter your memories</string>
+
+    <string name="nav_tab_filters">Filters</string>
+    <string name="nav_tab_swipe">Swipe</string>
 </resources>

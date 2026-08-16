@@ -1,0 +1,8 @@
+<resources>
+    <!-- app_name intentionally omitted — "Swipy" is a brand name, never translated; falls
+         back to the default values/strings.xml entry. -->
+    <string name="splash_tagline">התמונות שלך, פחות בלגן</string>
+
+    <string name="nav_tab_filters">מסננים</string>
+    <string name="nav_tab_swipe">החלקה</string>
+</resources>

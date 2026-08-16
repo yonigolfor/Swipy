@@ -1,5 +1,6 @@
 package com.swipy.feature.filters
 
+import androidx.annotation.StringRes
 import androidx.compose.ui.graphics.Color
 import com.swipy.core.designsystem.theme.FilterAll
 import com.swipy.core.designsystem.theme.FilterBlurryPhotos
@@ -14,49 +15,53 @@ import com.swipy.domain.model.FilterCategory
  * system module only exports raw color tokens (domain-agnostic); joining them to a :domain
  * type belongs to the feature module that already depends on both. No material-icons-extended
  * dependency, same precedent as UndoFab/ShuffleCapsule — glyphs are plain emoji.
+ *
+ * [titleRes]/[descriptionRes] hold resource ids, not resolved strings — this function isn't
+ * @Composable (it's called from inside `remember { }`), so stringResource() can't run here;
+ * callers resolve these at the actual Text() call site instead.
  */
 internal data class CategoryPresentation(
     val glyph: String,
     val color: Color,
-    val title: String,
-    val description: String,
+    @StringRes val titleRes: Int,
+    @StringRes val descriptionRes: Int,
 )
 
 internal fun FilterCategory.presentation(): CategoryPresentation = when (this) {
     FilterCategory.All -> CategoryPresentation(
         glyph = "🖼️",
         color = FilterAll,
-        title = "All Photos",
-        description = "Every photo and video in your library",
+        titleRes = R.string.filter_all_title,
+        descriptionRes = R.string.filter_all_description,
     )
     FilterCategory.Screenshots -> CategoryPresentation(
         glyph = "📱",
         color = FilterScreenshots,
-        title = "Screenshots",
-        description = "Screenshots quietly taking up space",
+        titleRes = R.string.filter_screenshots_title,
+        descriptionRes = R.string.filter_screenshots_description,
     )
     FilterCategory.ScreenRecordings -> CategoryPresentation(
         glyph = "⏺️",
         color = FilterScreenRecordings,
-        title = "Screen Recordings",
-        description = "Recordings you probably don't need anymore",
+        titleRes = R.string.filter_screen_recordings_title,
+        descriptionRes = R.string.filter_screen_recordings_description,
     )
     FilterCategory.LargeVideos -> CategoryPresentation(
         glyph = "🎬",
         color = FilterLargeVideos,
-        title = "Large Videos",
-        description = "Videos using the most storage",
+        titleRes = R.string.filter_large_videos_title,
+        descriptionRes = R.string.filter_large_videos_description,
     )
     FilterCategory.BlurryPhotos -> CategoryPresentation(
         glyph = "🌫️",
         color = FilterBlurryPhotos,
-        title = "Blurry Photos",
-        description = "Out-of-focus shots worth a second look",
+        titleRes = R.string.filter_blurry_photos_title,
+        descriptionRes = R.string.filter_blurry_photos_description,
     )
     FilterCategory.BurstPhotos -> CategoryPresentation(
         glyph = "📸",
         color = FilterBurstPhotos,
-        title = "Burst Photos",
-        description = "Near-duplicate shots from burst mode",
+        titleRes = R.string.filter_burst_photos_title,
+        descriptionRes = R.string.filter_burst_photos_description,
     )
 }

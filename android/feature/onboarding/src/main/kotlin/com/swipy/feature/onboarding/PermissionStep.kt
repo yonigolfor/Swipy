@@ -19,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -57,7 +58,7 @@ fun PermissionStep(
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Text(
-                text = "So we can work our magic",
+                text = stringResource(R.string.onboarding_permission_title),
                 fontSize = 28.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White,
@@ -67,9 +68,9 @@ fun PermissionStep(
             AnimatedContent(targetState = isPermissionDenied, label = "permissionSubtitle") { denied ->
                 Text(
                     text = if (denied) {
-                        "Access was denied. You can grant it anytime from Settings."
+                        stringResource(R.string.permission_denied_message)
                     } else {
-                        "We need access to your gallery.\nEverything stays on your device only 🔒"
+                        stringResource(R.string.onboarding_permission_subtitle)
                     },
                     fontSize = 15.sp,
                     color = Color.Gray,
@@ -85,16 +86,20 @@ fun PermissionStep(
             modifier = Modifier.fillMaxWidth().padding(horizontal = 40.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            PrivacyRow(glyph = "📱", text = "Stays on your device")
-            PrivacyRow(glyph = "🙈", text = "Completely private")
-            PrivacyRow(glyph = "🚫", text = "You're in control")
+            PrivacyRow(glyph = "📱", text = stringResource(R.string.onboarding_permission_local))
+            PrivacyRow(glyph = "🙈", text = stringResource(R.string.onboarding_permission_private))
+            PrivacyRow(glyph = "🚫", text = stringResource(R.string.onboarding_permission_control))
         }
 
         Spacer(Modifier.weight(1f))
 
         AnimatedContent(targetState = isPermissionDenied, label = "permissionCta") { denied ->
             GoldCapsuleButton(
-                text = if (denied) "Open Settings" else "Grant Access to Gallery",
+                text = if (denied) {
+                    stringResource(R.string.permission_denied_cta)
+                } else {
+                    stringResource(R.string.onboarding_permission_cta)
+                },
                 onClick = if (denied) onOpenSettings else onRequestPermission,
                 modifier = Modifier.padding(start = 32.dp, end = 32.dp, bottom = 48.dp),
             )

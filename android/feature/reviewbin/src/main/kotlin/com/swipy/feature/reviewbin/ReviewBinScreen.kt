@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -81,12 +82,14 @@ fun ReviewBinScreen(
         Scaffold(
             topBar = {
                 TopAppBar(
-                    title = { Text("Review Bin") },
-                    navigationIcon = { TextButton(onClick = onBack) { Text("‹ Back") } },
+                    title = { Text(stringResource(R.string.reviewbin_top_bar_title)) },
+                    navigationIcon = {
+                        TextButton(onClick = onBack) { Text(stringResource(R.string.reviewbin_back_button)) }
+                    },
                     actions = {
                         if (uiState.items.isNotEmpty()) {
                             TextButton(onClick = { viewModel.onIntent(ReviewBinIntent.RequestEmptyTrash) }) {
-                                Text("Empty Trash", color = SwipeRed)
+                                Text(stringResource(R.string.reviewbin_empty_trash_action), color = SwipeRed)
                             }
                         }
                     },

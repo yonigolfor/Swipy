@@ -1,0 +1,38 @@
+<resources>
+    <string name="onboarding_hook_title">הטלפון שלך סוחב\nמשקל מיותר.</string>
+    <string name="onboarding_hook_subtitle">בואו נפנה קצת מקום, יחד.</string>
+    <string name="onboarding_hook_stat_number">+10,000</string>
+    <string name="onboarding_hook_stat_label">תמונות וסרטונים</string>
+    <string name="onboarding_hook_cta">בואו נתחיל</string>
+
+    <string name="onboarding_permission_title">כדי שנוכל לעשות את הקסם</string>
+    <string name="onboarding_permission_subtitle">אנחנו צריכים גישה לגלריה שלך.\nהכל נשאר במכשיר שלך בלבד 🔒</string>
+    <string name="onboarding_permission_cta">אשר גישה לגלריה</string>
+    <string name="onboarding_permission_local">נשאר במכשיר שלך</string>
+    <string name="onboarding_permission_private">פרטי לחלוטין</string>
+    <string name="onboarding_permission_control">אתה בשליטה</string>
+    <string name="permission_denied_message">הגישה נדחתה. תוכל לאשר אותה בכל עת דרך ההגדרות.</string>
+    <string name="permission_denied_cta">פתח הגדרות</string>
+
+    <string name="onboarding_demo_title">ניקוי בסטייל.</string>
+    <string name="onboarding_demo_subtitle">שמאלה לאשפה, ימינה לשמירה.</string>
+    <string name="onboarding_demo_hint">נסה לגרור את הכרטיס</string>
+    <string name="onboarding_demo_cta">הבנתי!</string>
+
+    <string name="onboarding_snooze_title">לא בטוחים? אין בעיה</string>
+    <string name="onboarding_snooze_subtitle">החליקו למעלה כדי לדחות!</string>
+    <string name="onboarding_snooze_body">נציג לך את זה שוב מאוחר יותר, כדי שתוכל להמשיך להחליק!</string>
+    <string name="onboarding_snooze_cta">הבא</string>
+
+    <string name="onboarding_scan_title">סורק את הגלריה שלך…</string>
+    <string name="onboarding_scan_photos">תמונות</string>
+    <string name="onboarding_scan_videos">סרטונים</string>
+    <string name="onboarding_scan_large_videos">סרטונים גדולים</string>
+    <string name="onboarding_scan_privacy">הכל נשאר פרטי, במכשיר שלך</string>
+    <string name="onboarding_scan_cta">בואו ננקה!</string>
+    <string name="onboarding_scan_skip">דלג לעת עתה</string>
+
+    <string name="onboarding_quickwin_title">הכל מוכן!</string>
+    <string name="onboarding_quickwin_subtitle">הגיע הזמן לפנות מקום אחסון.</string>
+    <string name="onboarding_quickwin_cta">התחל להחליק</string>
+</resources>

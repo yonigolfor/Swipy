@@ -1,0 +1,20 @@
+<resources>
+    <string name="reviewbin_top_bar_title">Review Bin</string>
+    <string name="reviewbin_back_button">‹ Back</string>
+    <string name="reviewbin_empty_trash_action">Empty Trash</string>
+    <string name="reviewbin_restore_button">Restore</string>
+    <string name="reviewbin_celebration_title">Space Reclaimed! 🚀</string>
+    <string name="reviewbin_celebration_subtitle">You freed up</string>
+    <string name="reviewbin_celebration_cta">Awesome! 💪</string>
+    <string name="reviewbin_space_saved_label">Space saved</string>
+    <string name="reviewbin_total_storage_freed">Total Storage Freed</string>
+
+    <plurals name="reviewbin_items_deleted_sentence">
+        <item quantity="one">by deleting %d item</item>
+        <item quantity="other">by deleting %d items</item>
+    </plurals>
+    <plurals name="reviewbin_items_word">
+        <item quantity="one">item</item>
+        <item quantity="other">items</item>
+    </plurals>
+</resources>

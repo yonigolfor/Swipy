@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -42,13 +43,28 @@ fun QuickWinStep(onComplete: () -> Unit) {
             modifier = Modifier.fillMaxWidth().padding(horizontal = 32.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Text(text = "You're all set!", fontSize = 36.sp, fontWeight = FontWeight.Bold, color = Color.White, textAlign = TextAlign.Center)
+            Text(
+                text = stringResource(R.string.onboarding_quickwin_title),
+                fontSize = 36.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White,
+                textAlign = TextAlign.Center,
+            )
             Spacer(Modifier.height(16.dp))
-            Text(text = "Time to reclaim your storage.", fontSize = 15.sp, color = Color.Gray, textAlign = TextAlign.Center)
+            Text(
+                text = stringResource(R.string.onboarding_quickwin_subtitle),
+                fontSize = 15.sp,
+                color = Color.Gray,
+                textAlign = TextAlign.Center,
+            )
         }
 
         Spacer(Modifier.weight(1f))
 
-        GoldCapsuleButton(text = "Start Swiping", onClick = onComplete, modifier = Modifier.padding(start = 32.dp, end = 32.dp, bottom = 48.dp))
+        GoldCapsuleButton(
+            text = stringResource(R.string.onboarding_quickwin_cta),
+            onClick = onComplete,
+            modifier = Modifier.padding(start = 32.dp, end = 32.dp, bottom = 48.dp),
+        )
     }
 }

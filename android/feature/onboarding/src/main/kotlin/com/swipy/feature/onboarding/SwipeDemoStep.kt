@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -48,9 +49,9 @@ fun SwipeDemoStep(onNext: () -> Unit) {
         Spacer(Modifier.weight(1f))
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(text = "Cleanup in style.", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color.White)
+            Text(text = stringResource(R.string.onboarding_demo_title), fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color.White)
             Spacer(Modifier.height(8.dp))
-            Text(text = "Left to trash, right to keep.", fontSize = 14.sp, color = Color.Gray)
+            Text(text = stringResource(R.string.onboarding_demo_subtitle), fontSize = 14.sp, color = Color.Gray)
         }
 
         Spacer(Modifier.height(24.dp))
@@ -66,7 +67,7 @@ fun SwipeDemoStep(onNext: () -> Unit) {
 
         Spacer(Modifier.height(24.dp))
         Text(
-            text = "Try dragging the card",
+            text = stringResource(R.string.onboarding_demo_hint),
             fontSize = 12.sp,
             color = Color.Gray,
             textAlign = TextAlign.Center,
@@ -75,9 +76,15 @@ fun SwipeDemoStep(onNext: () -> Unit) {
 
         Spacer(Modifier.weight(1f))
 
-        GoldCapsuleButton(text = "Got it!", onClick = onNext, modifier = Modifier.padding(start = 32.dp, end = 32.dp, bottom = 48.dp))
+        GoldCapsuleButton(
+            text = stringResource(R.string.onboarding_demo_cta),
+            onClick = onNext,
+            modifier = Modifier.padding(start = 32.dp, end = 32.dp, bottom = 48.dp),
+        )
     }
 }
+
+private enum class DemoSwipeDirection { Delete, Keep }
 
 @Composable
 private fun DemoCard() {
@@ -85,7 +92,9 @@ private fun DemoCard() {
     val offsetX = remember { Animatable(0f) }
     val offsetY = remember { Animatable(0f) }
     var visible by remember { mutableStateOf(true) }
-    var label by remember { mutableStateOf<String?>(null) }
+    // Direction, not the resolved localized string — comparing a stored label against a
+    // hardcoded "Delete" literal would silently break once the rendered text is Hebrew.
+    var direction by remember { mutableStateOf<DemoSwipeDirection?>(null) }
 
     if (!visible) return
 
@@ -105,9 +114,9 @@ private fun DemoCard() {
                             offsetX.snapTo(offsetX.value + dragAmount.x)
                             offsetY.snapTo(offsetY.value + dragAmount.y)
                         }
-                        label = when {
-                            offsetX.value < -30f -> "Delete"
-                            offsetX.value > 30f -> "Keep"
+                        direction = when {
+                            offsetX.value < -30f -> DemoSwipeDirection.Delete
+                            offsetX.value > 30f -> DemoSwipeDirection.Keep
                             else -> null
                         }
                     },
@@ -120,7 +129,7 @@ private fun DemoCard() {
                                 visible = false
                                 offsetX.snapTo(0f)
                                 offsetY.snapTo(0f)
-                                label = null
+                                direction = null
                                 delay(150)
                                 visible = true
                             }
@@ -130,7 +139,7 @@ private fun DemoCard() {
                                 offsetX.animateTo(0f, snapBack)
                                 offsetY.animateTo(0f, snapBack)
                             }
-                            label = null
+                            direction = null
                         }
                     },
                 )
@@ -144,10 +153,21 @@ private fun DemoCard() {
         ) {
             Text(text = "🖼️", fontSize = 50.sp)
             Spacer(Modifier.height(12.dp))
-            Text(text = "Try dragging the card", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = Color.White.copy(alpha = 0.7f))
+            Text(
+                text = stringResource(R.string.onboarding_demo_hint),
+                fontSize = 17.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = Color.White.copy(alpha = 0.7f),
+            )
         }
-        label?.let { text ->
-            val color = if (text == "Delete") SwipeRed else SwipeGreen
+        direction?.let { swipeDirection ->
+            val isDelete = swipeDirection == DemoSwipeDirection.Delete
+            val color = if (isDelete) SwipeRed else SwipeGreen
+            val text = if (isDelete) {
+                stringResource(com.swipy.core.designsystem.R.string.swipe_action_delete)
+            } else {
+                stringResource(com.swipy.core.designsystem.R.string.swipe_action_keep)
+            }
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     text = text,
@@ -155,7 +175,7 @@ private fun DemoCard() {
                     fontWeight = FontWeight.Bold,
                     color = color,
                     modifier = Modifier
-                        .graphicsLayer { rotationZ = if (text == "Delete") -15f else 15f }
+                        .graphicsLayer { rotationZ = if (isDelete) -15f else 15f }
                         .background(color.copy(alpha = 0.2f), CircleShape)
                         .padding(horizontal = 16.dp, vertical = 8.dp),
                 )

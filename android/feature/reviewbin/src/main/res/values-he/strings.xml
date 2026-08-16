@@ -1,0 +1,22 @@
+<resources>
+    <string name="reviewbin_top_bar_title">סל מחזור</string>
+    <string name="reviewbin_back_button">‹ חזרה</string>
+    <string name="reviewbin_empty_trash_action">רוקן סל מחזור</string>
+    <string name="reviewbin_restore_button">שחזר</string>
+    <string name="reviewbin_celebration_title">השטח שוחרר! 🚀</string>
+    <string name="reviewbin_celebration_subtitle">פינית</string>
+    <string name="reviewbin_celebration_cta">מעולה! 💪</string>
+    <string name="reviewbin_space_saved_label">שטח שנחסך</string>
+    <string name="reviewbin_total_storage_freed">סה"כ שטח שפונה</string>
+
+    <plurals name="reviewbin_items_deleted_sentence">
+        <item quantity="one">על ידי מחיקת פריט אחד</item>
+        <item quantity="two">על ידי מחיקת שני פריטים</item>
+        <item quantity="other">על ידי מחיקת %d פריטים</item>
+    </plurals>
+    <plurals name="reviewbin_items_word">
+        <item quantity="one">פריט</item>
+        <item quantity="two">פריטים</item>
+        <item quantity="other">פריטים</item>
+    </plurals>
+</resources>

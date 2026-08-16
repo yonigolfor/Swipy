@@ -34,6 +34,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -76,6 +77,9 @@ fun SwipeStackScreen(
     val cardAreaScale = remember { Animatable(1f) }
     var isTransitioning by remember { mutableStateOf(false) }
     var indicatorText by remember { mutableStateOf<String?>(null) }
+    // Resolved here, not inline in the LaunchedEffect below — stringResource() requires a
+    // @Composable context, and viewModel.effects.collect {}'s lambda isn't one.
+    val shuffleLandedHomeLabel = stringResource(R.string.swipe_shuffle_landed_home)
 
     /** Fly-out → dispatch intent → parked off-screen, mirrors performShuffleTransition. */
     fun flyOutThenDispatch(intent: PhotoStackIntent) {
@@ -107,7 +111,7 @@ fun SwipeStackScreen(
                     isTransitioning = false
                     indicatorText = effect.landedAtEpochSeconds
                         ?.let { seconds -> monthYearFormatter.format(Instant.ofEpochSecond(seconds).atZone(ZoneId.systemDefault())) }
-                        ?: "Back home"
+                        ?: shuffleLandedHomeLabel
                     delay(2200)
                     indicatorText = null
                 }
@@ -130,7 +134,7 @@ fun SwipeStackScreen(
                 uiState.isLoading -> CircularProgressIndicator(modifier = Modifier.align(Alignment.Center))
 
                 uiState.stack.isEmpty() -> Text(
-                    text = "No more photos",
+                    text = stringResource(R.string.swipe_empty_state),
                     modifier = Modifier.align(Alignment.Center),
                     style = MaterialTheme.typography.titleMedium,
                 )
@@ -169,7 +173,7 @@ fun SwipeStackScreen(
             exit = slideOutVertically(tween(220)) { -it } + fadeOut(tween(220)),
         ) {
             ShuffleBadge(
-                label = "Shuffle Mode",
+                label = stringResource(R.string.swipe_shuffle_mode_label),
                 onDismiss = { flyOutThenDispatch(PhotoStackIntent.DeactivateShuffle) },
             )
         }
@@ -190,7 +194,7 @@ fun SwipeStackScreen(
             onClick = onNavigateToReviewBin,
             modifier = Modifier.align(Alignment.TopEnd).padding(top = 96.dp, end = 8.dp),
         ) {
-            Text("Review Bin (${uiState.reviewBinCount})")
+            Text(stringResource(R.string.swipe_review_bin_button, uiState.reviewBinCount))
         }
 
         // FAB column — Shuffle capsule above Undo, matching the iOS FAB row's VStack order.

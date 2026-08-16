@@ -35,24 +35,41 @@ swipe-commit path `CardStackLayer.kt` owns directly.
 
 ---
 
-## 2. Hebrew / RTL localization
+## 2. Hebrew / RTL localization — ✅ RESOLVED
 
-No localization system is wired up — confirmed via grep, only one incidental `stringResource`
-call in the whole Android codebase (`SessionSavingsBar.kt`); every other string is a hardcoded
-English literal. iOS uses `String(localized:)` everywhere against `Localizable.xcstrings` with
-both `en` and `he` translations (see root `CLAUDE.md` → "Localization").
+No localization system was wired up — confirmed via grep, only one incidental `stringResource`
+call in the whole Android codebase; every other string was a hardcoded English literal.
 
-**To do:**
-- Introduce `strings.xml` (+ `values-he/strings.xml`) and migrate every hardcoded string across
-  all feature modules to `stringResource(R.string.*)`.
-- Decide the Android equivalent of iOS's "pin layout direction to LTR app-wide" strategy (see
-  item 3 below — the two issues are the same root cause) — i.e. whether Android should let
-  `LocalLayoutDirection` follow the Hebrew system locale for **text/reading** layout (the
-  Android-idiomatic default, and generally correct — RTL text flow is what Hebrew users expect)
-  while still pinning **physical gesture directions** (swipe left/right, card drag) and
-  **left/right-coded UI** (Keep/Delete badge sides) to be locale-independent, the same
-  distinction iOS's own doc draws between "Hebrew text renders correctly regardless" and
-  "container layout/gesture direction must not flip."
+**Fix applied**: every module (`:app`, `:core:designsystem`, `:feature:swipe`,
+`:feature:filters`, `:feature:reviewbin`, `:feature:onboarding`) now has its own
+`res/values/strings.xml` + `res/values-he/strings.xml`, with every user-facing string migrated
+to `stringResource(R.string.*)` (or `pluralStringResource` for the Review Bin's item-count
+sentences, which needed real quantity handling — Hebrew's plural rules differ from English's).
+Brand-name text ("Swipy", the app icon's "S" letter) is deliberately left untranslated, matching
+`app_name`'s own convention. Unit abbreviations ("MB"/"GB") are also left untranslated,
+matching standard SI-unit convention.
+
+Three strings (`swipe.keep`/`swipe.delete`/`swipe.later`) are shared between the real swipe
+stack (`SwipeIndicator.kt`) and the onboarding demo cards (`SwipeDemoStep.kt`/
+`SnoozeIntroStep.kt`) — both already depend on `:core:designsystem`, and iOS's own
+`Localizable.xcstrings` uses the identical keys for both, so they live there once instead of
+duplicating (and risking translation drift) per module. `SwipeDemoStep.kt`'s `DemoCard` needed a
+real refactor beyond a string swap: it used to compare the *rendered label text* against a
+hardcoded `"Delete"` literal to pick the badge color/rotation — correct only in English. Replaced
+with a `DemoSwipeDirection` enum stored in state, with text/color both derived from the enum at
+render time.
+
+Item 3's RTL fix (`AbsoluteAlignment` for the real swipe badges) already matches
+`android/CLAUDE.md`'s prescribed approach: Android lets `LocalLayoutDirection` follow the Hebrew
+system locale for **text/reading** layout (confirmed via audit — `CardStackLayer.kt`'s drag math
+is pure pointer-offset with no `Start`/`End` usage anywhere, and `PhotoCardComposable.kt`'s info
+badges correctly use `TopStart`/`TopEnd`, since those are general UI chrome that *should* mirror
+under RTL, not gesture-direction-tied), while physical gesture-direction UI
+(`SwipeIndicator.kt`'s Keep/Delete badges) stays locale-independent. No app-wide LTR pin needed,
+unlike iOS.
+
+**Not yet tested on an actual Hebrew-locale device** — no such device was available this pass;
+worth a real on-device RTL pass before considering this pixel-final.
 
 ---
 

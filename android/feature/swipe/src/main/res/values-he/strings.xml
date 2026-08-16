@@ -1,0 +1,8 @@
+<resources>
+    <string name="swipe_empty_state">אין עוד תמונות</string>
+    <string name="swipe_shuffle_landed_home">חזרה הביתה</string>
+    <string name="swipe_shuffle_mode_label">מצב ערבוב</string>
+    <string name="swipe_review_bin_button">סל מחזור (%1$d)</string>
+    <string name="swipe_badge_screenshot">צילום מסך</string>
+    <string name="swipe_badge_recording">הקלטה</string>
+</resources>

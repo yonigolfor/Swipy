@@ -22,6 +22,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
@@ -135,13 +136,13 @@ private fun SwipyNavHost() {
                     selected = currentRoute == ROUTE_FILTERS,
                     onClick = { navController.navigateToTab(ROUTE_FILTERS) },
                     icon = { Text("🔍") },
-                    label = { Text("Filters") },
+                    label = { Text(stringResource(R.string.nav_tab_filters)) },
                 )
                 NavigationBarItem(
                     selected = currentRoute == ROUTE_SWIPE,
                     onClick = { navController.navigateToTab(ROUTE_SWIPE) },
                     icon = { Text("🗂️") },
-                    label = { Text("Swipe") },
+                    label = { Text(stringResource(R.string.nav_tab_swipe)) },
                 )
                 NavigationBarItem(
                     selected = currentRoute == ROUTE_REVIEW_BIN,
@@ -157,7 +158,9 @@ private fun SwipyNavHost() {
                             Text("🗑️")
                         }
                     },
-                    label = { Text("Review Bin") },
+                    // Reuses :feature:reviewbin's own top-bar title string rather than a
+                    // separate :app-local duplicate — same word, one source of truth.
+                    label = { Text(stringResource(com.swipy.feature.reviewbin.R.string.reviewbin_top_bar_title)) },
                 )
             }
         },

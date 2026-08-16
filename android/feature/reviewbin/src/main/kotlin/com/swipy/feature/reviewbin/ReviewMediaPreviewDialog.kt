@@ -20,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -123,6 +124,6 @@ private fun RestoreCapsule(onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(text = "↺", color = Color.White, fontSize = 16.sp)
-        Text(text = "Restore", color = Color.White, fontWeight = FontWeight.SemiBold)
+        Text(text = stringResource(R.string.reviewbin_restore_button), color = Color.White, fontWeight = FontWeight.SemiBold)
     }
 }

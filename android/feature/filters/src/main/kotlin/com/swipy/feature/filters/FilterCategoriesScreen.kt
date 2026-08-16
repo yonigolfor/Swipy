@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -57,7 +58,7 @@ fun FilterCategoriesScreen(
         modifier = modifier,
         topBar = {
             TopAppBar(
-                title = { Text("Smart Filters") },
+                title = { Text(stringResource(R.string.filters_top_bar_title)) },
                 actions = {
                     IconButton(onClick = { viewModel.onIntent(FilterCategoriesIntent.Refresh) }) {
                         Text(text = "⟳", fontSize = 18.sp)
@@ -69,7 +70,7 @@ fun FilterCategoriesScreen(
         LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
             item {
                 Text(
-                    text = "Quickly clear out common clutter",
+                    text = stringResource(R.string.filters_subtitle),
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
@@ -120,9 +121,9 @@ private fun CategoryRow(
         Spacer(Modifier.width(16.dp))
 
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = presentation.title, style = MaterialTheme.typography.titleMedium)
+            Text(text = stringResource(presentation.titleRes), style = MaterialTheme.typography.titleMedium)
             Text(
-                text = presentation.description,
+                text = stringResource(presentation.descriptionRes),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -156,7 +157,7 @@ private fun CountBadge(
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         if (count > 0) {
-            val label = if (count >= 100 && !isAllCategory) "99+" else "$count"
+            val label = if (count >= 100 && !isAllCategory) stringResource(R.string.filters_count_capped) else "$count"
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelLarge,
@@ -167,7 +168,11 @@ private fun CountBadge(
                     .padding(horizontal = 10.dp, vertical = 5.dp),
             )
         } else {
-            Text(text = "Empty", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                text = stringResource(R.string.filters_count_empty),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
         }
         if (isRecalculating) {
             CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp)
