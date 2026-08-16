@@ -4,4 +4,9 @@
     <string name="swipe_shuffle_mode_label">Shuffle Mode</string>
     <string name="swipe_badge_screenshot">Screenshot</string>
     <string name="swipe_badge_recording">Recording</string>
+    <!-- Real production copy, ported verbatim from iOS's Localizable.xcstrings "share.caption"
+         key — passed as Intent.EXTRA_TEXT alongside the shared media, the Android equivalent
+         of iOS's UIActivityViewController(activityItems: [imageProvider, caption]). Apps like
+         WhatsApp render this as the accompanying message text for the shared image/video. -->
+    <string name="swipe_share_caption">Sent via Swipy App 🌟</string>
 </resources>

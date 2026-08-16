@@ -168,6 +168,9 @@ fun PhotoCardComposable(item: PhotoItem, isTop: Boolean, modifier: Modifier = Mo
 @Composable
 private fun ShareIconButton(enabled: Boolean, item: PhotoItem) {
     val context = LocalContext.current
+    // Resolved here, not inside shareMediaItem() — stringResource() requires a @Composable
+    // context, and that function is a plain click-handler callback, not one.
+    val shareCaption = stringResource(R.string.swipe_share_caption)
     Box(
         modifier = Modifier
             .size(28.dp)
@@ -176,7 +179,7 @@ private fun ShareIconButton(enabled: Boolean, item: PhotoItem) {
                 enabled = enabled,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
-                onClick = { shareMediaItem(context, item) },
+                onClick = { shareMediaItem(context, item, shareCaption) },
             ),
         contentAlignment = Alignment.Center,
     ) {
@@ -186,11 +189,15 @@ private fun ShareIconButton(enabled: Boolean, item: PhotoItem) {
 
 /** Native Share Sheet for one media item — a content:// MediaStore Uri, granted read
  * permission for the receiving app via FLAG_GRANT_READ_URI_PERMISSION (no FileProvider needed;
- * MediaStore Uris are already content:// and accessible cross-app once that flag is set). */
-private fun shareMediaItem(context: Context, item: PhotoItem) {
+ * MediaStore Uris are already content:// and accessible cross-app once that flag is set).
+ * [caption] is the Android analogue of iOS's `UIActivityViewController(activityItems:
+ * [imageProvider, caption])` — apps that support EXTRA_TEXT alongside EXTRA_STREAM (WhatsApp
+ * included) render it as the shared image/video's accompanying message text. */
+private fun shareMediaItem(context: Context, item: PhotoItem, caption: String) {
     val sendIntent = Intent(Intent.ACTION_SEND).apply {
         type = if (item.isVideo) "video/*" else "image/*"
         putExtra(Intent.EXTRA_STREAM, Uri.parse(item.uriString))
+        putExtra(Intent.EXTRA_TEXT, caption)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
     context.startActivity(Intent.createChooser(sendIntent, null))
