@@ -16,6 +16,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -29,6 +30,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.swipy.core.designsystem.theme.OnboardingBackground
+import com.swipy.domain.model.FilterCategory
 import com.swipy.feature.filters.FilterCategoriesScreen
 import com.swipy.feature.onboarding.OnboardingScreen
 import com.swipy.feature.reviewbin.ReviewBinScreen
@@ -111,6 +113,18 @@ private fun SwipyNavHost() {
     val photoStackViewModel: PhotoStackViewModel = hiltViewModel()
     val stackUiState by photoStackViewModel.uiState.collectAsStateWithLifecycle()
 
+    // PhotoStackViewModel never auto-loads on init (it stays empty until LoadPhotos is sent,
+    // normally triggered by tapping a Filters category) — now that Swipe is the start
+    // destination (see android/TODO.md item 4), a first-time landing needs its own trigger or
+    // the user would see a permanently empty stack with no way to populate it. Guarded on the
+    // stack actually being empty so this never re-fires a redundant load on recomposition or
+    // after a real LoadPhotos already ran.
+    LaunchedEffect(Unit) {
+        if (stackUiState.stack.isEmpty()) {
+            photoStackViewModel.onIntent(PhotoStackIntent.LoadPhotos(FilterCategory.All))
+        }
+    }
+
     val backStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = backStackEntry?.destination?.route
 
@@ -150,7 +164,7 @@ private fun SwipyNavHost() {
     ) { padding ->
         NavHost(
             navController = navController,
-            startDestination = ROUTE_FILTERS,
+            startDestination = ROUTE_SWIPE,
             modifier = Modifier.padding(padding),
         ) {
             composable(ROUTE_FILTERS) {

@@ -46,85 +46,68 @@ both `en` and `he` translations (see root `CLAUDE.md` → "Localization").
 
 ---
 
-## 3. Swipe badge appears on the wrong side (root cause identified, not yet fixed)
+## 3. Swipe badge appears on the wrong side — ✅ RESOLVED
 
-Swiping the card physically **right** shows the "Keep" badge on the **left** edge of the
-screen instead of the right.
+Swiping the card physically **right** used to show the "Keep" badge on the **left** edge of
+the screen instead of the right.
 
-**Root cause**: `SwipeIndicator.kt:39-40` uses `Alignment.CenterStart` (Delete) /
+**Root cause**: `SwipeIndicator.kt:39-40` used `Alignment.CenterStart` (Delete) /
 `Alignment.CenterEnd` (Keep) — both are **layout-direction-aware** in Compose. Under an RTL
 `LocalLayoutDirection` (which Compose adopts automatically from a Hebrew system locale unless
 explicitly overridden), `CenterStart` resolves to the physical **right** edge and `CenterEnd`
 resolves to the physical **left** edge — exactly inverted from LTR. This is the direct Android
 analogue of the bug iOS's root `CLAUDE.md` documents at length under "Layout Direction — Pinned
-to LTR App-Wide": iOS discovered that RTL mirroring flips not just `.leading`/`.trailing`-based
-layout but was observed to flip raw `.offset(x:)`-based transitions too, and fixed it by pinning
-`.environment(\.layoutDirection, .leftToRight)` on the whole root `WindowGroup` — "forward"
-always means physically right regardless of device language.
+to LTR App-Wide".
 
-**To do:**
-- Replace `Alignment.CenterStart`/`CenterEnd` in `SwipeIndicator.kt` with explicit,
-  layout-direction-independent positioning (`Alignment.CenterLeft`/`CenterRight`-equivalent —
-  Compose has no such built-in constant, so this likely means computing the `Box` position
-  manually via `Modifier.offset`/`align(Alignment.Center)` + a sign flip, or wrapping just the
-  gesture/badge subtree in a forced `CompositionLocalProvider(LocalLayoutDirection provides
-  LayoutDirection.Ltr)`).
-- Audit `CardStackLayer.kt`'s drag-direction resolution (`resolveSwipeDirection`) and fling
-  targets for the same class of bug — the drag math itself is already raw pointer-offset based
-  (direction-agnostic per android/CLAUDE.md's own "Layout Direction" section), so it's likely
-  fine, but confirm rather than assume once item 2's RTL work lands and this becomes testable
-  end-to-end on a Hebrew-locale device.
-- Re-verify on the physical device once fixed — this class of bug is easy to "fix" for the
-  common LTR case while still being wrong under RTL if not tested on an actual Hebrew-locale
-  device.
+**Fix applied**: swapped `Alignment.CenterStart`/`CenterEnd` for `AbsoluteAlignment.CenterLeft`/
+`CenterRight` in `SwipeIndicator.kt` — both implement `Alignment` but are never layout-direction
+-aware, matching android/CLAUDE.md's prescribed approach (Android should let text/reading layout
+follow RTL, but physical gesture-direction UI must stay locale-independent) rather than
+adopting iOS's app-wide LTR pin.
+
+**Still open, deferred to item 2's RTL work**: audit `CardStackLayer.kt`'s drag-direction
+resolution and fling targets for the same class of bug — the drag math is already raw
+pointer-offset based (direction-agnostic), so it's likely fine, but not yet confirmed
+end-to-end on an actual Hebrew-locale device (no such device available this pass).
 
 ---
 
-## 4. Main tab should default to Swipe, not Filters
+## 4. Main tab should default to Swipe, not Filters — ✅ RESOLVED
 
-`MainActivity.kt`'s `SwipyNavHost` has `startDestination = ROUTE_FILTERS` — the app currently
-opens on the Smart Filters/Categories screen. iOS defaults to the Swipe tab
-(`ContentView.swift`: `@State private var selectedTab = 1`, where tab 1 is `SwipeStackView`) —
-Filters is reachable but not the landing screen.
+`MainActivity.kt`'s `SwipyNavHost` had `startDestination = ROUTE_FILTERS` — the app opened on
+the Smart Filters/Categories screen. iOS defaults to the Swipe tab (`ContentView.swift`:
+`@State private var selectedTab = 1`) — Filters is reachable but not the landing screen.
 
-**To do:**
-- Change `startDestination` to `ROUTE_SWIPE` in `SwipyNavHost` (`MainActivity.kt`).
-- Double-check `FilterCategoriesScreen`'s → `PhotoStackViewModel.LoadPhotos` → Swipe handoff
-  still behaves correctly with Swipe as the "home" tab (it should — `navigateToTab` already
-  fully clears the back stack per-tab, so this shouldn't require any other change), but verify
-  after switching.
+**Fix applied**: `startDestination` changed to `ROUTE_SWIPE`.
+
+**Unplanned but necessary companion fix**: `PhotoStackViewModel` never auto-loads on `init` —
+it stays empty until `PhotoStackIntent.LoadPhotos(filter)` is sent, which previously only
+happened when the user tapped a category on the Filters screen. Landing directly on Swipe would
+otherwise show a permanently empty stack with no way to populate it. `SwipyNavHost` now fires
+`LoadPhotos(FilterCategory.All)` once via a `LaunchedEffect(Unit)` guarded on the stack actually
+being empty, so it never re-fires redundantly after a real load has run.
 
 ---
 
-## 5. Smart Filters counts are inconsistent / don't make sense together
+## 5. Smart Filters counts are inconsistent / don't make sense together — ✅ RESOLVED
 
 Observed on-device: **All Photos: 100**, while individual sub-category counts (e.g. Screenshots:
-99+, Videos: 13, plus several more categories) clearly sum to well more than 100 in the real
-library. Showing "All Photos: 100" reads as obviously wrong to a user who can see the individual
-categories add up to more.
+99+, Videos: 13, plus several more categories) clearly summed to well more than 100 in the real
+library.
 
-**Likely cause**: Phase 1 fast counts are capped at 100 for *every* category, `.All` included
-(`FilterCategoriesViewModel`'s `CAP = 100`, `GetCategoryCountUseCase` — see android/CLAUDE.md
-"Smart Filter Counting (2-Phase)"). This matches iOS's own documented behavior (the cap
-"matches the '99+' display ceiling"), **but** iOS's UI only ever renders the `"99+"` collapsed
-form for count >= 100 on every category *except* `.all`
-(`SmartFiltersView.swift:190`: `count >= 100 && category != .all ? "99+" : "\(count)"`) — i.e.
-iOS special-cases `.all` to likely need an **uncapped** real count, not a capped Phase-1
-estimate, specifically because showing a bare capped number like "100" for the whole-library
-category (with no "+") reads as a real, precise, small count — which is exactly the confusing
-result reported here.
+**Root cause**: Phase 1 fast counts are capped at 100 for *every* category, `.All` included
+(`FilterCategoriesViewModel`'s `CAP = 100`, `GetCategoryCountUseCase`). iOS special-cases `.all`
+to show a real, uncapped total instead of the shared "99+" ceiling — a bare capped number like
+"100" for the whole-library category reads as a precise small count, not an estimate.
 
-**To do:**
-- Check iOS's actual `.all` count path in `PhotoLibraryService`/`PhotoStackViewModel` — confirm
-  whether `.all` genuinely gets an uncapped real total there (likely, e.g. via
-  `PHFetchResult.count`, which is O(1) — no enumeration cost) rather than the same
-  candidate-pool Phase-1 cap the other categories use.
-- Port whatever iOS actually does for `.all` specifically — likely: give `FilterCategory.All` an
-  **uncapped** real count (Android's `PhotoRepository.totalCount(FilterCategory.All)` already
-  exists and is used elsewhere for Shuffle's random-seek range — reuse it here instead of the
-  capped `countForCategory` path for this one category), while every other category keeps the
-  capped/`"99+"` Phase-1 behavior as-is.
-- Re-verify the numbers read sensibly together on-device once fixed.
+**Fix applied**: new `GetTotalCategoryCountUseCase` (`:domain`) wraps the existing, previously
+Shuffle-only `PhotoRepository.totalCount(filter)`. `FilterCategoriesViewModel.refresh()` now
+overrides the Phase-1 capped entry for `FilterCategory.All` with
+`(totalCount(All) - excludedIds.size).coerceAtLeast(0)` — every other category keeps the
+capped/`"99+"` Phase-1 behavior unchanged. The subtraction is exact, not approximate:
+`FilterCategory.All`'s MediaStore selection matches every image/video row with no further
+predicate (confirmed in `MediaStoreQueryBuilder`), so every already-swiped id (kept/binned/
+snoozed) is guaranteed a member of that raw total.
 
 ---
 

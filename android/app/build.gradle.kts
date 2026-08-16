@@ -67,4 +67,9 @@ dependencies {
     ksp(libs.hilt.android.compiler)
 
     implementation(libs.kotlinx.coroutines.android)
+    // PhotoStackUiState.stack is a PersistentList (see feature:swipe's own doc comment) — needed
+    // here too now that SwipyNavHost reads it directly to decide whether to trigger an initial
+    // LoadPhotos. :feature:swipe declares this as `implementation`, which doesn't propagate to
+    // this module's compile classpath.
+    implementation(libs.kotlinx.collections.immutable)
 }

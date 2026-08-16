@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.AbsoluteAlignment
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
@@ -35,9 +36,14 @@ import com.swipy.domain.model.SwipeAction
 fun SwipeIndicator(direction: SwipeAction?, modifier: Modifier = Modifier) {
     if (direction == null || direction == SwipeAction.Undo) return
 
+    // Absolute (not Start/End) alignment — a swipe is a physical, spatial gesture, not a
+    // text-flow concept: dragging right must always show Keep on the physical right edge
+    // regardless of layout direction. Alignment.CenterStart/CenterEnd are layout-direction-aware
+    // and silently invert under RTL (a Hebrew system locale), which is exactly the bug this
+    // fixes — see android/TODO.md item 3 and android/CLAUDE.md "Layout Direction".
     val alignment = when (direction) {
-        SwipeAction.Delete -> Alignment.CenterStart
-        SwipeAction.Keep -> Alignment.CenterEnd
+        SwipeAction.Delete -> AbsoluteAlignment.CenterLeft
+        SwipeAction.Keep -> AbsoluteAlignment.CenterRight
         SwipeAction.Snooze -> Alignment.TopCenter
         SwipeAction.Undo -> Alignment.Center
     }

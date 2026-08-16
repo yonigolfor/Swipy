@@ -10,6 +10,7 @@ import com.swipy.domain.usecase.FilterBlurryPhotosUseCase
 import com.swipy.domain.usecase.FilterBurstPhotosUseCase
 import com.swipy.domain.usecase.GetCategoryCountUseCase
 import com.swipy.domain.usecase.GetPhotoStackPageUseCase
+import com.swipy.domain.usecase.GetTotalCategoryCountUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import javax.inject.Inject
 import kotlinx.coroutines.async
@@ -36,6 +37,7 @@ import kotlinx.coroutines.launch
 @HiltViewModel
 class FilterCategoriesViewModel @Inject constructor(
     private val getCategoryCountUseCase: GetCategoryCountUseCase,
+    private val getTotalCategoryCountUseCase: GetTotalCategoryCountUseCase,
     private val getPhotoStackPageUseCase: GetPhotoStackPageUseCase,
     private val filterBlurryPhotosUseCase: FilterBlurryPhotosUseCase,
     private val filterBurstPhotosUseCase: FilterBurstPhotosUseCase,
@@ -72,10 +74,21 @@ class FilterCategoriesViewModel @Inject constructor(
                 addAll(photoStateRepository.snoozedPhotos.first().keys)
             }
             val counts = coroutineScope {
-                FilterCategory.entries
+                val capped = FilterCategory.entries
                     .map { category -> async { category to getCategoryCountUseCase(category, CAP, excludedIds) } }
                     .awaitAll()
                     .toMap()
+                // FilterCategory.All gets a real, uncapped total instead of the shared Phase-1
+                // "99+" ceiling every other category uses — a bare capped number like "100" for
+                // the whole-library category reads as a small, precise count rather than an
+                // estimate, which is exactly what made the pre-fix numbers look nonsensical next
+                // to larger per-category counts (see android/TODO.md item 5). totalCount() has
+                // no excludedIds param (its only other caller, Shuffle, doesn't need one), but
+                // FilterCategory.All's selection matches every image/video row with no further
+                // predicate, so every excluded id is guaranteed a member of that raw total —
+                // subtracting excludedIds.size here is exact, not an approximation.
+                val totalAll = (getTotalCategoryCountUseCase(FilterCategory.All) - excludedIds.size).coerceAtLeast(0)
+                capped + (FilterCategory.All to totalAll)
             }
             _uiState.update { it.copy(counts = counts) }
             categoryCountCacheRepository.saveCounts(counts)
