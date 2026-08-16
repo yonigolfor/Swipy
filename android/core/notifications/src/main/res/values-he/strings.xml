@@ -1,0 +1,28 @@
+<resources>
+    <string name="notif_channel_reminders_name">תזכורות</string>
+    <string name="notif_channel_reminders_description">תזכורות לסל מחזור, ניקוי, וחיסכון באחסון</string>
+
+    <string name="notif_reviewbin_title">מוכנים לנקות?</string>
+    <plurals name="notif_reviewbin_body">
+        <item quantity="one">פריט אחד מחכה בסל המחזור שלך.</item>
+        <item quantity="two">שני פריטים מחכים בסל המחזור שלך.</item>
+        <item quantity="other">%d פריטים מחכים בסל המחזור שלך.</item>
+    </plurals>
+
+    <string name="notif_burst_title">תמונות חדשות למיון</string>
+    <string name="notif_burst_body">%d תמונות חדשות מוכנות להחלקה.</string>
+
+    <string name="notif_milestone_title">אבן דרך הושגה! 🎉</string>
+    <string name="notif_milestone_body">פינית %d ג\'יגה-בייט של אחסון עם Swipy.</string>
+
+    <string name="notif_swipe_limit_title">מכסת ההחלקות שלך התאפסה</string>
+    <string name="notif_swipe_limit_body">מוכנים להמשיך? בואו נמיין עוד.</string>
+
+    <string name="notif_weekly_title_a">🧹🧹🧹🧹🧹🧹🧹🧹</string>
+    <string name="notif_weekly_body_a">זה זמן מושלם לנקות את הגלריה ושהמכשיר ינשום לרווחה! 🌿</string>
+    <string name="notif_weekly_title_b">הטלפון שלך יודה לך 📲</string>
+    <string name="notif_weekly_body_b">כמה ג\'יגה-בייט נשחרר השבוע? כנס לעשות קצת סדר.</string>
+
+    <string name="notif_inactivity_title">60 שניות זה המון זמן! ⏱️</string>
+    <string name="notif_inactivity_body">כנס ותגלה כמה GB של זבל אתה יכול לפנות מהמכשיר שלך ברגע.</string>
+</resources>

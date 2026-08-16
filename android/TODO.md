@@ -172,12 +172,9 @@ asset as source of truth per the explicit instruction to pull it from the iOS ap
 
 ---
 
-## 7. Local Notifications Engine & Scheduling
+## 7. Local Notifications Engine & Scheduling — 🟡 INFRASTRUCTURE BUILT, TRIGGERS PARTIALLY WIRED
 
-No notification system exists on Android at all — confirmed via search, no `WorkManager`
-dependency in `gradle/libs.versions.toml`, no `:core:notifications`/`:data:notifications`
-module (`settings.gradle.kts` has no such entry), no `POST_NOTIFICATIONS` permission in
-`AndroidManifest.xml`. iOS has a fully built-out system (`NOTIFICATIONS.md`,
+iOS has a fully built-out system (`NOTIFICATIONS.md`,
 `Services/NotificationManager.swift`/`NotificationScheduler.swift`/`NotificationDelegate.swift`)
 with **6 trigger types** and a **2-notification/day quota**:
 
@@ -209,52 +206,76 @@ with **6 trigger types** and a **2-notification/day quota**:
 Deep linking: tapping any notification opens the app to a specific tab (`filters`/`swipe`/
 `reviewBin`), delivered via a notification-center post the root view listens for.
 
-**Recommended Android implementation plan:**
+**Infrastructure built** — new `:core:notifications` module (Hilt-enabled Android library),
+wired into `:app`:
+- `NotificationTrigger` — the 6 triggers as an enum, each with a stable notification id (doubles
+  as `PendingIntent` request code, so re-posting the same trigger replaces rather than stacks)
+  and a `deepLinkRoute` matching `MainActivity`'s route constants.
+- `SwipyNotificationManager` — creates the `swipy_reminders` channel and posts/cancels
+  notifications, with a deep-link `PendingIntent` built via `packageManager.getLaunchIntentForPackage`
+  (this module can't reference `:app`'s `MainActivity` class directly — wrong dependency
+  direction — so the launcher Activity is targeted generically instead).
+- `NotificationScheduler` — `AlarmManager.setExactAndAllowWhileIdle` for the 3 exact triggers,
+  per the plan below.
+- `AlarmReceiver`/`BootReceiver` (`@AndroidEntryPoint` `BroadcastReceiver`s, declared in this
+  module's own merged manifest) — `AlarmReceiver` posts the notification and self-reschedules
+  the weekly trigger for next Sunday (`AlarmManager` has no `repeats: true` for exact alarms);
+  `BootReceiver` re-arms the weekly/inactivity alarms after a reboot, since exact alarms don't
+  survive one.
+- `SwipyNotificationWorker` (`@HiltWorker`, registered via `SwipyApplication`'s
+  `Configuration.Provider` + `HiltWorkerFactory` — required the default WorkManager
+  `androidx.startup` initializer to be explicitly removed in `:app`'s manifest, or app startup
+  crashes with "WorkManager is already initialized") — a `PeriodicWorkRequest` (6h, matching
+  iOS's own requested cadence) checking Review Bin reminder + Milestone. **Both checks are real,
+  not stubs** — they read `PhotoStateRepository.reviewBinIds`/`totalSpaceSavedLifetime`
+  (already existed) directly.
+- `NotificationStateStore` — reuses the app's single shared `DataStore<Preferences>` instance
+  (injected by type only, no `project(":data:datastore")` dependency needed — Hilt resolves it
+  via the app-level aggregated graph) rather than opening a second competing DataStore file.
+  Tracks `lastMilestoneNotifiedGb` and implements the real 2/day quota
+  (`tryConsumeDailyQuota()`, gates Review Bin/Milestone/Burst only, matching `NOTIFICATIONS.md`
+  exactly — the 3 exact-alarm triggers are correctly never gated by it).
+- `MainActivity` reads the deep-link route extra in both `onCreate` and `onNewIntent` (tapping a
+  notification while the app is already running redelivers via `onNewIntent`, since this is a
+  single-Activity app) and threads it down to `SwipyNavHost`. **Real bug caught while wiring
+  this**: `NavHost`'s `startDestination` param rebuilds (and resets) the whole nav graph if its
+  value changes across recompositions — naively passing the live deep-link parameter straight
+  through would have wiped the back stack the instant the deep link was marked consumed
+  (flipping back to null). Fixed by capturing the initial route once via a keyless `remember`,
+  decoupled from the live parameter that only drives an explicit `navigateToTab()` call for the
+  warm-start case.
+- Manifest: `POST_NOTIFICATIONS`, `SCHEDULE_EXACT_ALARM` (not `USE_EXACT_ALARM` — that's a
+  Play-Store-restricted permission reserved for alarm-clock/calendar-class apps), and
+  `RECEIVE_BOOT_COMPLETED` all added to `:app`'s `AndroidManifest.xml`.
+- Localization: `:core:notifications` has its own `res/values/strings.xml` +
+  `res/values-he/strings.xml` for all 6 triggers' title/body (the weekly-cleanup 2-variant pool
+  reuses real, already-shipped iOS Hebrew copy from `NOTIFICATIONS.md` where available, adapted
+  from "your iPhone" to "your phone" for the Android context) plus a `<plurals>` for the Review
+  Bin item count.
 
-1. **Permission (`POST_NOTIFICATIONS`, API 33+)** — request via
-   `rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission())`, same
-   pattern already used for media permissions (`OnboardingScreen.kt`). Timing should match
-   iOS's own HIG-driven choice to prompt **after** onboarding, not during — iOS's own doc
-   explains this explicitly ("asking for permission before the user has even seen the app's
-   value contradicts the HIG"); the equivalent Android moment is the first time
-   `SwipyNavHost`/`FilterCategoriesScreen` is reached, not inside `OnboardingScreen` itself. No
-   manifest declaration needed below API 33 (notifications don't require runtime permission
-   there).
-2. **Notification channel** — one `NotificationChannel("swipy_reminders", IMPORTANCE_DEFAULT)`
-   created once via `NotificationManagerCompat` at `SwipyApplication.onCreate()` (channel
-   creation is idempotent and must happen before the first notification post, same constraint
-   as iOS's synchronous background-task registration). Consider **splitting into channels per
-   trigger type** instead of one shared channel — a genuine Android capability with no iOS
-   analogue (iOS has no per-category user-facing mute toggle the way Android's per-channel
-   settings do) worth deciding deliberately rather than defaulting to iOS's single-category
-   shape.
-3. **Scheduler engine** — `WorkManager`, not `AlarmManager`, for the two truly periodic/
-   best-effort checks (burst + milestone + review-bin background re-evaluation): a
-   `PeriodicWorkRequest` at WorkManager's practical minimum useful interval for this use case
-   (iOS requests ~6h, matching that here is reasonable — well above WorkManager's 15-minute
-   floor). The **exact-time** deliveries (swipe-limit-reset at 00:01, weekly cleanup at Sunday
-   21:30, inactivity at a rolling +72h) are a worse fit for `WorkManager`'s inexact, batched
-   scheduling — `AlarmManager.setExactAndAllowWhileIdle` (API 23+, already covers `minSdk = 29`)
-   is the correct primitive for these three, mirroring `UNCalendarNotificationTrigger`/
-   `UNTimeIntervalNotificationTrigger`'s exact-delivery guarantee more faithfully than
-   WorkManager can. A new `:data:notifications` module (parallel to `:data:mediastore`/
-   `:data:datastore`) is the natural home — needs its own small DataStore-backed state (the
-   Android analogue of iOS's `notifCapCount`/`notifCapDate`/`lastMilestoneNotifiedGB`/
-   `burstSessionBaseCount`/`lastKnownPhotoCount`), following the same Preferences DataStore
-   pattern as `PhotoStateRepository`.
-4. **Deep linking** — `PendingIntent` into `MainActivity` carrying a nav-target extra (mirrors
-   the existing `ROUTE_FILTERS`/`ROUTE_SWIPE`/`ROUTE_REVIEW_BIN` constants in `MainActivity.kt`)
-   read in `onCreate()`/`onNewIntent()` and applied as the `SwipyNavHost` start destination for
-   that launch — no `NavController.navDeepLink()` registration needed given the app's flat
-   3-destination graph, a plain intent-extra read is simpler and sufficient here.
-5. **Localization** — title/body strings (plus the weekly-cleanup 2-variant pool) belong in the
-   new `:data:notifications` module's own `res/values/strings.xml` +
-   `res/values-he/strings.xml`, following the exact per-module pattern every other module in
-   this repo now uses (see item 2 above) — never centralize these into `:app`'s strings.xml.
-
-**Explicitly not in scope for a first pass:** iOS's photo-burst foreground path depends on a
-live `PHPhotoLibraryChangeObserver`; Android's equivalent (`ContentObserver` on
-`MediaStore.Images/Video.Media.EXTERNAL_CONTENT_URI`, already noted as a documented gap in
-`android/CLAUDE.md`'s "MediaStore Querying" section) doesn't exist yet either — trigger 2's
-foreground path is blocked on that being built first, so it may need to ship background-only
-initially, with the foreground real-time path following once the `ContentObserver` lands.
+**Still open / explicitly not wired this pass:**
+1. **Runtime permission request UI** — the manifest declares `POST_NOTIFICATIONS`, but nothing
+   yet calls `rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission())` to
+   actually prompt for it. Recommended timing, matching iOS's own HIG-driven choice to prompt
+   **after** onboarding, not during (iOS's doc: "asking for permission before the user has even
+   seen the app's value contradicts the HIG") — the first time `SwipyNavHost`/
+   `FilterCategoriesScreen` is reached, not inside `OnboardingScreen` itself.
+2. **Photo burst trigger** — not checked by the Worker at all yet. Blocked on the same missing
+   `MediaStore` `ContentObserver` noted in `android/CLAUDE.md`'s "MediaStore Querying" section —
+   do not add a naive "count photos every worker run" check in the meantime; that reintroduces
+   the exact baseline-drift bug class `NOTIFICATIONS.md` documents iOS having already fixed once
+   (the baseline must only advance when a notification actually fires).
+3. **Swipe-limit-reset trigger** — `NotificationScheduler.scheduleExact(SwipeLimitReset, ...)`
+   is a complete, callable API, but nothing calls it yet — there's no Android port of iOS's
+   `DailyLimitService`/swipe-cap state in `PhotoStackViewModel` for it to hook into. Wire it in
+   once that daily-limit feature exists on Android.
+4. **Review Bin reminder's 24h condition is a coarser proxy than iOS's real one** —
+   `PhotoStateRepository.reviewBinIds` is a bare id list with no per-item "added at" timestamp,
+   so the Worker currently fires whenever the bin is simply non-empty (debounced only by the
+   notification id's replace-not-stack behavior and the daily quota), not "24h since first
+   unresolved item" like iOS. Would need a new persisted timestamp field to close this gap
+   properly.
+5. **Per-trigger-type notification channels** — currently one shared `swipy_reminders` channel.
+   Splitting by trigger type is a genuine Android capability with no iOS analogue (iOS has no
+   per-category user-facing mute toggle the way Android's per-channel settings do) worth a
+   deliberate decision rather than defaulting to iOS's single-category shape.

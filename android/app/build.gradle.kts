@@ -50,6 +50,7 @@ dependencies {
     implementation(project(":feature:reviewbin"))
     implementation(project(":feature:filters"))
     implementation(project(":feature:onboarding"))
+    implementation(project(":core:notifications"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
@@ -65,6 +66,8 @@ dependencies {
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.android.compiler)
+    implementation(libs.androidx.hilt.work)
+    implementation(libs.androidx.work.runtime.ktx)
 
     implementation(libs.kotlinx.coroutines.android)
     // PhotoStackUiState.stack is a PersistentList (see feature:swipe's own doc comment) — needed

@@ -1,0 +1,27 @@
+<resources>
+    <string name="notif_channel_reminders_name">Reminders</string>
+    <string name="notif_channel_reminders_description">Review Bin, cleanup, and storage-savings reminders</string>
+
+    <string name="notif_reviewbin_title">Ready to clean up?</string>
+    <plurals name="notif_reviewbin_body">
+        <item quantity="one">You have %d item waiting in your Review Bin.</item>
+        <item quantity="other">You have %d items waiting in your Review Bin.</item>
+    </plurals>
+
+    <string name="notif_burst_title">New photos to sort</string>
+    <string name="notif_burst_body">%d new photos are ready to swipe through.</string>
+
+    <string name="notif_milestone_title">Milestone reached! 🎉</string>
+    <string name="notif_milestone_body">You\'ve freed up %d GB of storage with Swipy.</string>
+
+    <string name="notif_swipe_limit_title">Your swipe limit reset</string>
+    <string name="notif_swipe_limit_body">Ready for more? Let\'s keep sorting.</string>
+
+    <string name="notif_weekly_title_a">🧹🧹🧹🧹🧹🧹🧹🧹</string>
+    <string name="notif_weekly_body_a">Perfect time to clean up your gallery and let your device breathe! 🌿</string>
+    <string name="notif_weekly_title_b">Your phone will thank you 📲</string>
+    <string name="notif_weekly_body_b">How many gigabytes can you free up this week? Come tidy up.</string>
+
+    <string name="notif_inactivity_title">60 seconds is all it takes! ⏱️</string>
+    <string name="notif_inactivity_body">Come see how many GB of clutter you can free up from your device right now.</string>
+</resources>

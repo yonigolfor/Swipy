@@ -1,5 +1,6 @@
 package com.swipy.app
 
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -31,6 +32,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.swipy.core.designsystem.theme.OnboardingBackground
+import com.swipy.core.notifications.SwipyNotificationManager
 import com.swipy.domain.model.FilterCategory
 import com.swipy.feature.filters.FilterCategoriesScreen
 import com.swipy.feature.onboarding.OnboardingScreen
@@ -42,21 +44,44 @@ import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    /** Activity-level so both `onCreate` (cold start) and `onNewIntent` (tapped a notification
+     * while already running — MainActivity is the app's only Activity, so `FLAG_ACTIVITY_
+     * CLEAR_TOP` redelivers here via `onNewIntent` rather than spawning a second instance) can
+     * push into the same composition. */
+    private val pendingDeepLinkRoute = mutableStateOf<String?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        pendingDeepLinkRoute.value = intent?.getStringExtra(SwipyNotificationManager.EXTRA_DEEP_LINK_ROUTE)
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    AppRoot()
+                    AppRoot(
+                        pendingDeepLinkRoute = pendingDeepLinkRoute.value,
+                        onDeepLinkConsumed = { pendingDeepLinkRoute.value = null },
+                    )
                 }
             }
         }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        pendingDeepLinkRoute.value = intent.getStringExtra(SwipyNotificationManager.EXTRA_DEEP_LINK_ROUTE)
     }
 }
 
 private const val ROUTE_FILTERS = "filters"
 private const val ROUTE_SWIPE = "swipe"
 private const val ROUTE_REVIEW_BIN = "reviewbin"
+
+/** Guards against a malformed/unexpected `SwipyNotificationManager.EXTRA_DEEP_LINK_ROUTE` value
+ * crashing `NavHost` with "no destination found" — must be kept in sync with the 3
+ * `composable(...)` registrations below and with `NotificationTrigger.deepLinkRoute`'s values
+ * in `:core:notifications` (duplicated by necessity, see that enum's own doc comment). */
+private val KNOWN_ROUTES = setOf(ROUTE_FILTERS, ROUTE_SWIPE, ROUTE_REVIEW_BIN)
 
 /**
  * Splash -> Onboarding OR SwipyNavHost, gated purely on `hasCompletedOnboarding` — the direct
@@ -75,7 +100,7 @@ private const val ROUTE_REVIEW_BIN = "reviewbin"
  * itself, out of scope for this pass.
  */
 @Composable
-private fun AppRoot() {
+private fun AppRoot(pendingDeepLinkRoute: String?, onDeepLinkConsumed: () -> Unit) {
     var showSplash by remember { mutableStateOf(true) }
     val splashViewModel: SplashViewModel = hiltViewModel()
     val hasCompletedOnboarding by splashViewModel.hasCompletedOnboarding.collectAsStateWithLifecycle()
@@ -83,7 +108,10 @@ private fun AppRoot() {
     when {
         showSplash -> SplashScreen(onFinished = { showSplash = false })
         hasCompletedOnboarding == false -> OnboardingScreen(onComplete = {})
-        hasCompletedOnboarding == true -> SwipyNavHost()
+        hasCompletedOnboarding == true -> SwipyNavHost(
+            pendingDeepLinkRoute = pendingDeepLinkRoute,
+            onDeepLinkConsumed = onDeepLinkConsumed,
+        )
         else -> {
             // null: DataStore hasn't delivered its first value yet (in practice this window
             // closes well before the splash's own 1.3s timer elapses) — keep the splash's own
@@ -107,12 +135,22 @@ private fun AppRoot() {
  * nothing, since LoadPhotos would land on a PhotoStackViewModel nobody is observing. This is
  * the direct Android analogue of iOS's single @EnvironmentObject VM shared by SmartFiltersView
  * and SwipeStackView.
+ *
+ * [pendingDeepLinkRoute] is the tab a notification tap wants to open (see
+ * `SwipyNotificationManager.EXTRA_DEEP_LINK_ROUTE`/`NotificationTrigger.deepLinkRoute`) — used
+ * as the initial `startDestination` on a cold start, and as an explicit `navigateToTab` call
+ * for a warm start (tapping a notification while the app is already running doesn't recompose
+ * `NavHost` with a new `startDestination`; that param is only read at first composition —
+ * changing it afterward makes Navigation Compose rebuild the whole graph, wiping the back
+ * stack, so [initialRoute] below deliberately captures it once via a keyless `remember` and
+ * never lets the live parameter feed back into `startDestination`).
  */
 @Composable
-private fun SwipyNavHost() {
+private fun SwipyNavHost(pendingDeepLinkRoute: String?, onDeepLinkConsumed: () -> Unit) {
     val navController = rememberNavController()
     val photoStackViewModel: PhotoStackViewModel = hiltViewModel()
     val stackUiState by photoStackViewModel.uiState.collectAsStateWithLifecycle()
+    val initialRoute = remember { pendingDeepLinkRoute.takeIf { it in KNOWN_ROUTES } ?: ROUTE_SWIPE }
 
     // PhotoStackViewModel never auto-loads on init (it stays empty until LoadPhotos is sent,
     // normally triggered by tapping a Filters category) — now that Swipe is the start
@@ -124,6 +162,15 @@ private fun SwipyNavHost() {
         if (stackUiState.stack.isEmpty()) {
             photoStackViewModel.onIntent(PhotoStackIntent.LoadPhotos(FilterCategory.All))
         }
+    }
+
+    // Warm-start re-navigation only — the cold-start case is already covered by [initialRoute]
+    // above, so this redundantly (harmlessly) re-navigates to the same tab on first composition.
+    LaunchedEffect(pendingDeepLinkRoute) {
+        if (pendingDeepLinkRoute != null && pendingDeepLinkRoute in KNOWN_ROUTES) {
+            navController.navigateToTab(pendingDeepLinkRoute)
+        }
+        if (pendingDeepLinkRoute != null) onDeepLinkConsumed()
     }
 
     val backStackEntry by navController.currentBackStackEntryAsState()
@@ -167,7 +214,7 @@ private fun SwipyNavHost() {
     ) { padding ->
         NavHost(
             navController = navController,
-            startDestination = ROUTE_SWIPE,
+            startDestination = initialRoute,
             modifier = Modifier.padding(padding),
         ) {
             composable(ROUTE_FILTERS) {

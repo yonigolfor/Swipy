@@ -22,6 +22,7 @@ include(":app")
 include(":core:designsystem")
 include(":core:common")
 include(":core:testing")
+include(":core:notifications")
 
 include(":domain")
 
