@@ -1,9 +1,14 @@
 package com.swipy.app
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
@@ -23,7 +28,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
@@ -151,6 +158,34 @@ private fun SwipyNavHost(pendingDeepLinkRoute: String?, onDeepLinkConsumed: () -
     val photoStackViewModel: PhotoStackViewModel = hiltViewModel()
     val stackUiState by photoStackViewModel.uiState.collectAsStateWithLifecycle()
     val initialRoute = remember { pendingDeepLinkRoute.takeIf { it in KNOWN_ROUTES } ?: ROUTE_SWIPE }
+
+    // POST_NOTIFICATIONS (API 33+) — requested here, not inside OnboardingScreen, matching
+    // iOS's own HIG-driven choice to ask from ContentView.onAppear (i.e. the first time the
+    // *main* app screen is reached, after onboarding, not during it — see NOTIFICATIONS.md's
+    // "why not in didFinishLaunching" note). `SwipyNavHost` is entered once per app process
+    // lifetime in practice (its parent `when` branch in AppRoot only re-enters this composable
+    // if `hasCompletedOnboarding` itself changes, which doesn't happen mid-session), so this
+    // LaunchedEffect(Unit) fires once per cold start — the same granularity as iOS's onAppear.
+    // No manual "already asked" tracking needed: below API 33 this permission doesn't exist,
+    // and on 33+ the OS itself silently stops showing the dialog after the user denies twice
+    // (or checks "Don't ask again" on the first denial) — calling `launch()` unconditionally on
+    // a permission that's already granted or permanently denied is a documented no-op, so this
+    // can't turn into the "re-prompt in a loop" anti-pattern the media-permission flow
+    // explicitly avoids via its Settings-deep-link fallback.
+    val context = LocalContext.current
+    val notificationPermissionLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) { /* No in-app UI reacts to the result — notifications are a background enhancement, not
+          a blocking gate like gallery access, so there's no dedicated recovery screen here,
+          matching iOS's own fire-and-forget requestAuthorization call. */ }
+    LaunchedEffect(Unit) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
     // PhotoStackViewModel never auto-loads on init (it stays empty until LoadPhotos is sent,
     // normally triggered by tapping a Filters category) — now that Swipe is the start

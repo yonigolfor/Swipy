@@ -254,12 +254,17 @@ wired into `:app`:
   Bin item count.
 
 **Still open / explicitly not wired this pass:**
-1. **Runtime permission request UI** — the manifest declares `POST_NOTIFICATIONS`, but nothing
-   yet calls `rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission())` to
-   actually prompt for it. Recommended timing, matching iOS's own HIG-driven choice to prompt
-   **after** onboarding, not during (iOS's doc: "asking for permission before the user has even
-   seen the app's value contradicts the HIG") — the first time `SwipyNavHost`/
-   `FilterCategoriesScreen` is reached, not inside `OnboardingScreen` itself.
+1. ~~Runtime permission request UI~~ — ✅ RESOLVED. `SwipyNavHost`'s first composition now
+   calls `rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission())` for
+   `POST_NOTIFICATIONS` on API 33+, gated on `ContextCompat.checkSelfPermission` so it never
+   fires if already granted. Fires once per cold start (the same granularity as iOS's
+   `ContentView.onAppear`, since `SwipyNavHost` is entered once per app process lifetime in
+   practice) — timed to match iOS's own HIG-driven choice to prompt **after** onboarding, not
+   during. No manual "already asked" tracking needed: the OS itself silently stops showing the
+   dialog after two denials (or "Don't ask again"), so this can't become a re-prompt loop. No
+   dedicated in-app recovery/Settings-redirect UI on denial — notifications are a background
+   enhancement here, not a blocking gate like gallery access, matching iOS's own fire-and-forget
+   `requestAuthorization` call (no visible in-app fallback documented for it either).
 2. **Photo burst trigger** — not checked by the Worker at all yet. Blocked on the same missing
    `MediaStore` `ContentObserver` noted in `android/CLAUDE.md`'s "MediaStore Querying" section —
    do not add a naive "count photos every worker run" check in the meantime; that reintroduces
