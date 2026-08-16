@@ -1,22 +1,14 @@
 package com.swipy.app
 
-import android.Manifest
-import android.content.Context
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
-import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
@@ -28,11 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavHostController
@@ -40,7 +28,9 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.swipy.core.designsystem.theme.OnboardingBackground
 import com.swipy.feature.filters.FilterCategoriesScreen
+import com.swipy.feature.onboarding.OnboardingScreen
 import com.swipy.feature.reviewbin.ReviewBinScreen
 import com.swipy.feature.swipe.PhotoStackIntent
 import com.swipy.feature.swipe.PhotoStackViewModel
@@ -54,55 +44,48 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme {
                 Surface(modifier = Modifier.fillMaxSize()) {
-                    PermissionGate()
+                    AppRoot()
                 }
             }
         }
     }
 }
 
-private fun mediaPermissions(): Array<String> =
-    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-        arrayOf(Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VIDEO)
-    } else {
-        arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-    }
-
-private fun hasMediaPermission(context: Context): Boolean =
-    mediaPermissions().any {
-        ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
-    }
-
 private const val ROUTE_FILTERS = "filters"
 private const val ROUTE_SWIPE = "swipe"
 private const val ROUTE_REVIEW_BIN = "reviewbin"
 
-/** Gates SwipyNavHost behind the media permission prompt. */
+/**
+ * Splash -> Onboarding OR SwipyNavHost, gated purely on `hasCompletedOnboarding` — the direct
+ * port of iOS SplashScreenView's own routing (SplashScreenView.swift:38-53). Unlike iOS, which
+ * needs a manual `showMainApp` @State mirror of the @AppStorage flag (a documented SwiftUI
+ * gotcha: @AppStorage mutations don't reliably participate in a withAnimation transaction),
+ * Compose's plain reactive recomposition needs no such mirror — SplashViewModel's StateFlow
+ * naturally recomposes AppRoot into SwipyNavHost the instant OnboardingScreen persists the flag,
+ * so `onComplete` below is a no-op; the real signal is DataStore's own emission.
+ *
+ * No standalone media-permission gate here (the old PermissionGate) — permission is requested
+ * inside OnboardingScreen's own Permission step before a first-time user ever reaches
+ * SwipyNavHost. A returning user whose permission was later revoked isn't re-gated at this
+ * level, matching iOS's own top-level routing exactly; that recovery path (per root CLAUDE.md's
+ * "Photos permission denied/restricted: Never a dead end") belongs inside the Swipe screen
+ * itself, out of scope for this pass.
+ */
 @Composable
-private fun PermissionGate() {
-    val context = LocalContext.current
-    var hasPermission by remember { mutableStateOf(hasMediaPermission(context)) }
+private fun AppRoot() {
+    var showSplash by remember { mutableStateOf(true) }
+    val splashViewModel: SplashViewModel = hiltViewModel()
+    val hasCompletedOnboarding by splashViewModel.hasCompletedOnboarding.collectAsStateWithLifecycle()
 
-    val permissionLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions(),
-    ) { results ->
-        hasPermission = results.values.any { it }
-    }
-
-    if (hasPermission) {
-        SwipyNavHost()
-    } else {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text("Swipy needs access to your photos and videos", style = MaterialTheme.typography.headlineSmall)
-            Spacer(Modifier.height(16.dp))
-            Button(onClick = { permissionLauncher.launch(mediaPermissions()) }) {
-                Text("Grant photo access")
-            }
+    when {
+        showSplash -> SplashScreen(onFinished = { showSplash = false })
+        hasCompletedOnboarding == false -> OnboardingScreen(onComplete = {})
+        hasCompletedOnboarding == true -> SwipyNavHost()
+        else -> {
+            // null: DataStore hasn't delivered its first value yet (in practice this window
+            // closes well before the splash's own 1.3s timer elapses) — keep the splash's own
+            // background up rather than flash onboarding for what's likely a returning user.
+            Box(modifier = Modifier.fillMaxSize().background(OnboardingBackground))
         }
     }
 }

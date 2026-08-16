@@ -31,3 +31,14 @@ val SavingsBarGradientEnd = Color(0xFF8C4DF2)
 // Savings Bar — lava-star fill gradient (SessionSavingsBarView.swift starSection)
 val LavaGradientBottom = Color(0xFFFFB700)
 val LavaGradientTop = Color(0xFFFFE026)
+
+// Onboarding — dark premium background + gold CTA gradient (OnboardingView.swift, matches
+// SplashScreenView's own background exactly). Other onboarding accent colors (lock icon blue,
+// checkmark green, scan-row blue/purple/orange) deliberately reuse the tokens above
+// (FilterScreenshots, FilterScreenRecordings, FilterLargeVideos, SwipeGreen) rather than adding
+// near-duplicate near-identical hex values — only the two colors with no existing analogue
+// (background, gold) are new.
+val OnboardingBackground = Color(0xFF14141A) // rgb(0.08, 0.08, 0.10)
+val OnboardingGoldStart = Color(0xFFFFD94D) // rgb(1, 0.85, 0.3)
+val OnboardingGoldEnd = Color(0xFFFFA61A) // rgb(1, 0.65, 0.1)
+val OnboardingGoldShadow = Color(0xFFFFB333) // rgb(1, 0.7, 0.2)

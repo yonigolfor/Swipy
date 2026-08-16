@@ -188,4 +188,16 @@ class MediaStorePhotoRepository @Inject constructor(
             .query(collectionUri, idOnlyProjection, spec.selection, spec.selectionArgs, null)
             ?.use { it.count } ?: 0
     }
+
+    override suspend fun totalImageCount(): Int = countByMediaType(MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE)
+
+    override suspend fun totalVideoCount(): Int = countByMediaType(MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO)
+
+    private suspend fun countByMediaType(mediaType: Int): Int = withContext(Dispatchers.IO) {
+        val idOnlyProjection = arrayOf(MediaStore.Files.FileColumns._ID)
+        val selection = "${MediaStore.Files.FileColumns.MEDIA_TYPE} = ?"
+        context.contentResolver
+            .query(collectionUri, idOnlyProjection, selection, arrayOf(mediaType.toString()), null)
+            ?.use { it.count } ?: 0
+    }
 }

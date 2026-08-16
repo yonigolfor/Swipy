@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
 import com.swipy.domain.repository.CategoryCountCacheRepository
+import com.swipy.domain.repository.OnboardingStateRepository
 import com.swipy.domain.repository.PhotoStateRepository
 import dagger.Binds
 import dagger.Module
@@ -37,4 +38,7 @@ internal abstract class DataStoreBindsModule {
     abstract fun bindCategoryCountCacheRepository(
         impl: DataStoreCategoryCountCacheRepository,
     ): CategoryCountCacheRepository
+
+    @Binds
+    abstract fun bindOnboardingStateRepository(impl: DataStoreOnboardingStateRepository): OnboardingStateRepository
 }

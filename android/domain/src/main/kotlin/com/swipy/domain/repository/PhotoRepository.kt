@@ -39,4 +39,13 @@ interface PhotoRepository {
      * even though the underlying query does walk the full result set to produce a real count.
      */
     suspend fun totalCount(filter: FilterCategory): Int
+
+    /**
+     * Plain per-media-type totals — used only by the onboarding Scan step's counters.
+     * Unlike [totalCount], neither has a [FilterCategory] equivalent ([FilterCategory.All]
+     * combines both media types into one number) so these are their own repository methods
+     * rather than a new enum case that nothing else would use.
+     */
+    suspend fun totalImageCount(): Int
+    suspend fun totalVideoCount(): Int
 }

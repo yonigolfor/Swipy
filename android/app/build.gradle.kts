@@ -42,12 +42,14 @@ android {
 
 dependencies {
     implementation(project(":domain"))
+    implementation(project(":core:designsystem"))
     implementation(project(":data:mediastore"))
     implementation(project(":data:datastore"))
     implementation(project(":data:vision"))
     implementation(project(":feature:swipe"))
     implementation(project(":feature:reviewbin"))
     implementation(project(":feature:filters"))
+    implementation(project(":feature:onboarding"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
