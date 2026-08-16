@@ -7,21 +7,31 @@ commit as the fix.
 
 ---
 
-## 1. Haptic feedback audit
+## 1. Haptic feedback audit — 🟡 PARTIALLY RESOLVED (swipe commits only)
 
-No haptic feedback exists anywhere in the Android app today — confirmed via a full-repo grep,
-zero hits for any vibration/haptic API usage outside of doc comments. iOS has a dedicated
+No haptic feedback existed anywhere in the Android app — confirmed via a full-repo grep, zero
+hits for any vibration/haptic API usage outside of doc comments. iOS has a dedicated
 `HapticService` with a distinct pattern per swipe direction (see root `CLAUDE.md` → "Haptics"
-and `HAPTICS.md` for the full event map: Keep/Delete/Snooze each get their own
-`UIImpactFeedbackGenerator` style, plus the Session Savings Bar's multi-beat celebration burst,
-undo, shuffle land, etc.).
+and `HAPTICS.md` for the full event map).
 
-**To do:**
-- Port `HapticService` as an Android equivalent — `android.os.VibrationEffect` /
-  `HapticFeedbackConstants` (or `androidx.compose.ui.hapticfeedback.HapticFeedback` for
-  Compose-native call sites) mapped to the same event set iOS uses.
-- Wire it into every swipe commit (Keep/Delete/Snooze), Undo, Shuffle activate/land, and the
-  Session Savings Bar milestone celebration — mirroring `HAPTICS.md`'s event map.
+**Fix applied**: new `HapticManager` (`:core:designsystem/haptics/`, `@Singleton`, reached from
+Compose via `rememberHapticManager()` — the same `EntryPointAccessors` bridge pattern as
+`VideoPlayerPoolEntryPoint`/`rememberVideoPlayerPool()`). Uses `VibrationEffect.createOneShot`/
+`createWaveform` (API 26+, safe at `minSdk = 29`) via `VibratorManager` on API 31+ / legacy
+`Vibrator` below. Ported `HAPTICS.md`'s exact Swipe Actions intensities — `keep()` (light,
+amplitude 255) and `snooze()` (light, amplitude 153) share the same short one-shot shape,
+differing only by amplitude exactly like iOS's two `.light`-style generators differing only by
+intensity scalar; `delete()` is a double-pulse waveform (heavier feel, plus the requested
+double-pulse — iOS itself uses a single heavy tap, so the double-pulse is a deliberate Android
+enhancement, not a literal port). Wired directly into `CardStackLayer.kt`: `thresholdCrossed()`
+(amplitude 76) fires on every drag direction-lock transition, `keep()`/`delete()`/`snooze()`
+fire at the exact swipe-commit moment in `onDragEnd`. `thresholdCrossed()` itself has no iOS
+equivalent on the real card stack (confirmed against `HAPTICS.md` — iOS's only drag-time haptic,
+`.soft`, is exclusive to the onboarding demo card) — an intentional Android-only addition.
+
+**Still open**: Undo, Shuffle activate/land, and the Session Savings Bar milestone
+celebration burst have no haptic wiring yet — out of scope for this pass, which focused on the
+swipe-commit path `CardStackLayer.kt` owns directly.
 
 ---
 
@@ -111,19 +121,34 @@ snoozed) is guaranteed a member of that raw total.
 
 ---
 
-## 6. App icon is missing (using the default Android placeholder)
+## 6. App icon is missing — ✅ RESOLVED
 
-No launcher icon resources exist in `app/src/main/res` at all — confirmed via search, no
-`mipmap-*/ic_launcher*` files present anywhere in the Android project. The app currently installs
-with a generic/default icon.
+No launcher icon resources existed in `app/src/main/res` at all — no `mipmap-*/ic_launcher*`
+files anywhere in the Android project, no `android:icon`/`android:roundIcon` in the manifest.
+The actual iOS icon (`Swipy/Assets.xcassets/AppIcon.appiconset/AppIcon.png`, 1024×1024) turned
+out to be a stylized cyan "S"-shaped double-arrow glyph on a navy gradient — not literally
+"blue background, white S letter" as this doc's own earlier description assumed; used the real
+asset as source of truth per the explicit instruction to pull it from the iOS app.
 
-**To do:**
-- Source the icon from the iOS project (`Swipy/Assets.xcassets/AppIcon.appiconset` — blue
-  gradient background, white "S" letter, per root `CLAUDE.md`'s "What This App Is" → App Icon
-  line) and export/re-render it at the Android launcher icon sizes.
-- Generate a proper adaptive icon (`mipmap-anydpi-v26/ic_launcher.xml` foreground/background
-  layers) via Android Studio's Image Asset tool or `xmllint`-free manual export, not just a
-  flat single-density PNG.
-- Wire it into `AndroidManifest.xml`'s `<application>` tag — confirmed there's currently no
-  `android:icon`/`android:roundIcon` attribute at all (not even a reference to a missing
-  placeholder), and `app/src/main/res` has no `mipmap-*` directories whatsoever, only `values/`.
+**Fix applied**: an adaptive icon (`mipmap-anydpi-v26/ic_launcher.xml` +
+`ic_launcher_round.xml`), not a flat single-density PNG:
+- `drawable/ic_launcher_background.xml` — a linear gradient sampled from the source PNG's own
+  corner pixels (`#041235` bottom → `#12305F` top), so it visually continues the source art's
+  own background rather than a flat guess.
+- `drawable/ic_launcher_foreground_art.png` — the source PNG downscaled to 432×432 (Google's
+  recommended raw-asset resolution for a 108dp/4x adaptive-icon layer) via Pillow.
+- `drawable/ic_launcher_foreground.xml` — wraps the art in a 19%-inset `<inset>` drawable so it
+  sits within the adaptive icon's ~66dp safe-zone circle and is never clipped by a circular/
+  squircle launcher mask. The source PNG has no alpha channel (flat RGB, glyph+background baked
+  together as one square) — rather than attempting to isolate the glyph via pixel-thresholding
+  (fragile, real risk of a rough/amateurish edge on a "sleek" launcher icon), the *entire* flat
+  square is used as the foreground layer, insetted; since its own baked-in background closely
+  matches the separate background layer's gradient, the seam at the mask edge is effectively
+  invisible.
+- No legacy per-density raster `mipmap-*/ic_launcher.png` fallback — `minSdk = 29` guarantees
+  API 26+ on every supported device, so `mipmap-anydpi-v26`'s adaptive-icon XML is always what
+  resolves; a raster fallback would be genuinely unreachable dead weight (same "don't keep a
+  legacy path alive below minSdk" reasoning `android/CLAUDE.md`'s Code Quality Standard already
+  applies to the pre-API-30 delete-request branch).
+- `AndroidManifest.xml`'s `<application>` tag now sets `android:icon="@mipmap/ic_launcher"` and
+  `android:roundIcon="@mipmap/ic_launcher_round"`.

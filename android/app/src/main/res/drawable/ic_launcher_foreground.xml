@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- ic_launcher_foreground_art.png is the full flat iOS icon (glyph + its own baked-in navy
+     background, no alpha channel to isolate the glyph alone) — inset ~19% on every side so it
+     sits within the adaptive icon's 66dp safe-zone circle and is never clipped by a circular/
+     squircle launcher mask, with ic_launcher_background.xml's matching gradient showing through
+     the margin around it. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_launcher_foreground_art"
+    android:insetLeft="19%"
+    android:insetTop="19%"
+    android:insetRight="19%"
+    android:insetBottom="19%" />

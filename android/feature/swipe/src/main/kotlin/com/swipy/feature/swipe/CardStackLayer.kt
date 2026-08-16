@@ -24,6 +24,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
+import com.swipy.core.designsystem.haptics.rememberHapticManager
 import com.swipy.domain.model.PhotoItem
 import com.swipy.domain.model.SwipeAction
 import kotlin.math.hypot
@@ -71,6 +72,8 @@ fun CardStackLayer(
     onSwipeCommitted: (PhotoItem, SwipeAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val hapticManager = rememberHapticManager()
+
     BoxWithConstraints(
         modifier = modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
@@ -177,7 +180,10 @@ fun CardStackLayer(
                                     // — the live badge preview must never show a direction that
                                     // wouldn't actually commit if released right now.
                                     val newDirection = resolveSwipeDirection(offsetX.value, offsetY.value, thresholdPx)
-                                    if (newDirection != swipeDirection) swipeDirection = newDirection
+                                    if (newDirection != swipeDirection) {
+                                        swipeDirection = newDirection
+                                        hapticManager.thresholdCrossed()
+                                    }
                                 },
                                 onDragEnd = {
                                     isDragging = false
@@ -197,6 +203,12 @@ fun CardStackLayer(
                                             }
                                             launch { offsetX.animateTo(targetX, tween(220)) }
                                             launch { offsetY.animateTo(targetY, tween(220)) }
+                                            when (direction) {
+                                                SwipeAction.Keep -> hapticManager.keep()
+                                                SwipeAction.Delete -> hapticManager.delete()
+                                                SwipeAction.Snooze -> hapticManager.snooze()
+                                                SwipeAction.Undo -> Unit
+                                            }
                                             onSwipeCommitted(item, direction)
                                         } else {
                                             val snapBack = spring<Float>(dampingRatio = Spring.DampingRatioMediumBouncy)

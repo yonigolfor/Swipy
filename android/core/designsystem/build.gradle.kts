@@ -5,6 +5,8 @@ plugins {
     alias(libs.plugins.android.library)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
+    alias(libs.plugins.hilt.android)
+    alias(libs.plugins.ksp)
 }
 
 android {
@@ -35,4 +37,9 @@ dependencies {
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.bundles.compose)
     implementation(libs.kotlinx.coroutines.core)
+
+    // HapticManager (haptics/) needs @Singleton/@Inject/@ApplicationContext — this module had
+    // no Hilt dependency before that class existed.
+    implementation(libs.hilt.android)
+    ksp(libs.hilt.android.compiler)
 }
