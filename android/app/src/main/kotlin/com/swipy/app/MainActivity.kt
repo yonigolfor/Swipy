@@ -261,10 +261,7 @@ private fun SwipyNavHost(pendingDeepLinkRoute: String?, onDeepLinkConsumed: () -
                 )
             }
             composable(ROUTE_SWIPE) {
-                SwipeStackScreen(
-                    onNavigateToReviewBin = { navController.navigateToTab(ROUTE_REVIEW_BIN) },
-                    viewModel = photoStackViewModel,
-                )
+                SwipeStackScreen(viewModel = photoStackViewModel)
             }
             composable(ROUTE_REVIEW_BIN) {
                 ReviewBinScreen(onBack = { navController.navigateToTab(ROUTE_SWIPE) })

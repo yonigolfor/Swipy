@@ -49,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swipy.core.designsystem.R
+import com.swipy.core.designsystem.haptics.rememberHapticManager
 import com.swipy.core.designsystem.theme.LavaGradientBottom
 import com.swipy.core.designsystem.theme.LavaGradientTop
 import com.swipy.core.designsystem.theme.SavingsBarGradientEnd
@@ -89,6 +90,7 @@ fun SessionSavingsBar(
 
     val animatedProgress = remember { Animatable(progressFraction) }
     val starFill = remember { Animatable(progressFraction) }
+    val hapticManager = rememberHapticManager()
     var isCelebrating by remember { mutableStateOf(false) }
     var lastMilestone by remember { mutableIntStateOf(milestoneCount) }
     var celebrationTrigger by remember { mutableIntStateOf(0) }
@@ -110,6 +112,7 @@ fun SessionSavingsBar(
         // Step 2: star celebration (see StarSection's own LaunchedEffect(celebrationTrigger)).
         delay(360)
         celebrationTrigger++
+        hapticManager.milestoneBurst()
         onMilestoneReached()
 
         // Step 3: after the star's full windup/spin/settle cycle, snap bar to the remainder

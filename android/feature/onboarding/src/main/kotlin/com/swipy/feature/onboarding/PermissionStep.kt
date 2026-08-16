@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -25,6 +26,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swipy.core.designsystem.component.GoldCapsuleButton
+import com.swipy.core.designsystem.haptics.rememberHapticManager
 import com.swipy.core.designsystem.theme.FilterScreenshots
 import com.swipy.core.designsystem.theme.SwipeGreen
 
@@ -36,6 +38,14 @@ fun PermissionStep(
     onRequestPermission: () -> Unit,
     onOpenSettings: () -> Unit,
 ) {
+    val hapticManager = rememberHapticManager()
+    // UINotificationFeedbackGenerator(.error) — fires once per transition INTO denied, not on
+    // every recomposition while already denied (HAPTICS.md "Permissions": "fire once per
+    // transition into .denied — not on every check, and not repeatedly while already denied").
+    LaunchedEffect(isPermissionDenied) {
+        if (isPermissionDenied) hapticManager.error()
+    }
+
     Column(modifier = Modifier.fillMaxSize()) {
         Spacer(Modifier.weight(1f))
 

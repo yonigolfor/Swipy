@@ -17,6 +17,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.swipy.core.designsystem.haptics.rememberHapticManager
 import com.swipy.core.designsystem.theme.OnboardingGoldEnd
 import com.swipy.core.designsystem.theme.OnboardingGoldShadow
 import com.swipy.core.designsystem.theme.OnboardingGoldStart
@@ -26,6 +27,10 @@ import com.swipy.core.designsystem.theme.OnboardingGoldStart
  * (ONBOARDING.md "Shared Design Tokens" → "CTA Button (all steps)"). Compose's `Modifier.shadow`
  * has no x/y offset parameter the way SwiftUI's does (see PhotoCardComposable's own note on the
  * same gap) — the y:5 offset from `.shadow(color:radius:15,y:5)` isn't literally reproduced.
+ *
+ * Fires [HapticManager.mediumTap] on every tap, matching iOS's shared `haptic` generator
+ * ("`UIImpactFeedbackGenerator(style: .medium)` — all CTA taps", root `CLAUDE.md` "Haptics") —
+ * wired here once rather than at each individual onboarding step's `onClick`.
  */
 @Composable
 fun GoldCapsuleButton(
@@ -34,6 +39,7 @@ fun GoldCapsuleButton(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
 ) {
+    val hapticManager = rememberHapticManager()
     Text(
         text = text,
         color = Color.Black,
@@ -53,7 +59,10 @@ fun GoldCapsuleButton(
                 enabled = enabled,
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
-                onClick = onClick,
+                onClick = {
+                    hapticManager.mediumTap()
+                    onClick()
+                },
             )
             .padding(vertical = 18.dp),
     )

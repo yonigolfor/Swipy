@@ -7,6 +7,12 @@
         android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32" />
 
+    <!-- Normal (not runtime-dangerous) permission — required for HapticManager's
+         Vibrator.vibrate() calls; missing this throws a SecurityException at the first swipe,
+         not a silent no-op (found via a real on-device crash, not caught by any build/test
+         step — vibrator.hasVibrator() only checks hardware capability, not this permission). -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <!-- Runtime-requested on API 33+ (see :core:notifications' permission-request TODO) —
          notifications work without it below 33, matching the platform's own behavior. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

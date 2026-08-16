@@ -41,6 +41,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swipy.core.designsystem.component.GoldCapsuleButton
+import com.swipy.core.designsystem.haptics.rememberHapticManager
 import com.swipy.core.designsystem.theme.SwipeBlue
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -107,6 +108,7 @@ fun SnoozeIntroStep(onNext: () -> Unit) {
 @Composable
 private fun SnoozeDemoCard() {
     val scope = rememberCoroutineScope()
+    val hapticManager = rememberHapticManager()
     val offsetX = remember { Animatable(0f) }
     val offsetY = remember { Animatable(0f) }
     var visible by remember { mutableStateOf(true) }
@@ -152,10 +154,15 @@ private fun SnoozeDemoCard() {
                             offsetX.snapTo(offsetX.value + dragAmount.x)
                             offsetY.snapTo(offsetY.value + dragAmount.y)
                         }
-                        showLabel = offsetY.value < SNOOZE_LABEL_THRESHOLD
+                        val newShowLabel = offsetY.value < SNOOZE_LABEL_THRESHOLD
+                        if (newShowLabel != showLabel) {
+                            showLabel = newShowLabel
+                            hapticManager.softTick()
+                        }
                     },
                     onDragEnd = {
                         if (offsetY.value < SNOOZE_FLY_THRESHOLD) {
+                            hapticManager.mediumTap()
                             scope.launch {
                                 offsetY.animateTo(SNOOZE_FLY_DISTANCE, spring(dampingRatio = 0.7f, stiffness = 260f))
                                 visible = false

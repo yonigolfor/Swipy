@@ -19,7 +19,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -42,6 +41,7 @@ import com.swipy.core.designsystem.component.SessionSavingsBar
 import com.swipy.core.designsystem.component.ShuffleBadge
 import com.swipy.core.designsystem.component.ShuffleCapsule
 import com.swipy.core.designsystem.component.UndoFab
+import com.swipy.core.designsystem.haptics.rememberHapticManager
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -59,12 +59,12 @@ private val monthYearFormatter = DateTimeFormatter.ofPattern("MMMM yyyy")
  */
 @Composable
 fun SwipeStackScreen(
-    onNavigateToReviewBin: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: PhotoStackViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    val hapticManager = rememberHapticManager()
     val density = LocalDensity.current
     val screenHeightPx = with(density) { LocalConfiguration.current.screenHeightDp.dp.toPx() }
 
@@ -103,6 +103,7 @@ fun SwipeStackScreen(
             when (effect) {
                 PhotoStackEffect.NothingToUndo -> Unit
                 is PhotoStackEffect.ShuffleLanded -> {
+                    hapticManager.shuffleLand()
                     coroutineScope {
                         launch { cardAreaOffsetY.animateTo(0f, spring(dampingRatio = 0.72f, stiffness = 130f)) }
                         launch { cardAreaOpacity.animateTo(1f, spring(dampingRatio = 0.72f, stiffness = 130f)) }
@@ -190,26 +191,27 @@ fun SwipeStackScreen(
             )
         }
 
-        TextButton(
-            onClick = onNavigateToReviewBin,
-            modifier = Modifier.align(Alignment.TopEnd).padding(top = 96.dp, end = 8.dp),
-        ) {
-            Text(stringResource(R.string.swipe_review_bin_button, uiState.reviewBinCount))
-        }
-
         // FAB column — Shuffle capsule above Undo, matching the iOS FAB row's VStack order.
         Column(
             modifier = Modifier.align(Alignment.BottomStart).padding(start = 24.dp, bottom = 32.dp),
         ) {
             ShuffleCapsule(
                 isActive = uiState.isShuffleModeActive,
-                onToggle = { flyOutThenDispatch(PhotoStackIntent.ActivateShuffle) },
+                onToggle = {
+                    hapticManager.shuffleActivate()
+                    flyOutThenDispatch(PhotoStackIntent.ActivateShuffle)
+                },
                 onExit = { flyOutThenDispatch(PhotoStackIntent.DeactivateShuffle) },
                 modifier = Modifier.padding(bottom = 24.dp),
             )
             UndoFab(
                 enabled = uiState.canUndo,
-                onClick = { viewModel.onIntent(PhotoStackIntent.Undo) },
+                onClick = {
+                    // Android-native trigger point in place of iOS's shake gesture (no shake
+                    // gesture is built here) — matches iOS's own success() haptic on undo.
+                    hapticManager.success()
+                    viewModel.onIntent(PhotoStackIntent.Undo)
+                },
             )
         }
     }

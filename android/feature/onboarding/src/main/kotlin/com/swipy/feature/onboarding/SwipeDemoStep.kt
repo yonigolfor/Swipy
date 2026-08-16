@@ -32,6 +32,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.swipy.core.designsystem.component.GoldCapsuleButton
+import com.swipy.core.designsystem.haptics.rememberHapticManager
 import com.swipy.core.designsystem.theme.SwipeGreen
 import com.swipy.core.designsystem.theme.SwipeRed
 import kotlinx.coroutines.delay
@@ -89,6 +90,7 @@ private enum class DemoSwipeDirection { Delete, Keep }
 @Composable
 private fun DemoCard() {
     val scope = rememberCoroutineScope()
+    val hapticManager = rememberHapticManager()
     val offsetX = remember { Animatable(0f) }
     val offsetY = remember { Animatable(0f) }
     var visible by remember { mutableStateOf(true) }
@@ -114,15 +116,24 @@ private fun DemoCard() {
                             offsetX.snapTo(offsetX.value + dragAmount.x)
                             offsetY.snapTo(offsetY.value + dragAmount.y)
                         }
-                        direction = when {
+                        val newDirection = when {
                             offsetX.value < -30f -> DemoSwipeDirection.Delete
                             offsetX.value > 30f -> DemoSwipeDirection.Keep
                             else -> null
+                        }
+                        if (newDirection != direction) {
+                            direction = newDirection
+                            // iOS calls softHaptic.impactOccurred() on every raw onChanged
+                            // frame — only on direction transitions here instead, since
+                            // Vibrator.vibrate() has no per-app coalescing the way UIKit's
+                            // taptic engine does (see HapticManager.softTick's doc comment).
+                            hapticManager.softTick()
                         }
                     },
                     onDragEnd = {
                         val dx = offsetX.value
                         if (kotlin.math.abs(dx) > FLY_OFF_THRESHOLD) {
+                            hapticManager.mediumTap()
                             val targetX = if (dx > 0) FLY_OFF_DISTANCE else -FLY_OFF_DISTANCE
                             scope.launch {
                                 offsetX.animateTo(targetX, spring(dampingRatio = 0.7f, stiffness = 260f))

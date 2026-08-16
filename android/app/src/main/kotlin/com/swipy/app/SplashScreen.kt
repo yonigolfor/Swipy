@@ -2,15 +2,15 @@ package com.swipy.app
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -21,8 +21,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -58,15 +60,24 @@ fun SplashScreen(onFinished: () -> Unit) {
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.graphicsLayer { scaleX = targetScale; scaleY = targetScale; alpha = targetAlpha },
         ) {
-            Box(modifier = Modifier.clip(RoundedCornerShape(30.dp)).background(MaterialTheme.colorScheme.primary)) {
-                Text(
-                    text = "S",
-                    color = Color.White,
-                    fontSize = 72.sp,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(24.dp),
-                )
-            }
+            // The real app icon art (same source asset the adaptive launcher icon is built
+            // from — see app/src/main/res/drawable/ic_launcher_foreground_art.png), not the
+            // OS-masked adaptive form: iOS's own SplashScreenView shows its flat
+            // AppIconImage asset the same way, not "the icon as it appears already-masked on
+            // the home screen". Mirrors iOS's frame(150x150) + shadow(radius:20, y:10).
+            Image(
+                painter = painterResource(R.drawable.ic_launcher_foreground_art),
+                contentDescription = null,
+                modifier = Modifier
+                    .size(150.dp)
+                    .shadow(
+                        elevation = 20.dp,
+                        shape = RoundedCornerShape(30.dp),
+                        ambientColor = Color.Black.copy(alpha = 0.3f),
+                        spotColor = Color.Black.copy(alpha = 0.3f),
+                    )
+                    .clip(RoundedCornerShape(30.dp)),
+            )
             Spacer(Modifier.height(20.dp))
             Text(text = "Swipy", color = Color.White, fontSize = 32.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(8.dp))

@@ -7,31 +7,66 @@ commit as the fix.
 
 ---
 
-## 1. Haptic feedback audit — 🟡 PARTIALLY RESOLVED (swipe commits only)
+## 1. Haptic feedback audit — ✅ RESOLVED (full `HAPTICS.md` event map ported)
 
 No haptic feedback existed anywhere in the Android app — confirmed via a full-repo grep, zero
 hits for any vibration/haptic API usage outside of doc comments. iOS has a dedicated
 `HapticService` with a distinct pattern per swipe direction (see root `CLAUDE.md` → "Haptics"
 and `HAPTICS.md` for the full event map).
 
-**Fix applied**: new `HapticManager` (`:core:designsystem/haptics/`, `@Singleton`, reached from
+**Critical bug found and fixed during on-device dogfooding**: the very first physical-device
+test after the initial haptics pass crashed on every real swipe with
+`SecurityException: vibrate: Neither user ... nor current process has android.permission.VIBRATE`.
+The `VIBRATE` permission was never added to `AndroidManifest.xml` — `vibrator.hasVibrator()`
+only checks hardware capability, not this permission, so nothing in the build/compile/test
+pipeline could have caught it; it only surfaces at the moment `Vibrator.vibrate()` actually
+runs. Fixed by adding `<uses-permission android:name="android.permission.VIBRATE" />` (a normal,
+not runtime-dangerous, permission).
+
+**Fix applied**: `HapticManager` (`:core:designsystem/haptics/`, `@Singleton`, reached from
 Compose via `rememberHapticManager()` — the same `EntryPointAccessors` bridge pattern as
 `VideoPlayerPoolEntryPoint`/`rememberVideoPlayerPool()`). Uses `VibrationEffect.createOneShot`/
 `createWaveform` (API 26+, safe at `minSdk = 29`) via `VibratorManager` on API 31+ / legacy
-`Vibrator` below. Ported `HAPTICS.md`'s exact Swipe Actions intensities — `keep()` (light,
-amplitude 255) and `snooze()` (light, amplitude 153) share the same short one-shot shape,
-differing only by amplitude exactly like iOS's two `.light`-style generators differing only by
-intensity scalar; `delete()` is a double-pulse waveform (heavier feel, plus the requested
-double-pulse — iOS itself uses a single heavy tap, so the double-pulse is a deliberate Android
-enhancement, not a literal port). Wired directly into `CardStackLayer.kt`: `thresholdCrossed()`
-(amplitude 76) fires on every drag direction-lock transition, `keep()`/`delete()`/`snooze()`
-fire at the exact swipe-commit moment in `onDragEnd`. `thresholdCrossed()` itself has no iOS
-equivalent on the real card stack (confirmed against `HAPTICS.md` — iOS's only drag-time haptic,
-`.soft`, is exclusive to the onboarding demo card) — an intentional Android-only addition.
+`Vibrator` below. Now covers every event in `HAPTICS.md`:
 
-**Still open**: Undo, Shuffle activate/land, and the Session Savings Bar milestone
-celebration burst have no haptic wiring yet — out of scope for this pass, which focused on the
-swipe-commit path `CardStackLayer.kt` owns directly.
+- **Swipe Actions**: `keep()`/`snooze()` (light, amplitude 255/153 — same shape, differ only by
+  amplitude, exactly like iOS's two `.light` generators differing only by intensity scalar);
+  `delete()` is a double-pulse waveform (iOS itself uses a single heavy tap — the double-pulse
+  is a deliberate Android enhancement). Wired into `CardStackLayer.kt`'s `onDragEnd`.
+  `thresholdCrossed()` (drag direction-lock crossing) has no iOS equivalent on the real card
+  stack — an intentional Android-only addition.
+- **Onboarding CTAs/demo cards**: `mediumTap()` wired once into the shared `GoldCapsuleButton`
+  component (every onboarding CTA gets it for free, matching iOS's single-generator-for-every-
+  CTA architecture) — not the literal per-button call sites iOS's own source has. `softTick()`
+  wired into both demo cards' (`SwipeDemoStep`/`SnoozeIntroStep`) direction-change transitions,
+  deliberately throttled to fire only on transitions rather than iOS's literal per-frame
+  `softHaptic.impactOccurred()` call — `Vibrator.vibrate()` has no equivalent to UIKit's taptic-
+  engine coalescing, so an unthrottled port would be a genuinely worse feel, not a faithful one.
+- **UI Actions**: `selectionTick()` on Filter category tap (`FilterCategoriesScreen`'s
+  `CategoryRow`); `shuffleActivate()` on the Shuffle FAB tap and `shuffleLand()` (two-beat) on
+  `PhotoStackEffect.ShuffleLanded` (both in `SwipeStackScreen.kt`); `success()` on Undo — the
+  Android-native trigger point standing in for iOS's shake gesture, which has no Android
+  equivalent built.
+- **GB Milestone crescendo**: `milestoneBurst()` — a single `VibrationEffect.createWaveform`
+  atomically expressing the whole 6-beat pattern, wired into `SessionSavingsBar.kt`'s existing
+  `celebrationTrigger` step (same ~360ms-after-fill timing `HAPTICS.md` specifies). Deliberately
+  **not** a literal port of iOS's manual `DispatchQueue.asyncAfter`-sequenced generator calls —
+  iOS needs that because a single `UIImpactFeedbackGenerator` call can't express a multi-beat
+  pattern (the exact reason `HAPTICS.md` calls out `SessionSavingsBarView` as the one view
+  allowed to bypass `HapticService`); `createWaveform` has no such limitation, so one atomic
+  Android call is the more idiomatic primitive for this shape, not a workaround-for-a-workaround.
+- **Empty Trash**: `emptyTrashBurst()` (triple-heavy, full intensity) wired into
+  `ReviewBinScreen.kt`'s `ReviewBinEffect.EmptyTrashCompleted` handling.
+- **Permission denied**: `error()` wired into `PermissionStep.kt` via
+  `LaunchedEffect(isPermissionDenied)`, firing once per transition into denied (not on every
+  recomposition while already denied), matching `HAPTICS.md`'s exact firing rule.
+
+**Deliberately not wired — needs a UI feature that doesn't exist yet, not a haptics gap**:
+Review Bin item restore's "poof" haptic (`HAPTICS.md`: soft impact/0.7, synced to iOS's
+`.popping` → `.poofing` animation phase transition) — Android's restore is a plain instant
+action with no distinct pop/poof animation phase to sync a haptic to yet. Revisit once/if that
+animation is built; wiring a haptic to a nonexistent animation phase would be fake, not a real
+port.
 
 ---
 

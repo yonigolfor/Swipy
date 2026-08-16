@@ -41,6 +41,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.swipy.core.designsystem.haptics.rememberHapticManager
 import com.swipy.domain.model.FilterCategory
 
 /** Screen chrome — the Compose analogue of iOS SmartFiltersView. A plain list, not a grid —
@@ -98,13 +99,21 @@ private fun CategoryRow(
     modifier: Modifier = Modifier,
 ) {
     val presentation = remember(category) { category.presentation() }
+    val hapticManager = rememberHapticManager()
     val isConfirmedEmpty = count == 0
     val isClickable = count == null || count > 0
 
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clickable(enabled = isClickable, onClick = onClick)
+            .clickable(
+                enabled = isClickable,
+                onClick = {
+                    // UISelectionFeedbackGenerator.selectionChanged() (HAPTICS.md "UI Actions").
+                    hapticManager.selectionTick()
+                    onClick()
+                },
+            )
             .graphicsLayer { alpha = if (isConfirmedEmpty) 0.4f else 1f }
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically,

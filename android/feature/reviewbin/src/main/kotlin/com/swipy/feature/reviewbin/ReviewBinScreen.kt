@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import com.swipy.core.designsystem.haptics.rememberHapticManager
 import com.swipy.core.designsystem.theme.SwipeRed
 import com.swipy.domain.model.PhotoItem
 
@@ -55,6 +56,7 @@ fun ReviewBinScreen(
     viewModel: ReviewBinViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val hapticManager = rememberHapticManager()
     var celebration by remember { mutableStateOf<CelebrationData?>(null) }
 
     val deleteConfirmationLauncher = rememberLauncherForActivityResult(
@@ -72,6 +74,9 @@ fun ReviewBinScreen(
                     IntentSenderRequest.Builder(effect.pendingIntent.intentSender).build(),
                 )
                 is ReviewBinEffect.EmptyTrashCompleted -> {
+                    // Triple-heavy at full intensity (HAPTICS.md: "the strongest feedback in
+                    // the app, matching the finality of permanent deletion").
+                    hapticManager.emptyTrashBurst()
                     celebration = CelebrationData(effect.spaceSavedBytes, effect.itemCount)
                 }
             }
