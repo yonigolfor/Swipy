@@ -29,4 +29,10 @@ data class PhotoItem(
     val height: Int,
     val durationMs: Long,
     val dateAddedEpochSeconds: Long,
+    /** Resolved once at fetch time via the same relative-path/bucket-name heuristic
+     * MediaStoreQueryBuilder uses for the Screenshots/ScreenRecordings filters — see
+     * android/CLAUDE.md "Smart Filter Counting" for why MediaStore has no direct
+     * "is screenshot" column the way PHAsset does. Drives the card's corner badge. */
+    val isScreenshot: Boolean = false,
+    val isScreenRecording: Boolean = false,
 )

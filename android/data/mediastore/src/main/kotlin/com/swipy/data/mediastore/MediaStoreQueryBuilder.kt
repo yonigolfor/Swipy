@@ -26,6 +26,21 @@ internal object MediaStoreQueryBuilder {
     private const val SCREEN_RECORDING_NAME_MATCH = "screenrecord%"
     private const val SCREENSHOT_BUCKET_NAME = "Screenshots"
 
+    /**
+     * Row-level mirror of the SQL heuristic above, for classifying an already-fetched row
+     * (PhotoItem.isScreenshot/isScreenRecording — drives PhotoCardComposable's corner badge)
+     * rather than filtering a query. Kept in this object, not duplicated in
+     * MediaStorePhotoRepository, so the two classification paths can never silently drift.
+     * SQLite's LIKE is case-insensitive for ASCII by default — `ignoreCase = true` mirrors that.
+     */
+    fun isScreenshot(relativePath: String?, bucketDisplayName: String?): Boolean =
+        relativePath?.contains("Screenshot", ignoreCase = true) == true ||
+            bucketDisplayName.equals(SCREENSHOT_BUCKET_NAME, ignoreCase = true)
+
+    fun isScreenRecording(relativePath: String?, bucketDisplayName: String?, displayName: String?): Boolean =
+        isScreenshot(relativePath, bucketDisplayName) ||
+            displayName?.startsWith("screenrecord", ignoreCase = true) == true
+
     fun forCategory(filter: FilterCategory): MediaStoreQuerySpec = when (filter) {
         FilterCategory.All -> MediaStoreQuerySpec(
             selection = "${MediaStore.Files.FileColumns.MEDIA_TYPE} IN (?, ?)",

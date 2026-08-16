@@ -9,6 +9,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -16,6 +17,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -25,6 +27,7 @@ import androidx.compose.ui.zIndex
 import com.swipy.domain.model.PhotoItem
 import com.swipy.domain.model.SwipeAction
 import kotlin.math.hypot
+import kotlin.random.Random
 import kotlinx.collections.immutable.ImmutableList
 import kotlinx.coroutines.launch
 
@@ -32,7 +35,20 @@ private const val CARD_STACK_SIZE = 3
 private const val ROTATION_SENSITIVITY = 20f
 private const val MAX_ROTATION_DEGREES = 15f
 private val SWIPE_THRESHOLD = 120.dp
-private val BACKGROUND_CARD_STEP = 18.dp
+
+/** Total horizontal margin (both sides combined) around the card — mirrors iOS
+ * `geometry.size.width - 40` (CardStackView.swift:103). */
+private val CARD_HORIZONTAL_MARGIN = 40.dp
+
+/** Background-card recede step per index — mirrors iOS's `index * 8pt` (CardStackView.swift:224). */
+private val BACKGROUND_CARD_STEP = 8.dp
+
+/** Fixed per-item tilt range — mirrors iOS `Double.random(in: -4...4)` (PhotoItem.swift:33).
+ * Seeded from the item's own id (not re-rolled on every recomposition/relaunch) so a card's
+ * tilt stays stable for as long as it's visible, the same way iOS assigns it once at model
+ * creation rather than computing it fresh in the view. */
+private const val MAX_TILT_DEGREES = 4f
+
 /**
  * Drag magnitude at which the SwipeIndicator reaches full opacity/scale. NOT a literal port of
  * iOS's 100pt (CardStackView.swift:253) — iOS's direction unlocks at 80pt, 80% of its own 100pt
@@ -55,13 +71,23 @@ fun CardStackLayer(
     onSwipeCommitted: (PhotoItem, SwipeAction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    BoxWithConstraints(modifier = modifier.fillMaxSize()) {
+    BoxWithConstraints(
+        modifier = modifier.fillMaxSize(),
+        contentAlignment = Alignment.Center,
+    ) {
         val density = LocalDensity.current
         val thresholdPx = with(density) { SWIPE_THRESHOLD.toPx() }
         val backgroundStepPx = with(density) { BACKGROUND_CARD_STEP.toPx() }
         val flingDistanceXPx = with(density) { maxWidth.toPx() } * 1.5f
         val flingDistanceYPx = with(density) { maxHeight.toPx() } * 1.5f
         val indicatorFadeDistancePx = with(density) { INDICATOR_FADE_DISTANCE.toPx() }
+
+        // Fixed 9:16 portrait card, capped by either the available width (minus side margins)
+        // or the available height — mirrors iOS CardStackView.swift:103-104 exactly. This is
+        // what makes the stack read as a centered "deck of cards" with visible background
+        // around it, rather than an edge-to-edge full-bleed image.
+        val cardW = minOf(maxWidth - CARD_HORIZONTAL_MARGIN, maxHeight * 9f / 16f)
+        val cardH = cardW * 16f / 9f
 
         val visible = items.take(CARD_STACK_SIZE)
 
@@ -75,6 +101,12 @@ fun CardStackLayer(
                 val rotation = remember { Animatable(0f) }
                 var swipeDirection by remember { mutableStateOf<SwipeAction?>(null) }
                 var isDragging by remember { mutableStateOf(false) }
+
+                // Stable per-card tilt for the background/receding look — computed once per
+                // item id, not re-rolled on every recomposition.
+                val tiltDegrees = remember(item.id) {
+                    Random(item.id).nextFloat() * (2 * MAX_TILT_DEGREES) - MAX_TILT_DEGREES
+                }
 
                 // Only the card ARRIVING at index 0 springs into place — every other index
                 // change snaps instantly. Getting this backwards (animating every index
@@ -90,6 +122,15 @@ fun CardStackLayer(
                     animationSpec = if (isTop) spring(dampingRatio = 0.85f, stiffness = 380f) else tween(0),
                     label = "cardRestingOffsetY",
                 )
+                // Receding opacity for background cards — mirrors iOS `1.0 - index * 0.2`
+                // (CardStackView.swift:226). A pure function of index like restingScale/
+                // restingOffsetY above, so index 0 naturally evaluates to fully opaque with
+                // no isTop branch needed.
+                val restingAlpha by animateFloatAsState(
+                    targetValue = 1f - (index * 0.2f),
+                    animationSpec = if (isTop) spring(dampingRatio = 0.85f, stiffness = 380f) else tween(0),
+                    label = "cardAlpha",
+                )
 
                 // The card itself — translation/rotation/scale + the drag gesture. SwipeIndicator
                 // is a SEPARATE sibling below (not nested in this Box) — it must NOT inherit this
@@ -98,16 +139,23 @@ fun CardStackLayer(
                 // nesting it here, matching iOS's `.overlay` being chained after CardStackView's
                 // transform modifiers, reads correctly in SwiftUI but does not translate to
                 // Compose the same way once the card is dragged past a few hundred px).
+                //
+                // Every value read inside this graphicsLayer lambda (offsetX/offsetY/rotation/
+                // restingScale/restingOffsetY/restingAlpha/tiltDegrees) is deferred to the draw
+                // phase, not read in this composable's own body — a drag frame therefore never
+                // triggers a recomposition here, only a re-draw, so it can't be the source of
+                // any layout-level bleed-through the way the earlier NavHost back-stack bug was.
                 Box(
                     modifier = Modifier
-                        .fillMaxSize()
+                        .size(cardW, cardH)
                         .zIndex((CARD_STACK_SIZE - index).toFloat())
                         .graphicsLayer {
                             translationX = if (isTop) offsetX.value else 0f
                             translationY = if (isTop) offsetY.value else restingOffsetY
-                            rotationZ = if (isTop) rotation.value else 0f
+                            rotationZ = if (isTop) rotation.value else tiltDegrees
                             scaleX = restingScale
                             scaleY = restingScale
+                            alpha = restingAlpha
                         }
                         .pointerInput(item.id, isTop) {
                             if (!isTop) return@pointerInput
@@ -169,11 +217,11 @@ fun CardStackLayer(
                 }
 
                 // Pinned to the SCREEN (this Box fills the same BoxWithConstraints the cards
-                // themselves fill, un-transformed) — only opacity/scale react to drag magnitude,
-                // never position, so Keep/Delete/Later always stay readable at the screen edge
-                // regardless of how far the card underneath has been dragged. A decorative
-                // conditional sibling, not a branch around the card — safe per android/CLAUDE.md
-                // "Conditional Animation".
+                // themselves are centered inside — deliberately NOT sized to cardW/cardH, so
+                // the badge stays readable at the screen edge regardless of how far the
+                // smaller card underneath has been dragged), only opacity/scale react to drag
+                // magnitude, never position. A decorative conditional sibling, not a branch
+                // around the card — safe per android/CLAUDE.md "Conditional Animation".
                 if (isTop && isDragging) {
                     SwipeIndicator(
                         direction = swipeDirection,

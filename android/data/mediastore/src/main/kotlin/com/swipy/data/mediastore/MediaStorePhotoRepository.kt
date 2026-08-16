@@ -35,6 +35,13 @@ class MediaStorePhotoRepository @Inject constructor(
         MediaStore.Files.FileColumns.HEIGHT,
         MediaStore.Files.FileColumns.DURATION,
         MediaStore.Files.FileColumns.DATE_ADDED,
+        // Screenshot/recording classification only — see readPhotoItems and
+        // MediaStoreQueryBuilder.isScreenshot/isScreenRecording. Three extra narrow text
+        // columns on every row; not worth a separate query given fetchPage is already capped
+        // at PAGE_SIZE/INITIAL_LOAD rows per call.
+        MediaStore.Files.FileColumns.RELATIVE_PATH,
+        MediaStore.Files.FileColumns.BUCKET_DISPLAY_NAME,
+        MediaStore.Files.FileColumns.DISPLAY_NAME,
     )
 
     override suspend fun fetchPage(
@@ -90,22 +97,34 @@ class MediaStorePhotoRepository @Inject constructor(
         val heightCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.HEIGHT)
         val durationCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DURATION)
         val dateAddedCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DATE_ADDED)
+        val relativePathCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.RELATIVE_PATH)
+        val bucketNameCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.BUCKET_DISPLAY_NAME)
+        val displayNameCol = c.getColumnIndexOrThrow(MediaStore.Files.FileColumns.DISPLAY_NAME)
 
         val items = mutableListOf<PhotoItem>()
         while (c.moveToNext()) {
             val id = c.getLong(idCol)
+            val isVideo = c.getInt(mediaTypeCol) == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO
+            val relativePath = c.getString(relativePathCol)
+            val bucketName = c.getString(bucketNameCol)
+            val displayName = c.getString(displayNameCol)
             items += PhotoItem(
                 id = id,
                 uriString = ContentUris.withAppendedId(collectionUri, id).toString(),
                 fileSizeBytes = c.getLong(sizeCol),
                 mimeType = c.getString(mimeCol) ?: "",
-                isVideo = c.getInt(mediaTypeCol) == MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO,
+                isVideo = isVideo,
                 width = c.getInt(widthCol),
                 height = c.getInt(heightCol),
                 durationMs = c.getLong(durationCol),
                 // MediaStore's DATE_ADDED is epoch SECONDS (DATE_TAKEN, notoriously, is
                 // milliseconds instead) — do not treat this value as epoch millis.
                 dateAddedEpochSeconds = c.getLong(dateAddedCol),
+                // Mutually exclusive by media type, mirroring MediaStoreQueryBuilder's own
+                // per-category MEDIA_TYPE gating — a video is never flagged as a screenshot,
+                // an image is never flagged as a screen recording.
+                isScreenshot = !isVideo && MediaStoreQueryBuilder.isScreenshot(relativePath, bucketName),
+                isScreenRecording = isVideo && MediaStoreQueryBuilder.isScreenRecording(relativePath, bucketName, displayName),
             )
         }
         return items
