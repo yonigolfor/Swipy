@@ -316,6 +316,7 @@ struct CardStackView: View {
                 pinchScale = max(1.0, scale)
                 if !isPinching, pinchScale > 1.01 {
                     isPinching = true
+                    viewModel.isUserInteracting = true
                     // A single-finger drag may already be mid-flight when the second
                     // finger lands — dragGesture.onChanged bails out once isPinching
                     // is true, so without this reset dragOffset/dragRotation would
@@ -334,6 +335,7 @@ struct CardStackView: View {
             .onEnded { _ in
                 // Spring reset handled by onChange(of: isPinching) above.
                 isPinching = false
+                viewModel.isUserInteracting = isDragging
                 pinchPanOrigin = .zero
             }
             .simultaneously(with:
@@ -374,6 +376,7 @@ struct CardStackView: View {
                 guard !isPinching, !isUndoAnimating else { return }
                 if !isDragging {
                     isDragging = true
+                    viewModel.isUserInteracting = true
                     viewModel.cancelPrefetch()
                 }
                 dragOffset = value.translation
@@ -393,6 +396,7 @@ struct CardStackView: View {
             .onEnded { value in
                 guard !isUndoAnimating else { return }
                 isDragging = false
+                viewModel.isUserInteracting = isPinching
                 hasFiredEarlyPrecache = false
                 swipeDirection = .none
                 // If a pinch is active or scale hasn't fully reset, discard swipe.
