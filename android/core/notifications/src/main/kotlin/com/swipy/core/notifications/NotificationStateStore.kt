@@ -9,7 +9,6 @@ import java.time.LocalDate
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 
 /**
@@ -42,14 +41,16 @@ class NotificationStateStore @Inject constructor(
      */
     suspend fun tryConsumeDailyQuota(): Boolean {
         val today = LocalDate.now().toString()
-        val prefs = dataStore.data.first()
-        val count = if (prefs[NOTIF_CAP_DATE] == today) prefs[NOTIF_CAP_COUNT] ?: 0 else 0
-        if (count >= DAILY_QUOTA) return false
-        dataStore.edit {
-            it[NOTIF_CAP_DATE] = today
-            it[NOTIF_CAP_COUNT] = count + 1
+        var consumed = false
+        dataStore.edit { prefs ->
+            val count = if (prefs[NOTIF_CAP_DATE] == today) prefs[NOTIF_CAP_COUNT] ?: 0 else 0
+            if (count < DAILY_QUOTA) {
+                prefs[NOTIF_CAP_DATE] = today
+                prefs[NOTIF_CAP_COUNT] = count + 1
+                consumed = true
+            }
         }
-        return true
+        return consumed
     }
 
     private companion object {

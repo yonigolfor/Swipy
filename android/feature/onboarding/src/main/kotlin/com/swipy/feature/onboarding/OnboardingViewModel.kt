@@ -1,5 +1,6 @@
 package com.swipy.feature.onboarding
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.swipy.domain.repository.OnboardingStateRepository
@@ -23,9 +24,20 @@ import kotlinx.coroutines.launch
 class OnboardingViewModel @Inject constructor(
     private val scanLibraryForOnboardingUseCase: ScanLibraryForOnboardingUseCase,
     private val onboardingStateRepository: OnboardingStateRepository,
+    private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(OnboardingUiState())
+    // Restores the in-progress step across process death (not just rotation, which the
+    // ViewModel already survives on its own) — most likely to matter for exactly the step
+    // that requires backgrounding to Settings and back (RecheckPermissionOnResume), the
+    // scenario most likely to get the process reclaimed.
+    private val _uiState = MutableStateFlow(
+        OnboardingUiState(
+            currentStep = savedStateHandle.get<String>(KEY_CURRENT_STEP)
+                ?.let { runCatching { OnboardingStep.valueOf(it) }.getOrNull() }
+                ?: OnboardingStep.VisualHook,
+        ),
+    )
     val uiState: StateFlow<OnboardingUiState> = _uiState.asStateFlow()
 
     private val _effects = Channel<OnboardingEffect>(Channel.BUFFERED)
@@ -79,6 +91,11 @@ class OnboardingViewModel @Inject constructor(
     }
 
     private fun goTo(step: OnboardingStep) {
+        savedStateHandle[KEY_CURRENT_STEP] = step.name
         _uiState.update { it.copy(currentStep = step) }
+    }
+
+    private companion object {
+        const val KEY_CURRENT_STEP = "current_step"
     }
 }

@@ -1,7 +1,7 @@
 package com.swipy.feature.swipe
 
-import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -99,9 +100,16 @@ fun CardStackLayer(
                 val isTop = index == 0
                 val scope = rememberCoroutineScope()
 
-                val offsetX = remember { Animatable(0f) }
-                val offsetY = remember { Animatable(0f) }
-                val rotation = remember { Animatable(0f) }
+                // Plain synchronous floats, not Animatable — a drag callback fires up to 120x/sec
+                // and isn't itself suspend, so driving it through Animatable.snapTo() forced a
+                // fresh coroutine launch (and a MutatorMutex cancel/re-acquire) per frame purely
+                // to bridge into a suspend API. animate() below drives these same floats for the
+                // release/snap-back animation, so Animatable's machinery is only ever paid for
+                // once per gesture, not once per frame. See android/CLAUDE.md "Gesture Engine &
+                // Card Stack Performance".
+                var offsetX by remember { mutableFloatStateOf(0f) }
+                var offsetY by remember { mutableFloatStateOf(0f) }
+                var rotation by remember { mutableFloatStateOf(0f) }
                 var swipeDirection by remember { mutableStateOf<SwipeAction?>(null) }
                 var isDragging by remember { mutableStateOf(false) }
 
@@ -153,9 +161,9 @@ fun CardStackLayer(
                         .size(cardW, cardH)
                         .zIndex((CARD_STACK_SIZE - index).toFloat())
                         .graphicsLayer {
-                            translationX = if (isTop) offsetX.value else 0f
-                            translationY = if (isTop) offsetY.value else restingOffsetY
-                            rotationZ = if (isTop) rotation.value else tiltDegrees
+                            translationX = if (isTop) offsetX else 0f
+                            translationY = if (isTop) offsetY else restingOffsetY
+                            rotationZ = if (isTop) rotation else tiltDegrees
                             scaleX = restingScale
                             scaleY = restingScale
                             alpha = restingAlpha
@@ -166,20 +174,20 @@ fun CardStackLayer(
                                 onDragStart = { isDragging = true },
                                 onDrag = { change, dragAmount ->
                                     change.consume()
-                                    scope.launch {
-                                        offsetX.snapTo(offsetX.value + dragAmount.x)
-                                        offsetY.snapTo(offsetY.value + dragAmount.y)
-                                        rotation.snapTo(
-                                            (offsetX.value / ROTATION_SENSITIVITY)
-                                                .coerceIn(-MAX_ROTATION_DEGREES, MAX_ROTATION_DEGREES),
-                                        )
-                                    }
+                                    // Synchronous — no coroutine launch per frame. onDrag isn't
+                                    // suspend, and these are plain mutableFloatStateOf writes
+                                    // read only inside graphicsLayer above, so this never
+                                    // triggers recomposition, only a re-draw.
+                                    offsetX += dragAmount.x
+                                    offsetY += dragAmount.y
+                                    rotation = (offsetX / ROTATION_SENSITIVITY)
+                                        .coerceIn(-MAX_ROTATION_DEGREES, MAX_ROTATION_DEGREES)
                                     // Reuses the same threshold/resolution as the actual commit
                                     // decision below (unlike iOS, which happens to use one
                                     // shared 80pt SwipeDirection.from(offset:) for both already)
                                     // — the live badge preview must never show a direction that
                                     // wouldn't actually commit if released right now.
-                                    val newDirection = resolveSwipeDirection(offsetX.value, offsetY.value, thresholdPx)
+                                    val newDirection = resolveSwipeDirection(offsetX, offsetY, thresholdPx)
                                     if (newDirection != swipeDirection) {
                                         swipeDirection = newDirection
                                         hapticManager.thresholdCrossed()
@@ -188,21 +196,21 @@ fun CardStackLayer(
                                 onDragEnd = {
                                     isDragging = false
                                     swipeDirection = null
-                                    val direction = resolveSwipeDirection(offsetX.value, offsetY.value, thresholdPx)
+                                    val direction = resolveSwipeDirection(offsetX, offsetY, thresholdPx)
                                     scope.launch {
                                         if (direction != null) {
                                             val targetX = when (direction) {
                                                 SwipeAction.Keep -> flingDistanceXPx
                                                 SwipeAction.Delete -> -flingDistanceXPx
-                                                else -> offsetX.value
+                                                else -> offsetX
                                             }
                                             val targetY = if (direction == SwipeAction.Snooze) {
                                                 -flingDistanceYPx
                                             } else {
-                                                offsetY.value
+                                                offsetY
                                             }
-                                            launch { offsetX.animateTo(targetX, tween(220)) }
-                                            launch { offsetY.animateTo(targetY, tween(220)) }
+                                            launch { animate(offsetX, targetX, animationSpec = tween(220)) { value, _ -> offsetX = value } }
+                                            launch { animate(offsetY, targetY, animationSpec = tween(220)) { value, _ -> offsetY = value } }
                                             when (direction) {
                                                 SwipeAction.Keep -> hapticManager.keep()
                                                 SwipeAction.Delete -> hapticManager.delete()
@@ -212,9 +220,9 @@ fun CardStackLayer(
                                             onSwipeCommitted(item, direction)
                                         } else {
                                             val snapBack = spring<Float>(dampingRatio = Spring.DampingRatioMediumBouncy)
-                                            launch { offsetX.animateTo(0f, snapBack) }
-                                            launch { offsetY.animateTo(0f, snapBack) }
-                                            launch { rotation.animateTo(0f, snapBack) }
+                                            launch { animate(offsetX, 0f, animationSpec = snapBack) { value, _ -> offsetX = value } }
+                                            launch { animate(offsetY, 0f, animationSpec = snapBack) { value, _ -> offsetY = value } }
+                                            launch { animate(rotation, 0f, animationSpec = snapBack) { value, _ -> rotation = value } }
                                         }
                                     }
                                 },
@@ -241,7 +249,7 @@ fun CardStackLayer(
                             .fillMaxSize()
                             .zIndex(1000f)
                             .graphicsLayer {
-                                val progress = (hypot(offsetX.value, offsetY.value) / indicatorFadeDistancePx)
+                                val progress = (hypot(offsetX, offsetY) / indicatorFadeDistancePx)
                                     .coerceIn(0f, 1f)
                                 alpha = progress
                                 scaleX = progress

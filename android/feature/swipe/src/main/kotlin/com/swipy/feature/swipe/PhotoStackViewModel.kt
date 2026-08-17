@@ -1,5 +1,6 @@
 package com.swipy.feature.swipe
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.swipy.domain.model.FilterCategory
@@ -48,6 +49,7 @@ class PhotoStackViewModel @Inject constructor(
     private val filterBlurryPhotosUseCase: FilterBlurryPhotosUseCase,
     private val filterBurstPhotosUseCase: FilterBurstPhotosUseCase,
     private val photoStateRepository: PhotoStateRepository,
+    private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(PhotoStackUiState())
@@ -65,7 +67,13 @@ class PhotoStackViewModel @Inject constructor(
     private var isFetching = false
     private var hasMore = true
     private var lastSwipe: LastSwipe? = null
-    private var currentFilter: FilterCategory = FilterCategory.All
+    // Restored from SavedStateHandle so a process-death recreation (e.g. system memory
+    // pressure while the user is deep in a Smart Filter) re-fetches under the same filter
+    // context instead of silently falling back to the default queue.
+    private var currentFilter: FilterCategory =
+        savedStateHandle.get<String>(KEY_CURRENT_FILTER)
+            ?.let { runCatching { FilterCategory.valueOf(it) }.getOrNull() }
+            ?: FilterCategory.All
 
     // Shuffle Mode state — see android/CLAUDE.md and ActivateShuffleUseCase's doc for why this
     // is a random SEEK (snapshot + saved offset), not a full shuffled-index map.
@@ -250,6 +258,7 @@ class PhotoStackViewModel @Inject constructor(
      */
     private fun handleLoadPhotos(filter: FilterCategory) {
         currentFilter = filter
+        savedStateHandle[KEY_CURRENT_FILTER] = filter.name
         nextOffset = 0
         hasMore = true
         isFetching = false
@@ -324,6 +333,7 @@ class PhotoStackViewModel @Inject constructor(
         const val BURST_FETCH_PAGE_SIZE = 500
         const val WATERMARK = 15
         const val MAX_FETCH_ATTEMPTS = 20
+        const val KEY_CURRENT_FILTER = "current_filter"
     }
 }
 

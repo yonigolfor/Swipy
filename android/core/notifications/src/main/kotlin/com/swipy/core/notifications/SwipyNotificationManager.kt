@@ -1,14 +1,11 @@
 package com.swipy.core.notifications
 
-import android.Manifest
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.os.Build
-import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -40,12 +37,10 @@ class SwipyNotificationManager @Inject constructor(
     }
 
     fun post(trigger: NotificationTrigger, title: String, body: String) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ActivityCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) !=
-            PackageManager.PERMISSION_GRANTED
-        ) {
-            return
-        }
+        // Unifies the API 33+ POST_NOTIFICATIONS runtime-permission check with per-channel/
+        // global notification disablement on every API level, in one platform-recommended call
+        // — a user can revoke either at any time post-grant, independent of app code.
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
         val pendingIntent = PendingIntent.getActivity(
             context,
             trigger.notificationId,
