@@ -63,6 +63,16 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     private var networkFailureCount = 0
     private var lastNetworkFailureDate: Date? = nil
 
+    /// Mirrors CardStackView's isDragging/isPinching — true while the user is actively
+    /// touching the card stack. Deliberately NOT @Published: this is set on every gesture
+    /// start/end (only twice per gesture, so the cost of setting it is nil), but making it
+    /// @Published would fire objectWillChange on every mutation regardless of whether any
+    /// view actually reads it in `body`, forcing SwiftUI to re-diff the whole card ForEach —
+    /// the exact mechanism that caused the regression documented in CLAUDE.md under
+    /// "Swipe Gesture Performance" (Round 4). Background scans (startBackgroundBlurBurstPrescan)
+    /// poll this directly to yield GPU/CPU priority to an active gesture.
+    var isUserInteracting = false
+
     /// Background pre-fetch task. Cancelled on drag start, restarted on drag end.
     private var prefetchTask: Task<Void, Never>?
     /// Long-lived task that observes NetworkMonitorService.$isOnline.
@@ -474,6 +484,29 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         isBlurBurstScanActive = false
     }
 
+    /// Tuning constants for the fresh-install CPU-spike mitigations — see CLAUDE.md's
+    /// "Fresh-install first-swipe CPU spike (fixed)" for the full rationale behind each value.
+    private enum ScanTuning {
+        /// Delay before scheduleDeferredPersonaBuild() actually calls analyzeFavorites() —
+        /// gives the first real swipes of a session a clean CPU/GPU window.
+        static let personaDeferredDelay: Duration = .seconds(5)
+        /// How often prescanBatches re-checks isUserInteracting while blocked on an active gesture.
+        static let gestureInteractionPollInterval: Duration = .milliseconds(150)
+        /// Cooperative pause between prescan chunks, independent of gesture state — gives the
+        /// compositor headroom even when the user isn't actively gesturing (e.g. reading a card).
+        static let interChunkYieldDuration: Duration = .milliseconds(100)
+        /// Blurry prescan chunk size — each verdict is fully independent per-asset (no chain
+        /// state), so this can be small purely to give the gesture-guard check above frequent
+        /// checkpoints, at zero accuracy cost.
+        static let blurPrescanPageSize = 30
+        /// Burst prescan chunk size — deliberately matches accurateBurstCount()'s own page size
+        /// (PhotoStackViewModel.accurateBurstCount) so both burst-scanning entry points agree on
+        /// chain boundaries and never disagree on what gets cached for a boundary-adjacent asset.
+        /// BurstAnalyzer.analyze() has no cross-call state, so a smaller value here would risk
+        /// splitting a real long burst across two page boundaries.
+        static let burstPrescanPageSize = 500
+    }
+
     /// Walks the full library at background priority, populating BlurBurstCacheService
     /// so Blurry/Burst Smart Filters are already warm by the time the user taps into
     /// them. Cache-first throughout — re-running this after it already completed once
@@ -494,10 +527,16 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         Task.detached(priority: .background) {
             if service.fetchResult == nil { service.fetchAllPhotos() }
 
-            await Self.prescanBatches(filter: .blurryPhotos, service: service, excluding: excluded) { batch in
+            await Self.prescanBatches(
+                filter: .blurryPhotos, service: service, excluding: excluded,
+                pageSize: ScanTuning.blurPrescanPageSize, viewModel: self
+            ) { batch in
                 await BlurBurstScanEngine.shared.scanBlurry(batch, maxConcurrency: prescanConcurrency) { _ in }
             }
-            await Self.prescanBatches(filter: .burstPhotos, service: service, excluding: excluded, pageSize: 500) { batch in
+            await Self.prescanBatches(
+                filter: .burstPhotos, service: service, excluding: excluded,
+                pageSize: ScanTuning.burstPrescanPageSize, viewModel: self
+            ) { batch in
                 let analyzed = await BurstAnalyzer.shared.analyze(batch, maxConcurrency: prescanConcurrency)
                 let analyzedIDs = Set(analyzed.map { $0.id })
                 BlurBurstCacheService.shared.setBurstVerdicts(
@@ -510,22 +549,32 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     }
 
     /// Pages through every asset matching `filter`, handing each batch to `process`.
-    /// `nonisolated static` — pure pagination + delegation, no actor-isolated state.
+    /// `nonisolated static` — pure pagination + delegation; `viewModel` is only used to poll
+    /// `isUserInteracting` (a plain, non-@Published flag — see its declaration for why),
+    /// never mutated here.
     private nonisolated static func prescanBatches(
         filter: FilterCategory,
         service: PhotoLibraryService,
         excluding: Set<String>,
-        pageSize: Int = 300,
+        pageSize: Int,
+        viewModel: PhotoStackViewModel,
         process: ([PhotoItem]) async -> Void
     ) async {
         var cursor = 0
         while cursor < service.totalAssetCount {
+            // Back off entirely while the user is actively dragging/pinching — CIFilter/Vision
+            // work is GPU/ANE-bound, which GCD's .background QoS does not deprioritize (see
+            // CLAUDE.md's cold-start jank notes), so this is an explicit yield rather than
+            // relying on QoS alone to keep the compositor's frame budget clear.
+            while await viewModel.isUserInteracting {
+                try? await Task.sleep(for: ScanTuning.gestureInteractionPollInterval)
+            }
             let (batch, next) = service.fetchPageOfAssets(
                 for: filter, startIndex: cursor, pageSize: pageSize, excluding: excluding
             )
             cursor = next ?? service.totalAssetCount
             if !batch.isEmpty { await process(batch) }
-            await Task.yield()
+            try? await Task.sleep(for: ScanTuning.interChunkYieldDuration)
             if next == nil { break }
         }
     }
@@ -612,15 +661,16 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             await MainActor.run {
                 withAnimation(.spring(response: 0.6)) { self.onboardingLargeVideoCount = finalLarge }
             }
-            // Kick off persona building while the user finishes the last onboarding step.
-            await AestheticScoringService.shared.analyzeFavorites()
-            await MainActor.run { self.scoreCachedCardsIfNeeded() }
-
-            // Sequenced, not parallel: starting this alongside the work above (both used
-            // to fire together right at permission grant, during onboarding's own animated
-            // steps) doubled up CPU load at the worst possible time — two unrelated heavy
-            // background scans competing with onboarding's UI animations for the same cores.
-            await MainActor.run { self.startBackgroundBlurBurstPrescan() }
+            // Persona building is deliberately NOT awaited here — buildPersonaBlocking() is a
+            // synchronous, unconcurrent scan of up to 200 Favorites (real PHImageManager +
+            // CIFilter + Vision work, one at a time), and awaiting it used to serialize the
+            // entire prescan below behind it. scheduleDeferredPersonaBuild() fires it off on
+            // its own delayed timer instead, so it never blocks the prescan's start and never
+            // stacks GPU/ANE work on top of the user's very first real swipes.
+            await MainActor.run {
+                self.scheduleDeferredPersonaBuild()
+                self.startBackgroundBlurBurstPrescan()
+            }
         }
     }
 
@@ -790,13 +840,9 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         preShuffleStack = nil
         invalidatePendingUndo()
 
-        // Build aesthetic persona once — no-op when already ready or in-flight.
-        // After it completes, score any cards that were already cached while it was building.
-        Task.detached(priority: .utility) { [weak self] in
-            await AestheticScoringService.shared.analyzeFavorites()
-            guard let self else { return }
-            await MainActor.run { [self] in self.scoreCachedCardsIfNeeded() }
-        }
+        // Aesthetic persona build is intentionally NOT triggered here — see
+        // scheduleDeferredPersonaBuild() below for why it's deferred off the cold-start path.
+        scheduleDeferredPersonaBuild()
 
         Task {
             if photoService.fetchResult == nil { photoService.fetchAllPhotos() }
@@ -2032,6 +2078,36 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
         photoStack.insert(contentsOf: assets.map { PhotoItem(asset: $0) }, at: 0)
         precacheNextImages()
+    }
+
+    /// True while a deferred persona build (below) is scheduled or in flight — prevents
+    /// piling up redundant sleep-then-noop Tasks if this is called from multiple cold-start
+    /// entry points (resetAndLoad for a returning user, startOnboardingScan for a fresh
+    /// install) in close succession. Reset once the scheduled attempt actually runs, so a
+    /// premature attempt (e.g. permission still not granted yet) doesn't permanently block
+    /// a later, real attempt from scheduling its own.
+    private var personaBuildScheduled = false
+
+    /// Schedules the aesthetic persona build off the critical cold-start / first-swipe path.
+    /// buildPersonaBlocking() (AestheticScoringService) is a synchronous, unconcurrent scan of
+    /// up to 200 Favorites — real PHImageManager + CIFilter + Vision work, one at a time, no
+    /// TaskGroup — so running it immediately at cold start or right at onboarding permission
+    /// grant used to compete directly with the very first swipe's drag rendering. Deferring by
+    /// a fixed delay gives the initial swipe experience a clean window; analyzeFavorites()
+    /// itself is idempotent (no-ops if already built or in flight), so calling this multiple
+    /// times per session is safe. Score badges simply appear a few seconds later than before —
+    /// scoreCachedCardsIfNeeded() catches up any cards that were already on-screen and cached.
+    private func scheduleDeferredPersonaBuild() {
+        guard !personaBuildScheduled else { return }
+        personaBuildScheduled = true
+        Task.detached(priority: .utility) { [weak self] in
+            try? await Task.sleep(for: ScanTuning.personaDeferredDelay)
+            await AestheticScoringService.shared.analyzeFavorites()
+            await MainActor.run {
+                self?.personaBuildScheduled = false
+                self?.scoreCachedCardsIfNeeded()
+            }
+        }
     }
 
     /// Scores all cards currently in the image cache.
