@@ -62,37 +62,79 @@ enum DemoModeService {
     /// to switch demo video scenarios.
     static var activeSession: DemoSession = .demo2
 
+    /// Shuffle-only demo bucket — reuses Demo1's 6 already-bundled images (same asset
+    /// list + identifiersKey as `.demo1`) rather than a distinct asset group, so it never
+    /// creates a second, duplicate set of PHAssets in the real Photos library.
+    private static let demoShuffleAssets: [DemoAsset] = DemoSession.demo1.assets
+    private static let demoShuffleIdentifiersKey = DemoSession.demo1.identifiersKey
+
+    /// True once a shake has successfully loaded the active session's demo items at
+    /// least once this run. Gates the shuffle-demo sneak-peek (`PhotoStackViewModel
+    /// .pinDemoShuffleAssets`) and its fake "August 2023" landing label — pressing
+    /// Shuffle before ever shaking behaves 100% normally (real random date, no pinned
+    /// items), so the trick only kicks in mid-recording, after demo2 is already staged.
+    private(set) static var shakeDemoLoaded = false
+
     /// Resolves the active session's demo PHAssets, in session.assets' order, importing
     /// only whatever isn't already cached. Every later call (each shake) just re-fetches
     /// the same assets by their stored localIdentifier — nothing is re-imported.
     static func loadDemoAssets(completion: @escaping ([PHAsset]) -> Void) {
         let session = activeSession
+        loadAssets(session.assets, cacheKey: session.identifiersKey) { assets in
+            if !assets.isEmpty { shakeDemoLoaded = true }
+            completion(assets)
+        }
+    }
+
+    /// Same idempotent import/cache mechanism as `loadDemoAssets`, but for the fixed
+    /// shuffle-only bucket (Demo1's images) regardless of which session is active.
+    static func loadDemoShuffleAssets(completion: @escaping ([PHAsset]) -> Void) {
+        loadAssets(demoShuffleAssets, cacheKey: demoShuffleIdentifiersKey, completion: completion)
+    }
+
+    /// Fire-and-forget: imports (if needed) the shuffle demo images and decodes them
+    /// straight into PhotoLibraryService's card NSCache ahead of time, so pinning them
+    /// on a Shuffle tap later is a synchronous cache hit — zero visible loading. Safe to
+    /// call more than once (e.g. every shake); `requestCardImage` results just get re-cached.
+    static func prewarmDemoShuffleAssets() {
+        loadDemoShuffleAssets { assets in
+            print("[Demo] prewarming \(assets.count) shuffle asset(s)")
+            for asset in assets where asset.mediaType == .image {
+                PhotoLibraryService.shared.requestCardImage(for: asset) { image, isDegraded in
+                    guard let image, !isDegraded else { return }
+                    PhotoLibraryService.shared.cacheImage(image, for: asset.localIdentifier)
+                }
+            }
+        }
+    }
+
+    private static func loadAssets(_ assets: [DemoAsset], cacheKey: String, completion: @escaping ([PHAsset]) -> Void) {
         let authStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        let cache = (UserDefaults.standard.dictionary(forKey: session.identifiersKey) as? [String: String]) ?? [:]
-        print("[Demo] authStatus=\(authStatus.rawValue) cachedCount=\(cache.count)/\(session.assets.count)")
-        if let ordered = orderedAssets(for: session, cache: cache) {
+        let cache = (UserDefaults.standard.dictionary(forKey: cacheKey) as? [String: String]) ?? [:]
+        print("[Demo] authStatus=\(authStatus.rawValue) cachedCount=\(cache.count)/\(assets.count) key=\(cacheKey)")
+        if let ordered = orderedAssets(for: assets, cache: cache) {
             print("[Demo] serving \(ordered.count) cached asset(s)")
             completion(ordered)
             return
         }
-        importAndLoad(session: session, cache: cache, completion: completion)
+        importAndLoad(assets: assets, cacheKey: cacheKey, cache: cache, completion: completion)
     }
 
-    /// Resolves every item in session.assets to a PHAsset via the cache, preserving
-    /// session.assets' order. Returns nil if anything is missing from the cache (needs
-    /// importing) or a cached localIdentifier no longer resolves to a real PHAsset.
-    private static func orderedAssets(for session: DemoSession, cache: [String: String]) -> [PHAsset]? {
-        let ids = session.assets.map { cache[$0.cacheKey] }
+    /// Resolves every item in `assets` to a PHAsset via the cache, preserving `assets`'
+    /// order. Returns nil if anything is missing from the cache (needs importing) or a
+    /// cached localIdentifier no longer resolves to a real PHAsset.
+    private static func orderedAssets(for assets: [DemoAsset], cache: [String: String]) -> [PHAsset]? {
+        let ids = assets.map { cache[$0.cacheKey] }
         guard ids.allSatisfy({ $0 != nil }) else { return nil }
         let nonNilIDs = ids.compactMap { $0 }
         let result = PHAsset.fetchAssets(withLocalIdentifiers: nonNilIDs, options: nil)
         var byID: [String: PHAsset] = [:]
         result.enumerateObjects { asset, _, _ in byID[asset.localIdentifier] = asset }
-        let assets = nonNilIDs.compactMap { byID[$0] }
-        return assets.count == nonNilIDs.count ? assets : nil
+        let resolved = nonNilIDs.compactMap { byID[$0] }
+        return resolved.count == nonNilIDs.count ? resolved : nil
     }
 
-    private static func importAndLoad(session: DemoSession, cache: [String: String], completion: @escaping ([PHAsset]) -> Void) {
+    private static func importAndLoad(assets: [DemoAsset], cacheKey: String, cache: [String: String], completion: @escaping ([PHAsset]) -> Void) {
         // A cache entry alone isn't enough — the localIdentifier it points to may no
         // longer resolve (e.g. the demo asset was deleted from Photos directly), so treat
         // that the same as never having been imported and re-create it.
@@ -102,7 +144,7 @@ enum DemoModeService {
             let result = PHAsset.fetchAssets(withLocalIdentifiers: cachedIDs, options: nil)
             result.enumerateObjects { asset, _, _ in resolvedIDs.insert(asset.localIdentifier) }
         }
-        let missing = session.assets.filter { asset in
+        let missing = assets.filter { asset in
             guard let id = cache[asset.cacheKey] else { return true }
             return !resolvedIDs.contains(id)
         }
@@ -144,9 +186,9 @@ enum DemoModeService {
             for (key, placeholder) in placeholders {
                 updatedCache[key] = placeholder.localIdentifier
             }
-            UserDefaults.standard.set(updatedCache, forKey: session.identifiersKey)
-            let ordered = orderedAssets(for: session, cache: updatedCache) ?? []
-            print("[Demo] resolved \(ordered.count)/\(session.assets.count) final asset(s)")
+            UserDefaults.standard.set(updatedCache, forKey: cacheKey)
+            let ordered = orderedAssets(for: assets, cache: updatedCache) ?? []
+            print("[Demo] resolved \(ordered.count)/\(assets.count) final asset(s)")
             DispatchQueue.main.async { completion(ordered) }
         })
     }

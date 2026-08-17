@@ -960,6 +960,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 isLoading = false
                 shuffleBatchID = UUID()
                 if !photoStack.isEmpty { precacheNextImages() }
+                pinDemoShuffleAssets()
             } else if currentFilter == .blurryPhotos || currentFilter == .burstPhotos || currentFilter == .largeVideos {
                 // These filters require ViewModel-level detection (blur/burst/fileSize) —
                 // jump the cursor and delegate to scanUntilFull, same as the normal load path.
@@ -985,6 +986,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 isLoading = false
                 shuffleBatchID = UUID()
                 if !photoStack.isEmpty { precacheNextImages() }
+                pinDemoShuffleAssets()
             } else {
                 var (items, nextIdx) = photoService.fetchPageOfAssets(
                     for: currentFilter,
@@ -1018,6 +1020,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                     self.isLoading = false
                     self.shuffleBatchID = UUID()
                     if !self.photoStack.isEmpty { self.precacheNextImages() }
+                    self.pinDemoShuffleAssets()
                 }
             }
         }
@@ -2078,6 +2081,21 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
         photoStack.insert(contentsOf: assets.map { PhotoItem(asset: $0) }, at: 0)
         precacheNextImages()
+    }
+
+    /// DEMO BRANCH ONLY — after a real shuffle jump lands, prepends the pre-warmed
+    /// shuffle-only demo bucket (see `DemoModeService.prewarmDemoShuffleAssets`) so the
+    /// cards shown right after tapping Shuffle are an NSCache hit with zero visible
+    /// loading. Guarded on `isShuffleModeActive` so the empty-result fallback branches
+    /// (which reset it back to `false` and restore the plain linear stack) don't pin
+    /// demo cards onto a stack the user never actually shuffled into. Also guarded on
+    /// `DemoModeService.shakeDemoLoaded` — Shuffle behaves like a real jump (real items,
+    /// real landing date) until the shake demo has actually run once.
+    private func pinDemoShuffleAssets() {
+        guard isShuffleModeActive, DemoModeService.shakeDemoLoaded else { return }
+        DemoModeService.loadDemoShuffleAssets { [weak self] assets in
+            self?.pinDemoAssets(assets)
+        }
     }
 
     /// True while a deferred persona build (below) is scheduled or in flight — prevents

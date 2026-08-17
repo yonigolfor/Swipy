@@ -220,6 +220,9 @@ struct SwipeStackView: View {
                 print("[Demo] loadDemoAssets returned \(assets.count) asset(s)")
                 viewModel.pinDemoAssets(assets)
             }
+            // Warm the shuffle-only demo bucket now, well ahead of the Shuffle tap later
+            // in the recording, so that jump shows zero visible loading.
+            DemoModeService.prewarmDemoShuffleAssets()
         }
         .toolbarBackground(.visible, for: .tabBar)
         .onAppear {
@@ -267,7 +270,14 @@ struct SwipeStackView: View {
                 cardStackScale = 1
             }
             if viewModel.isShuffleModeActive {
-                if let date = viewModel.photoStack.first?.asset.creationDate {
+                // DEMO BRANCH ONLY — once the shake demo has run, every shuffle re-pins
+                // the demo-shuffle sneak peek to the front of the (still genuinely
+                // random) landing stack; the label shows a fixed August 2023 instead of
+                // those items' real (just-now) import date. Revert to always using
+                // photoStack.first's real creationDate before merging back to main.
+                if DemoModeService.shakeDemoLoaded, let fakeDate = demoShuffleDisplayDate {
+                    triggerTimeIndicator(for: fakeDate)
+                } else if let date = viewModel.photoStack.first?.asset.creationDate {
                     triggerTimeIndicator(for: date)
                 }
             } else {
@@ -777,6 +787,13 @@ struct SwipeStackView: View {
         DispatchQueue.main.asyncAfter(deadline: .now() + 2.2) {
             withAnimation(.easeOut(duration: 0.35)) { showTimeIndicator = false }
         }
+    }
+
+    /// DEMO BRANCH ONLY — fixed display date for the shuffle-demo sneak peek (see
+    /// `.onChange(of: viewModel.shuffleBatchID)` above). Purely cosmetic: the actual
+    /// jump target stays exactly as random as ever, only the label lies.
+    private var demoShuffleDisplayDate: Date? {
+        DateComponents(calendar: .current, year: 2023, month: 8, day: 15).date
     }
 
     private func formatShuffleDate(_ date: Date) -> String {
