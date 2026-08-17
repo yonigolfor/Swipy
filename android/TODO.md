@@ -319,3 +319,78 @@ wired into `:app`:
    Splitting by trigger type is a genuine Android capability with no iOS analogue (iOS has no
    per-category user-facing mute toggle the way Android's per-channel settings do) worth a
    deliberate decision rather than defaulting to iOS's single-category shape.
+
+---
+
+## 8. Paywall Integration & Play Billing — 🔴 NOT STARTED
+
+Confirmed via grep: `:feature:paywall` is registered in `settings.gradle.kts` and exists only as
+an empty directory containing a bare `build.gradle.kts` — no screen, no ViewModel, no strings.
+**Play Billing Library is not in the dependency catalog at all** (`gradle/libs.versions.toml` has
+zero hits for `billing`). This is the Android port of iOS's `PaywallView.swift` (3-tier
+Monthly/Yearly/Lifetime pricing, gold-glow selection, dynamic CTA) + `PremiumManager.swift`
+(StoreKit 2 — `PremiumTier` enum, entitlement status, purchase/restore). See root `CLAUDE.md`
+→ "Key Behavioral Constraints" → "Paywall (3-tier)" for the full iOS spec to port from,
+including the two presentation contexts (`postOnboarding`/`swipeLimitReached`).
+
+Tightly coupled to item 9 below — the swipe-limit-reached trigger is what actually presents the
+paywall on iOS, so these two are one track, not two independent features.
+
+---
+
+## 9. Swipe Quota (DailyLimitService) — 🔴 NOT STARTED
+
+No `DailyLimitService`/swipe-cap use case exists anywhere under `:domain` or `:feature:swipe`
+(confirmed via grep — zero hits for `dailylimit`/`swipequota`/`swipelimit` outside of
+`:core:notifications`' already-built `SwipeLimitReset` trigger, which has nothing to call it).
+iOS's `DailyLimitService` gates keep/delete swipes at 120/day + a one-time +50 share bonus, then
+triggers the paywall (item 8) via `viewModel.shouldShowPaywall = true` — see
+`CardStackView.swift`'s `dragGesture.onEnded`, the `!viewModel.canSwipe` branch, for the exact
+trigger point to port. Right now Android has **no daily swipe limit at all**. This is also the
+reason notification trigger 4 (Swipe Limit Reset) is listed as unreachable in item 7 above — it
+needs this service to exist before anything can call `NotificationScheduler.scheduleExact(SwipeLimitReset, ...)`.
+
+---
+
+## 10. Pinch-to-Zoom on Top Card — 🟡 IMPLEMENTED, NOT YET VERIFIED ON-DEVICE
+
+Ported from iOS's `CardStackView.swift` "Pinch Gesture" section + `SwipeStackView.swift`'s
+dim-overlay/`isPinching` wiring.
+
+**Fix applied**: `CardStackLayer.kt`'s single `detectDragGestures` call was replaced with a
+custom `awaitEachGesture` loop that arbitrates 1-finger swipe vs. 2+-finger pinch by inspecting
+the live pointer count each event — Compose has no SwiftUI-style "simultaneousGesture
+auto-routes by finger count" primitive, so this is hand-rolled from the same public building
+blocks `detectTransformGestures` itself uses (`PointerEvent.calculateZoom()`/`calculatePan()`/
+`calculateCentroid()`). Entering a pinch resets any in-flight drag offset/rotation to zero
+(mirrors iOS's identical reset in `pinchGesture.onChanged`); a pinch ending while one finger
+remains down does not retroactively start a swipe (mirrors SwiftUI gesture-recognizer
+exclusivity) via a `pinchEndedThisGesture` flag. Touch-slop is hand-implemented
+(`viewConfiguration.touchSlop`) since the custom detector fully replaces `detectDragGestures`,
+which used to provide it internally.
+
+Card transform is split across **two** stacked `graphicsLayer` modifiers, not one — a single
+`graphicsLayer` shares one `transformOrigin` between `scaleX/Y` and `rotationZ`, but iOS's
+`.scaleEffect(pinchScale, anchor:)`/`.rotationEffect()` are independent modifiers with
+independent anchors (rotation always about center regardless of the pinch anchor). Stacking two
+layers (scale+translate anchored at `pinchAnchor`, then a separate layer for `rotationZ` at the
+default center origin) is what lets Compose reproduce that independence — necessary because
+`pinchAnchor` is deliberately never reset after a pinch ends (matches iOS, avoids a jump on the
+next zoom), so a subsequent normal swipe's rotation would otherwise pivot around a stale
+off-center point instead of the card's own center. Release springs `pinchScale → 1f` /
+`pinchOffset → Offset.zero` via the same `animate()`-into-`mutableFloatStateOf` pattern used for
+the drag release animation (see item 3 of the architecture audit fixes) — not raw `Animatable`,
+consistent with this file's per-frame-state discipline. `SwipeStackScreen.kt` hoists a discrete
+`isPinching` boolean (via `onPinchStateChanged`, never the per-frame pinch values themselves) to
+elevate the card layer's `zIndex` to 200 and fade in a `0.55`-alpha black scrim (`tween(200)` in,
+instant snap out) — matches iOS's `zIndex(isPinching ? 200 : 0)` / dim-overlay spec exactly.
+
+**Deliberately not ported**: iOS also hides the tab bar during a pinch. Android's bottom
+`NavigationBar` has no hide-on-gesture wiring at all yet (confirmed via grep — not even for the
+existing drag), so nothing to hook into here; revisit once nav-hide exists for any reason.
+
+**Not yet tested on a physical device** — no device was connected this pass (`adb devices`
+returned empty). `./gradlew :app:assembleDebug test` passes, but pinch-to-zoom is multi-touch,
+`graphicsLayer`-composition-order-sensitive gesture code — verify the actual zoom/pan feel,
+touch-slop threshold, and anchor-point accuracy on-device before considering this pixel-final,
+same caveat as item 2's RTL work.

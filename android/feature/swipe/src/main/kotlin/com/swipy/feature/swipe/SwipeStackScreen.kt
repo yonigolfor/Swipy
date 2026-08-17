@@ -3,6 +3,8 @@ package com.swipy.feature.swipe
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -35,6 +37,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.swipy.core.designsystem.component.SessionSavingsBar
@@ -77,6 +80,17 @@ fun SwipeStackScreen(
     val cardAreaScale = remember { Animatable(1f) }
     var isTransitioning by remember { mutableStateOf(false) }
     var indicatorText by remember { mutableStateOf<String?>(null) }
+    // Mirrors CardStackView's continuous pinch state up to this screen's chrome — hoisted only
+    // as a discrete start/end flag (never the per-frame pinchScale/pinchOffset themselves),
+    // same "only discrete events cross into the parent" discipline as onSwipeCommitted.
+    var isPinching by remember { mutableStateOf(false) }
+    // Animates in over 0.2s while zooming, snaps out instantly on release — matches
+    // SwipeStackView.swift's `.animation(isPinching ? .easeInOut(duration: 0.2) : nil, value:)`.
+    val pinchScrimAlpha by animateFloatAsState(
+        targetValue = if (isPinching) 0.55f else 0f,
+        animationSpec = if (isPinching) tween(200) else snap(),
+        label = "pinchScrim",
+    )
     // Resolved here, not inline in the LaunchedEffect below — stringResource() requires a
     // @Composable context, and viewModel.effects.collect {}'s lambda isn't one.
     val shuffleLandedHomeLabel = stringResource(R.string.swipe_shuffle_landed_home)
@@ -124,6 +138,10 @@ fun SwipeStackScreen(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                // Elevates the card above the savings bar/badges/FAB/scrim while pinching
+                // (matches iOS's `.zIndex(isPinching ? 200 : 0)` on the equivalent container),
+                // so the zoomed card isn't clipped underneath this screen's other chrome.
+                .zIndex(if (isPinching) 200f else 0f)
                 .graphicsLayer {
                     translationY = cardAreaOffsetY.value
                     alpha = cardAreaOpacity.value
@@ -145,6 +163,7 @@ fun SwipeStackScreen(
                     onSwipeCommitted = { item, action ->
                         viewModel.onIntent(PhotoStackIntent.Swipe(item, action))
                     },
+                    onPinchStateChanged = { isPinching = it },
                     modifier = Modifier.padding(top = 100.dp),
                 )
             }
@@ -214,5 +233,16 @@ fun SwipeStackScreen(
                 },
             )
         }
+
+        // Pinch-zoom background dim — above all chrome (savings bar/badges/FAB, all default
+        // zIndex 0) but below the zoomed card (zIndex 200 above). A bare decorative Box with no
+        // input-handling modifier never intercepts touch by default, the Compose equivalent of
+        // iOS's explicit `.allowsHitTesting(false)` — no extra modifier needed for that here.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .zIndex(190f)
+                .background(Color.Black.copy(alpha = pinchScrimAlpha)),
+        )
     }
 }

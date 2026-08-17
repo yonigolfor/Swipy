@@ -5,7 +5,11 @@ import androidx.compose.animation.core.animate
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculateCentroid
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
@@ -20,8 +24,12 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.input.pointer.positionChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -72,6 +80,7 @@ fun CardStackLayer(
     items: ImmutableList<PhotoItem>,
     onSwipeCommitted: (PhotoItem, SwipeAction) -> Unit,
     modifier: Modifier = Modifier,
+    onPinchStateChanged: (Boolean) -> Unit = {},
 ) {
     val hapticManager = rememberHapticManager()
 
@@ -92,6 +101,8 @@ fun CardStackLayer(
         // around it, rather than an edge-to-edge full-bleed image.
         val cardW = minOf(maxWidth - CARD_HORIZONTAL_MARGIN, maxHeight * 9f / 16f)
         val cardH = cardW * 16f / 9f
+        val cardWidthPx = with(density) { cardW.toPx() }
+        val cardHeightPx = with(density) { cardH.toPx() }
 
         val visible = items.take(CARD_STACK_SIZE)
 
@@ -112,6 +123,15 @@ fun CardStackLayer(
                 var rotation by remember { mutableFloatStateOf(0f) }
                 var swipeDirection by remember { mutableStateOf<SwipeAction?>(null) }
                 var isDragging by remember { mutableStateOf(false) }
+
+                // Pinch-to-zoom state — same "plain synchronous state, never Animatable during
+                // the active gesture" discipline as the drag values above. pinchAnchor is
+                // deliberately never reset back to center on release (matches iOS
+                // CardStackView.swift's pinchGesture comment) — resetting it would cause a
+                // visible jump the next time the user zooms.
+                var pinchScale by remember { mutableFloatStateOf(1f) }
+                var pinchOffset by remember { mutableStateOf(Offset.Zero) }
+                var pinchAnchor by remember { mutableStateOf(TransformOrigin.Center) }
 
                 // Stable per-card tilt for the background/receding look — computed once per
                 // item id, not re-rolled on every recomposition.
@@ -161,76 +181,196 @@ fun CardStackLayer(
                         .size(cardW, cardH)
                         .zIndex((CARD_STACK_SIZE - index).toFloat())
                         .graphicsLayer {
-                            translationX = if (isTop) offsetX else 0f
-                            translationY = if (isTop) offsetY else restingOffsetY
-                            rotationZ = if (isTop) rotation else tiltDegrees
-                            scaleX = restingScale
-                            scaleY = restingScale
+                            // Drag offset and pinch pan are never simultaneously non-zero —
+                            // entering a pinch resets offsetX/offsetY to 0, and drag is
+                            // suppressed for the rest of the gesture once a pinch has started
+                            // (see the pointerInput block below) — so adding them here is safe.
+                            translationX = if (isTop) offsetX + pinchOffset.x else 0f
+                            translationY = if (isTop) offsetY + pinchOffset.y else restingOffsetY
+                            scaleX = if (isTop) restingScale * pinchScale else restingScale
+                            scaleY = if (isTop) restingScale * pinchScale else restingScale
+                            transformOrigin = if (isTop) pinchAnchor else TransformOrigin.Center
                             alpha = restingAlpha
+                        }
+                        // Separate layer so rotation always pivots around the card's own
+                        // center, independent of pinchAnchor — a single graphicsLayer shares
+                        // one transformOrigin between scale and rotation, but iOS's
+                        // rotationEffect/scaleEffect are independent modifiers with
+                        // independent anchors (rotation always about center). Stacking two
+                        // layers is what lets Compose reproduce that independence — this
+                        // layer's rotation is applied to the already translated+scaled result
+                        // of the layer above, pivoting about the (untransformed) card bounds,
+                        // exactly mirroring iOS's offset → scale(anchor) → offset → rotate
+                        // modifier chain order (CardStackView.swift "cardStack").
+                        .graphicsLayer {
+                            rotationZ = if (isTop) rotation else tiltDegrees
                         }
                         .pointerInput(item.id, isTop) {
                             if (!isTop) return@pointerInput
-                            detectDragGestures(
-                                onDragStart = { isDragging = true },
-                                onDrag = { change, dragAmount ->
-                                    change.consume()
-                                    // Synchronous — no coroutine launch per frame. onDrag isn't
-                                    // suspend, and these are plain mutableFloatStateOf writes
-                                    // read only inside graphicsLayer above, so this never
-                                    // triggers recomposition, only a re-draw.
-                                    offsetX += dragAmount.x
-                                    offsetY += dragAmount.y
-                                    rotation = (offsetX / ROTATION_SENSITIVITY)
-                                        .coerceIn(-MAX_ROTATION_DEGREES, MAX_ROTATION_DEGREES)
-                                    // Reuses the same threshold/resolution as the actual commit
-                                    // decision below (unlike iOS, which happens to use one
-                                    // shared 80pt SwipeDirection.from(offset:) for both already)
-                                    // — the live badge preview must never show a direction that
-                                    // wouldn't actually commit if released right now.
-                                    val newDirection = resolveSwipeDirection(offsetX, offsetY, thresholdPx)
-                                    if (newDirection != swipeDirection) {
-                                        swipeDirection = newDirection
-                                        hapticManager.thresholdCrossed()
+
+                            fun applyDrag(delta: Offset) {
+                                offsetX += delta.x
+                                offsetY += delta.y
+                                rotation = (offsetX / ROTATION_SENSITIVITY)
+                                    .coerceIn(-MAX_ROTATION_DEGREES, MAX_ROTATION_DEGREES)
+                                // Reuses the same threshold/resolution as the actual commit
+                                // decision below (unlike iOS, which happens to use one shared
+                                // 80pt SwipeDirection.from(offset:) for both already) — the
+                                // live badge preview must never show a direction that wouldn't
+                                // actually commit if released right now.
+                                val newDirection = resolveSwipeDirection(offsetX, offsetY, thresholdPx)
+                                if (newDirection != swipeDirection) {
+                                    swipeDirection = newDirection
+                                    hapticManager.thresholdCrossed()
+                                }
+                            }
+
+                            fun endPinch() {
+                                onPinchStateChanged(false)
+                                val snapBack = spring<Float>(dampingRatio = Spring.DampingRatioNoBouncy, stiffness = 440f)
+                                scope.launch {
+                                    launch { animate(pinchScale, 1f, animationSpec = snapBack) { value, _ -> pinchScale = value } }
+                                    launch {
+                                        animate(pinchOffset.x, 0f, animationSpec = snapBack) { value, _ -> pinchOffset = pinchOffset.copy(x = value) }
                                     }
-                                },
-                                onDragEnd = {
-                                    isDragging = false
-                                    swipeDirection = null
-                                    val direction = resolveSwipeDirection(offsetX, offsetY, thresholdPx)
-                                    scope.launch {
-                                        if (direction != null) {
-                                            val targetX = when (direction) {
-                                                SwipeAction.Keep -> flingDistanceXPx
-                                                SwipeAction.Delete -> -flingDistanceXPx
-                                                else -> offsetX
-                                            }
-                                            val targetY = if (direction == SwipeAction.Snooze) {
-                                                -flingDistanceYPx
-                                            } else {
-                                                offsetY
-                                            }
-                                            launch { animate(offsetX, targetX, animationSpec = tween(220)) { value, _ -> offsetX = value } }
-                                            launch { animate(offsetY, targetY, animationSpec = tween(220)) { value, _ -> offsetY = value } }
-                                            when (direction) {
-                                                SwipeAction.Keep -> hapticManager.keep()
-                                                SwipeAction.Delete -> hapticManager.delete()
-                                                SwipeAction.Snooze -> hapticManager.snooze()
-                                                SwipeAction.Undo -> Unit
-                                            }
-                                            onSwipeCommitted(item, direction)
-                                        } else {
-                                            val snapBack = spring<Float>(dampingRatio = Spring.DampingRatioMediumBouncy)
-                                            launch { animate(offsetX, 0f, animationSpec = snapBack) { value, _ -> offsetX = value } }
-                                            launch { animate(offsetY, 0f, animationSpec = snapBack) { value, _ -> offsetY = value } }
-                                            launch { animate(rotation, 0f, animationSpec = snapBack) { value, _ -> rotation = value } }
+                                    launch {
+                                        animate(pinchOffset.y, 0f, animationSpec = snapBack) { value, _ -> pinchOffset = pinchOffset.copy(y = value) }
+                                    }
+                                }
+                                // pinchAnchor intentionally not reset — see its declaration comment.
+                            }
+
+                            fun endDrag() {
+                                isDragging = false
+                                swipeDirection = null
+                                val direction = resolveSwipeDirection(offsetX, offsetY, thresholdPx)
+                                scope.launch {
+                                    if (direction != null) {
+                                        val targetX = when (direction) {
+                                            SwipeAction.Keep -> flingDistanceXPx
+                                            SwipeAction.Delete -> -flingDistanceXPx
+                                            else -> offsetX
                                         }
+                                        val targetY = if (direction == SwipeAction.Snooze) {
+                                            -flingDistanceYPx
+                                        } else {
+                                            offsetY
+                                        }
+                                        launch { animate(offsetX, targetX, animationSpec = tween(220)) { value, _ -> offsetX = value } }
+                                        launch { animate(offsetY, targetY, animationSpec = tween(220)) { value, _ -> offsetY = value } }
+                                        when (direction) {
+                                            SwipeAction.Keep -> hapticManager.keep()
+                                            SwipeAction.Delete -> hapticManager.delete()
+                                            SwipeAction.Snooze -> hapticManager.snooze()
+                                            SwipeAction.Undo -> Unit
+                                        }
+                                        onSwipeCommitted(item, direction)
+                                    } else {
+                                        val snapBack = spring<Float>(dampingRatio = Spring.DampingRatioMediumBouncy)
+                                        launch { animate(offsetX, 0f, animationSpec = snapBack) { value, _ -> offsetX = value } }
+                                        launch { animate(offsetY, 0f, animationSpec = snapBack) { value, _ -> offsetY = value } }
+                                        launch { animate(rotation, 0f, animationSpec = snapBack) { value, _ -> rotation = value } }
                                     }
-                                },
-                                onDragCancel = {
-                                    isDragging = false
-                                    swipeDirection = null
-                                },
-                            )
+                                }
+                            }
+
+                            // Custom dual-mode detector (rather than detectDragGestures) — Compose
+                            // has no SwiftUI-style "simultaneousGesture auto-routes by finger
+                            // count" primitive, so 1-finger swipe and 2+-finger pinch-zoom are
+                            // arbitrated here by inspecting the live pointer count each event, the
+                            // same low-level pattern detectTransformGestures itself is built from
+                            // (calculateZoom/calculatePan/calculateCentroid are its own public
+                            // building blocks). Mirrors CardStackView.swift's MagnificationGesture
+                            // .simultaneously(with: DragGesture) composition.
+                            awaitEachGesture {
+                                awaitFirstDown(requireUnconsumed = false)
+                                var isPinchActive = false
+                                // True once a pinch has been recognized and released within this
+                                // gesture — a remaining single finger must NOT retroactively start
+                                // a swipe drag, mirroring iOS's gesture-recognizer exclusivity.
+                                var pinchEndedThisGesture = false
+                                // Below-touch-slop movement accumulates here until it's large
+                                // enough to count as an intentional drag (matches
+                                // detectDragGestures' internal touch-slop behavior, which this
+                                // custom detector otherwise replaces wholesale).
+                                var slopAccumulator = Offset.Zero
+
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val pressedChanges = event.changes.filter { it.pressed }
+
+                                    when {
+                                        pressedChanges.size >= 2 -> {
+                                            if (!isPinchActive) {
+                                                isPinchActive = true
+                                                onPinchStateChanged(true)
+                                                // A single-finger drag may already be mid-flight
+                                                // when the second finger lands — without this
+                                                // reset, offsetX/offsetY/rotation would stay
+                                                // frozen at their last value and stack underneath
+                                                // pinchOffset for the rest of the gesture instead
+                                                // of the card tracking the pinch (mirrors iOS's
+                                                // identical reset in pinchGesture.onChanged).
+                                                isDragging = false
+                                                swipeDirection = null
+                                                offsetX = 0f
+                                                offsetY = 0f
+                                                rotation = 0f
+                                                val centroid = event.calculateCentroid(useCurrent = true)
+                                                pinchAnchor = TransformOrigin(
+                                                    (centroid.x / cardWidthPx).coerceIn(0f, 1f),
+                                                    (centroid.y / cardHeightPx).coerceIn(0f, 1f),
+                                                )
+                                            }
+                                            val zoom = event.calculateZoom()
+                                            // Local/content-space pan must be scaled by the
+                                            // current pinchScale to read as 1:1 screen-space
+                                            // movement — same correction iOS applies in its own
+                                            // inner DragGesture (CardStackView.swift:353-357),
+                                            // since pointerInput reports positions in the card's
+                                            // pre-transform layout space, not the visually
+                                            // scaled-up space.
+                                            val pan = event.calculatePan()
+                                            pinchScale = (pinchScale * zoom).coerceAtLeast(1f)
+                                            pinchOffset += pan * pinchScale
+                                            event.changes.forEach { if (it.positionChanged()) it.consume() }
+                                        }
+
+                                        pressedChanges.size == 1 -> {
+                                            val change = pressedChanges[0]
+                                            when {
+                                                isPinchActive -> {
+                                                    isPinchActive = false
+                                                    pinchEndedThisGesture = true
+                                                    endPinch()
+                                                    if (change.positionChanged()) change.consume()
+                                                }
+                                                pinchEndedThisGesture -> {
+                                                    if (change.positionChanged()) change.consume()
+                                                }
+                                                change.positionChanged() -> {
+                                                    val delta = change.positionChange()
+                                                    if (!isDragging) {
+                                                        slopAccumulator += delta
+                                                        if (slopAccumulator.getDistance() > viewConfiguration.touchSlop) {
+                                                            isDragging = true
+                                                            change.consume()
+                                                            applyDrag(slopAccumulator)
+                                                        }
+                                                    } else {
+                                                        change.consume()
+                                                        applyDrag(delta)
+                                                    }
+                                                }
+                                            }
+                                        }
+
+                                        else -> break
+                                    }
+                                }
+
+                                if (isDragging) endDrag()
+                            }
                         },
                 ) {
                     PhotoCardComposable(item = item, isTop = isTop, modifier = Modifier.fillMaxSize())
