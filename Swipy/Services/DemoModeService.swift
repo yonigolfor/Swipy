@@ -62,11 +62,20 @@ enum DemoModeService {
     /// to switch demo video scenarios.
     static var activeSession: DemoSession = .demo2
 
-    /// Shuffle-only demo bucket — reuses Demo1's 6 already-bundled images (same asset
-    /// list + identifiersKey as `.demo1`) rather than a distinct asset group, so it never
-    /// creates a second, duplicate set of PHAssets in the real Photos library.
-    private static let demoShuffleAssets: [DemoAsset] = DemoSession.demo1.assets
-    private static let demoShuffleIdentifiersKey = DemoSession.demo1.identifiersKey
+    /// The 3 sneak-peek items shown *first* on a Shuffle tap, ahead of Demo1's 6 images
+    /// below — a personal pelican/tree/beach set, distinct from either demo1 or demo2's
+    /// own session content.
+    private static let shuffleSneakPeekAssets: [DemoAsset] = [
+        .video(resource: "ShuffleBeach", ext: "mov"),
+        .image(name: "ShufflePelican"),
+        .image(name: "ShuffleTree"),
+    ]
+
+    /// Shuffle-only demo bucket — the 3 sneak-peek items above, followed by Demo1's 6
+    /// already-bundled images. Own dedicated cache key (not demo1's own) since the
+    /// bucket's content no longer matches demo1's asset list 1:1.
+    private static let demoShuffleAssets: [DemoAsset] = shuffleSneakPeekAssets + DemoSession.demo1.assets
+    private static let demoShuffleIdentifiersKey = "demoAssetIdentifierCache_shuffle"
 
     /// True once a shake has successfully loaded the active session's demo items at
     /// least once this run. Gates the shuffle-demo sneak-peek (`PhotoStackViewModel
@@ -120,8 +129,12 @@ enum DemoModeService {
     /// to leave the real Photos library exactly as it was before demo mode touched it.
     static func deleteAllDemoAssets(completion: @escaping (Bool) -> Void) {
         let sessions: [DemoSession] = [.demo1, .demo2]
-        let allIDs = Set(sessions.flatMap { session in
-            ((UserDefaults.standard.dictionary(forKey: session.identifiersKey) as? [String: String]) ?? [:]).values
+        // demoShuffleIdentifiersKey is its own dedicated cache key (no longer aliases
+        // demo1's), so it must be swept separately or the sneak-peek trio would leak
+        // out of cleanup entirely.
+        let cacheKeys = sessions.map { $0.identifiersKey } + [demoShuffleIdentifiersKey]
+        let allIDs = Set(cacheKeys.flatMap { key in
+            ((UserDefaults.standard.dictionary(forKey: key) as? [String: String]) ?? [:]).values
         })
         guard !allIDs.isEmpty else {
             print("[Demo] deleteAllDemoAssets — nothing to delete")
@@ -134,7 +147,7 @@ enum DemoModeService {
             PHAssetChangeRequest.deleteAssets(toDelete)
         }, completionHandler: { success, error in
             if success {
-                for session in sessions { UserDefaults.standard.removeObject(forKey: session.identifiersKey) }
+                for key in cacheKeys { UserDefaults.standard.removeObject(forKey: key) }
                 shakeDemoLoaded = false
                 print("[Demo] deleteAllDemoAssets succeeded")
             } else {
