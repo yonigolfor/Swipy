@@ -284,6 +284,19 @@ struct SwipeStackView: View {
         // Silent re-check when returning from Settings — only reloads if access was
         // actually blocked before and was just granted, never on an ordinary foreground.
         .onChange(of: scenePhase) { newPhase in
+            if newPhase == .background {
+                // Safety net: DragGesture/MagnificationGesture's onEnded isn't guaranteed to
+                // fire if the app resigns active mid-gesture (e.g. Home button pressed while
+                // a finger is still down on a card) — without this, isDragging/isPinching/
+                // viewModel.isUserInteracting could stay stuck `true` for the rest of the
+                // session, permanently hanging startBackgroundBlurBurstPrescan()'s gesture-
+                // guard loop and starving its scan lock (see CLAUDE.md's code-review note on
+                // this). Backgrounding always ends any in-flight gesture from the user's
+                // perspective, so unconditionally resetting here is always correct.
+                isDragging = false
+                isPinching = false
+                viewModel.isUserInteracting = false
+            }
             guard newPhase == .active else { return }
             let currentStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
             defer { lastKnownAuthStatus = currentStatus }

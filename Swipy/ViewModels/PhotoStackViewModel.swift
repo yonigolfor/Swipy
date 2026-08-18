@@ -492,6 +492,14 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         static let personaDeferredDelay: Duration = .seconds(5)
         /// How often prescanBatches re-checks isUserInteracting while blocked on an active gesture.
         static let gestureInteractionPollInterval: Duration = .milliseconds(150)
+        /// Safety-net ceiling on how long prescanBatches will wait on isUserInteracting before
+        /// giving up and proceeding anyway. SwipeStackView's scenePhase observer is the primary
+        /// fix for isUserInteracting getting stuck `true` (a gesture whose onEnded never fires
+        /// because the app backgrounds mid-drag) — this is defense-in-depth for any other way
+        /// it could happen, since the consequence of hanging here forever isn't just "this scan
+        /// pauses": it never calls releaseBlurBurstScan(), permanently starving the shared lock
+        /// and silently disabling Smart Filters' Blurry/Burst accurate counts for the session.
+        static let gestureWaitTimeout: Duration = .seconds(30)
         /// Cooperative pause between prescan chunks, independent of gesture state — gives the
         /// compositor headroom even when the user isn't actively gesturing (e.g. reading a card).
         static let interChunkYieldDuration: Duration = .milliseconds(100)
@@ -566,8 +574,14 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             // work is GPU/ANE-bound, which GCD's .background QoS does not deprioritize (see
             // CLAUDE.md's cold-start jank notes), so this is an explicit yield rather than
             // relying on QoS alone to keep the compositor's frame budget clear.
+            var waitedForGesture: Duration = .zero
             while await viewModel.isUserInteracting {
+                if waitedForGesture >= ScanTuning.gestureWaitTimeout {
+                    print("[PhotoStackViewModel] prescanBatches — isUserInteracting stuck true for \(ScanTuning.gestureWaitTimeout), proceeding anyway")
+                    break
+                }
                 try? await Task.sleep(for: ScanTuning.gestureInteractionPollInterval)
+                waitedForGesture += ScanTuning.gestureInteractionPollInterval
             }
             let (batch, next) = service.fetchPageOfAssets(
                 for: filter, startIndex: cursor, pageSize: pageSize, excluding: excluding
