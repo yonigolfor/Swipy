@@ -62,6 +62,21 @@ struct SmartFiltersView: View {
                             .foregroundColor(.orange)
                     }
                 }
+                // DEMO BRANCH ONLY — wipes every demo asset (shake-to-restage's demo1/demo2
+                // sets, including the shuffle sneak-peek bucket) out of the real Photos
+                // library. Lives here, not on SwipeStackView, so it never appears on-screen
+                // during an actual recording — tap once after a session to leave Photos
+                // exactly as it was before demo mode touched it. Delete before merging to main.
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button {
+                        DemoModeService.deleteAllDemoAssets { success in
+                            print("[Demo] cleanup from Smart Filters toolbar — success=\(success)")
+                        }
+                    } label: {
+                        Image(systemName: "trash.fill")
+                            .foregroundColor(.red)
+                    }
+                }
             }
             #endif
             .task {

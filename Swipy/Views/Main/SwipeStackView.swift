@@ -221,8 +221,12 @@ struct SwipeStackView: View {
                 viewModel.pinDemoAssets(assets)
             }
             // Warm the shuffle-only demo bucket now, well ahead of the Shuffle tap later
-            // in the recording, so that jump shows zero visible loading.
-            DemoModeService.prewarmDemoShuffleAssets()
+            // in the recording, so that jump shows zero visible loading. Importing these
+            // into Photos makes photoLibraryDidChange see them as new real photos, so they
+            // must be explicitly excluded from the main stack — see excludeFromMainStack.
+            DemoModeService.prewarmDemoShuffleAssets { assets in
+                viewModel.excludeFromMainStack(assets)
+            }
         }
         .toolbarBackground(.visible, for: .tabBar)
         .onAppear {

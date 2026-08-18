@@ -2083,6 +2083,25 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         precacheNextImages()
     }
 
+    /// DEMO BRANCH ONLY — marks the shuffle-only demo bucket's assets as already-processed
+    /// the instant they're imported into Photos (see `DemoModeService.prewarmDemoShuffleAssets`),
+    /// and scrubs them back out of `photoStack` if they already snuck in. Without this,
+    /// importing demo1's images (needed to warm the cache ahead of an actual Shuffle tap)
+    /// makes the OS report them as newly-added real photos — `photoLibraryDidChange`'s
+    /// generic "new asset → insert at front of photoStack" path has no concept of "demo"
+    /// and pins them onto the *main linear stack* immediately, not just on Shuffle as
+    /// intended. The `photoStack.removeAll` below is a belt-and-suspenders guard against
+    /// `photoLibraryDidChange`'s own async callback winning the race and inserting them
+    /// before this runs — marking `processedAssetIDs` alone only prevents *future*
+    /// insertions. `pinDemoShuffleAssets()` already removes these same IDs from
+    /// `processedAssetIDs` at the moment a real shuffle wants to show them, so the
+    /// exclusion is lifted exactly when it should be.
+    func excludeFromMainStack(_ assets: [PHAsset]) {
+        let ids = Set(assets.map { $0.localIdentifier })
+        for id in ids { processedAssetIDs.insert(id) }
+        photoStack.removeAll { ids.contains($0.id) }
+    }
+
     /// DEMO BRANCH ONLY — after a real shuffle jump lands, prepends the pre-warmed
     /// shuffle-only demo bucket (see `DemoModeService.prewarmDemoShuffleAssets`) so the
     /// cards shown right after tapping Shuffle are an NSCache hit with zero visible

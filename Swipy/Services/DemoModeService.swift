@@ -96,7 +96,11 @@ enum DemoModeService {
     /// straight into PhotoLibraryService's card NSCache ahead of time, so pinning them
     /// on a Shuffle tap later is a synchronous cache hit — zero visible loading. Safe to
     /// call more than once (e.g. every shake); `requestCardImage` results just get re-cached.
-    static func prewarmDemoShuffleAssets() {
+    /// `onResolved` hands back the resolved assets so the caller can react (e.g. excluding
+    /// them from the main linear stack — see `PhotoStackViewModel.excludeFromMainStack`)
+    /// without making a second, independent `loadDemoShuffleAssets` call — two concurrent
+    /// calls on a cold cache would race and could double-import the same 6 assets.
+    static func prewarmDemoShuffleAssets(onResolved: (([PHAsset]) -> Void)? = nil) {
         loadDemoShuffleAssets { assets in
             print("[Demo] prewarming \(assets.count) shuffle asset(s)")
             for asset in assets where asset.mediaType == .image {
@@ -105,7 +109,39 @@ enum DemoModeService {
                     PhotoLibraryService.shared.cacheImage(image, for: asset.localIdentifier)
                 }
             }
+            onResolved?(assets)
         }
+    }
+
+    /// Deletes every demo asset ever imported into the real Photos library — across both
+    /// sessions (demo1, demo2; the shuffle bucket reuses demo1's key, so it's covered too)
+    /// — and clears their identifier caches so a later run re-imports fresh copies instead
+    /// of pointing at now-deleted identifiers. Call once at the end of a recording session
+    /// to leave the real Photos library exactly as it was before demo mode touched it.
+    static func deleteAllDemoAssets(completion: @escaping (Bool) -> Void) {
+        let sessions: [DemoSession] = [.demo1, .demo2]
+        let allIDs = Set(sessions.flatMap { session in
+            ((UserDefaults.standard.dictionary(forKey: session.identifiersKey) as? [String: String]) ?? [:]).values
+        })
+        guard !allIDs.isEmpty else {
+            print("[Demo] deleteAllDemoAssets — nothing to delete")
+            completion(true)
+            return
+        }
+        let toDelete = PHAsset.fetchAssets(withLocalIdentifiers: Array(allIDs), options: nil)
+        print("[Demo] deleting \(toDelete.count) demo asset(s) from Photos")
+        PHPhotoLibrary.shared().performChanges({
+            PHAssetChangeRequest.deleteAssets(toDelete)
+        }, completionHandler: { success, error in
+            if success {
+                for session in sessions { UserDefaults.standard.removeObject(forKey: session.identifiersKey) }
+                shakeDemoLoaded = false
+                print("[Demo] deleteAllDemoAssets succeeded")
+            } else {
+                print("[Demo] ⚠️ deleteAllDemoAssets failed: \(error?.localizedDescription ?? "unknown error")")
+            }
+            DispatchQueue.main.async { completion(success) }
+        })
     }
 
     private static func loadAssets(_ assets: [DemoAsset], cacheKey: String, completion: @escaping ([PHAsset]) -> Void) {
