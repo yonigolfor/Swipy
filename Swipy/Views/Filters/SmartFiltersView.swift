@@ -34,9 +34,14 @@ struct SmartFiltersView: View {
                     localStorageRow
                 } header: {
                     Text("Device")
-                        #if DEBUG
-                        .onLongPressGesture { showAnalyticsDebug = true }
-                        #endif
+                        // DEMO BRANCH ONLY — flips the app's language (English/Hebrew) and
+                        // force-quits so the change takes effect on next relaunch; see
+                        // DemoLanguageService. This replaces the analytics-debug-sheet
+                        // long-press below for the demo branch — exit(0) makes any code
+                        // after it unreachable, so they can't coexist on one gesture.
+                        // Revert to `.onLongPressGesture { showAnalyticsDebug = true }`
+                        // before merging to main.
+                        .onLongPressGesture { DemoLanguageService.toggleLanguage() }
                 }
             }
             #if DEBUG
