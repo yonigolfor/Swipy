@@ -4,6 +4,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import java.time.LocalDate
 import javax.inject.Inject
@@ -28,6 +29,30 @@ class NotificationStateStore @Inject constructor(
 
     suspend fun setLastMilestoneNotifiedGb(gb: Int) {
         dataStore.edit { it[LAST_MILESTONE_GB] = gb }
+    }
+
+    /**
+     * Background-path photo-count baseline (the analogue of iOS `lastKnownPhotoCount`) —
+     * `null` means no baseline has ever been established yet. Only advances when a burst
+     * notification actually fires (see [PhotoBurstMonitor]/`SwipyNotificationWorker`'s
+     * `checkPhotoBurstTrigger`) — a diff still under the 50-photo threshold must leave this
+     * untouched so it accumulates across multiple periodic runs, exactly mirroring the bug
+     * class iOS's `NOTIFICATIONS.md` documents having already fixed once.
+     */
+    val lastKnownPhotoCount: Flow<Int?> = dataStore.data.map { it[LAST_KNOWN_PHOTO_COUNT] }
+
+    suspend fun setLastKnownPhotoCount(count: Int) {
+        dataStore.edit { it[LAST_KNOWN_PHOTO_COUNT] = count }
+    }
+
+    /** Epoch millis of the last photo-burst notification actually sent — gates both the
+     * foreground ([PhotoBurstMonitor]) and background (`SwipyNotificationWorker`) paths on the
+     * same "not sent a burst notification in the last 24h" rule from `NOTIFICATIONS.md`. Default
+     * `0` means "always eligible" until the first real fire. */
+    val lastBurstNotifiedAt: Flow<Long> = dataStore.data.map { it[LAST_BURST_NOTIFIED_AT] ?: 0L }
+
+    suspend fun setLastBurstNotifiedAt(epochMillis: Long) {
+        dataStore.edit { it[LAST_BURST_NOTIFIED_AT] = epochMillis }
     }
 
     /**
@@ -57,6 +82,8 @@ class NotificationStateStore @Inject constructor(
         val LAST_MILESTONE_GB = intPreferencesKey("notif_last_milestone_gb")
         val NOTIF_CAP_DATE = stringPreferencesKey("notif_cap_date")
         val NOTIF_CAP_COUNT = intPreferencesKey("notif_cap_count")
+        val LAST_KNOWN_PHOTO_COUNT = intPreferencesKey("notif_last_known_photo_count")
+        val LAST_BURST_NOTIFIED_AT = longPreferencesKey("notif_last_burst_notified_at")
         const val DAILY_QUOTA = 2
     }
 }

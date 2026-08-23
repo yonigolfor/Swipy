@@ -33,6 +33,7 @@ dependencies {
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.lifecycle.process)
     // Only the type (DataStore<Preferences>) is needed here — the actual @Provides binding
     // lives in :data:datastore's DataStoreProvidesModule and resolves via Hilt's app-level
     // aggregated graph; no project(":data:datastore") dependency needed for that to work.

@@ -207,7 +207,7 @@ asset as source of truth per the explicit instruction to pull it from the iOS ap
 
 ---
 
-## 7. Local Notifications Engine & Scheduling — 🟡 INFRASTRUCTURE BUILT, TRIGGERS PARTIALLY WIRED
+## 7. Local Notifications Engine & Scheduling — 🟡 5/6 TRIGGERS WIRED, NOT YET VERIFIED ON-DEVICE
 
 iOS has a fully built-out system (`NOTIFICATIONS.md`,
 `Services/NotificationManager.swift`/`NotificationScheduler.swift`/`NotificationDelegate.swift`)
@@ -300,25 +300,57 @@ wired into `:app`:
    dedicated in-app recovery/Settings-redirect UI on denial — notifications are a background
    enhancement here, not a blocking gate like gallery access, matching iOS's own fire-and-forget
    `requestAuthorization` call (no visible in-app fallback documented for it either).
-2. **Photo burst trigger** — not checked by the Worker at all yet. Blocked on the same missing
-   `MediaStore` `ContentObserver` noted in `android/CLAUDE.md`'s "MediaStore Querying" section —
-   do not add a naive "count photos every worker run" check in the meantime; that reintroduces
-   the exact baseline-drift bug class `NOTIFICATIONS.md` documents iOS having already fixed once
-   (the baseline must only advance when a notification actually fires).
+2. ~~Photo burst trigger~~ — ✅ RESOLVED, two independent paths mirroring `NOTIFICATIONS.md`
+   exactly. **New `:domain` interface `MediaChangeNotifier`** (`observeChanges(): Flow<Unit>`),
+   implemented in `:data:mediastore` as `MediaStoreChangeNotifier` — a `callbackFlow` wrapping a
+   `ContentObserver` on `MediaStore.Files.getContentUri(VOLUME_EXTERNAL)` (the same collection
+   `MediaStorePhotoRepository` itself queries, so no separate Images/Video registration needed).
+   Kept in `:domain` rather than requiring `:core:notifications` to depend on `:data:mediastore`
+   directly — resolved via Hilt's app-level graph, same pattern as `NotificationStateStore`'s
+   `DataStore<Preferences>` injection. **Foreground path**: new `PhotoBurstMonitor` (`@Singleton`)
+   debounces (`3s`) the observer's events, compares `PhotoRepository.totalCount(All)` against an
+   in-memory `burstSessionBaseCount` — the direct analogue of iOS's `burstSessionBaseCount`,
+   reset every foreground via `resetSessionBaseline()`. **Background path**:
+   `SwipyNotificationWorker.checkPhotoBurstTrigger()` compares the same total count against a
+   *persisted* `NotificationStateStore.lastKnownPhotoCount` baseline — ported iOS's two documented
+   bug fixes exactly: the baseline only advances when a notification actually fires (a diff still
+   under 50 leaves it untouched so it accumulates across runs), and the very first baseline is
+   only captured once media permission is confirmed granted (`ContextCompat.checkSelfPermission`),
+   never seeded as a false `0` before onboarding requests access. Both paths share
+   `NotificationStateStore.lastBurstNotifiedAt` (24h re-fire cooldown) and the existing daily quota.
 3. **Swipe-limit-reset trigger** — `NotificationScheduler.scheduleExact(SwipeLimitReset, ...)`
    is a complete, callable API, but nothing calls it yet — there's no Android port of iOS's
-   `DailyLimitService`/swipe-cap state in `PhotoStackViewModel` for it to hook into. Wire it in
-   once that daily-limit feature exists on Android.
-4. **Review Bin reminder's 24h condition is a coarser proxy than iOS's real one** —
-   `PhotoStateRepository.reviewBinIds` is a bare id list with no per-item "added at" timestamp,
-   so the Worker currently fires whenever the bin is simply non-empty (debounced only by the
-   notification id's replace-not-stack behavior and the daily quota), not "24h since first
-   unresolved item" like iOS. Would need a new persisted timestamp field to close this gap
-   properly.
-5. **Per-trigger-type notification channels** — currently one shared `swipy_reminders` channel.
+   `DailyLimitService`/swipe-cap state in `PhotoStackViewModel` for it to hook into. **Deliberately
+   still deferred** — tightly coupled to the Paywall (item 8) and Swipe Quota (item 9), which are
+   their own separate feature, not part of "the notification system." Wire it in once item 9 exists.
+4. ~~Review Bin reminder's 24h condition is a coarser proxy than iOS's real one~~ — ✅ RESOLVED.
+   `PhotoStateRepository` gained `reviewBinAddedAt: Flow<Map<Long, Long>>` (epoch millis, set only
+   on an id's *first* addition — an undo/re-swipe of an already-binned id doesn't reset its
+   clock), persisted the same JSON-blob way as the existing `reviewBinFileSizes` map.
+   `checkReviewBinReminder()` now gates on `now - oldestUnresolvedTimestamp >= 24h`, matching iOS
+   exactly instead of firing on "bin merely non-empty."
+5. **Persistent reminders now re-arm on every foreground, matching iOS** — ✅ RESOLVED
+   (found while porting the above, not originally listed as a gap, but a real behavioral drift
+   from iOS: `armPersistentReminders()` previously only ran once in `SwipyApplication.onCreate()`,
+   so a user who reopened the app multiple times within one process never got their 72h
+   inactivity countdown reset, unlike iOS's `scenePhase == .active` handler which does this every
+   time). New `NotificationForegroundCoordinator` (`@Singleton`) registers a
+   `ProcessLifecycleOwner` observer (the app-wide, not per-`Activity`, foreground signal — the
+   correct native analogue of `scenePhase`) that on `ON_START` calls both
+   `photoBurstMonitor.resetSessionBaseline()` and `scheduler.armPersistentReminders()` (already
+   idempotent/replace-based, safe to call repeatedly). `SwipyApplication.onCreate()` no longer
+   arms anything directly — mirrors iOS's own choice to defer this to first `scenePhase == .active`
+   rather than `didFinishLaunching`; `BootReceiver` still covers the reboot-with-no-UI-opened case.
+6. **Per-trigger-type notification channels** — currently one shared `swipy_reminders` channel.
    Splitting by trigger type is a genuine Android capability with no iOS analogue (iOS has no
    per-category user-facing mute toggle the way Android's per-channel settings do) worth a
-   deliberate decision rather than defaulting to iOS's single-category shape.
+   deliberate decision rather than defaulting to iOS's single-category shape. Not part of this
+   pass — single-channel already matches iOS parity; revisit as an Android-only enhancement.
+
+**Not yet tested on a physical device** — same caveat as items 2 and 10: a `ContentObserver`
+firing on a genuine bulk photo import, and the 24h Review Bin/burst-cooldown timers, cannot be
+exercised live without a physical device and real elapsed time. `./gradlew :app:assembleDebug
+test` passes; this pass verifies the new logic by compilation and code review, not a live run.
 
 ---
 

@@ -24,6 +24,15 @@ interface PhotoStateRepository {
     val reviewBinSpaceSaved: Flow<Long>
     val totalSpaceSavedLifetime: Flow<Long>
 
+    /**
+     * Epoch-millis timestamp of when each still-binned id was first added — drives the real
+     * "24h since the oldest unresolved item" Review Bin reminder condition (mirrors iOS
+     * `NOTIFICATIONS.md` trigger 1), instead of a coarse "bin is non-empty" proxy. Only set once
+     * per id (see [addToReviewBin]) — an undo/re-swipe of an already-binned id must not reset
+     * its clock.
+     */
+    val reviewBinAddedAt: Flow<Map<Long, Long>>
+
     suspend fun addToReviewBin(id: Long, fileSizeBytes: Long)
     suspend fun restoreFromReviewBin(id: Long)
     suspend fun emptyReviewBin()

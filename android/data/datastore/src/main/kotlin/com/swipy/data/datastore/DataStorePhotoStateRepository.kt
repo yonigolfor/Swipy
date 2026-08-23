@@ -40,6 +40,8 @@ class DataStorePhotoStateRepository @Inject constructor(
 
     override val reviewBinSpaceSaved: Flow<Long> = reviewBinFileSizes.map { it.values.sum() }
 
+    override val reviewBinAddedAt: Flow<Map<Long, Long>> = dataStore.data.map { it.reviewBinAddedAt() }
+
     override val totalSpaceSavedLifetime: Flow<Long> = dataStore.data.map { prefs ->
         prefs[TOTAL_SPACE_SAVED_LIFETIME] ?: 0L
     }
@@ -49,6 +51,9 @@ class DataStorePhotoStateRepository @Inject constructor(
             val ids = prefs.reviewBinIds()
             if (id !in ids) {
                 prefs[REVIEW_BIN_IDS] = json.encodeToString(ids + id)
+                // Only set the clock on first addition — a later undo/re-swipe of the same id
+                // must not reset how long it's been sitting in the bin.
+                prefs[REVIEW_BIN_ADDED_AT] = json.encodeToString(prefs.reviewBinAddedAt() + (id to System.currentTimeMillis()))
             }
             prefs[REVIEW_BIN_FILE_SIZES] = json.encodeToString(prefs.reviewBinFileSizes() + (id to fileSizeBytes))
         }
@@ -58,6 +63,7 @@ class DataStorePhotoStateRepository @Inject constructor(
         dataStore.edit { prefs ->
             prefs[REVIEW_BIN_IDS] = json.encodeToString(prefs.reviewBinIds() - id)
             prefs[REVIEW_BIN_FILE_SIZES] = json.encodeToString(prefs.reviewBinFileSizes() - id)
+            prefs[REVIEW_BIN_ADDED_AT] = json.encodeToString(prefs.reviewBinAddedAt() - id)
         }
     }
 
@@ -67,6 +73,7 @@ class DataStorePhotoStateRepository @Inject constructor(
             prefs[TOTAL_SPACE_SAVED_LIFETIME] = (prefs[TOTAL_SPACE_SAVED_LIFETIME] ?: 0L) + freedBytes
             prefs[REVIEW_BIN_IDS] = json.encodeToString(emptyList<Long>())
             prefs[REVIEW_BIN_FILE_SIZES] = json.encodeToString(emptyMap<Long, Long>())
+            prefs[REVIEW_BIN_ADDED_AT] = json.encodeToString(emptyMap<Long, Long>())
         }
     }
 
@@ -76,6 +83,7 @@ class DataStorePhotoStateRepository @Inject constructor(
             prefs[TOTAL_SPACE_SAVED_LIFETIME] = (prefs[TOTAL_SPACE_SAVED_LIFETIME] ?: 0L) + freedBytes
             prefs[REVIEW_BIN_IDS] = json.encodeToString(prefs.reviewBinIds() - id)
             prefs[REVIEW_BIN_FILE_SIZES] = json.encodeToString(prefs.reviewBinFileSizes() - id)
+            prefs[REVIEW_BIN_ADDED_AT] = json.encodeToString(prefs.reviewBinAddedAt() - id)
         }
     }
 
@@ -99,6 +107,9 @@ class DataStorePhotoStateRepository @Inject constructor(
     private fun Preferences.reviewBinFileSizes(): Map<Long, Long> =
         this[REVIEW_BIN_FILE_SIZES]?.let { json.decodeFromString(it) } ?: emptyMap()
 
+    private fun Preferences.reviewBinAddedAt(): Map<Long, Long> =
+        this[REVIEW_BIN_ADDED_AT]?.let { json.decodeFromString(it) } ?: emptyMap()
+
     private fun Preferences.snoozedPhotos(): Map<Long, Int> =
         this[SNOOZED_PHOTOS]?.let { json.decodeFromString(it) } ?: emptyMap()
 
@@ -108,6 +119,7 @@ class DataStorePhotoStateRepository @Inject constructor(
         val KEPT_PHOTO_IDS = stringSetPreferencesKey("kept_photo_ids")
         val REVIEW_BIN_IDS = stringPreferencesKey("review_bin_ids")
         val REVIEW_BIN_FILE_SIZES = stringPreferencesKey("review_bin_file_sizes")
+        val REVIEW_BIN_ADDED_AT = stringPreferencesKey("review_bin_added_at")
         val TOTAL_SPACE_SAVED_LIFETIME = longPreferencesKey("total_space_saved_lifetime")
         val SNOOZED_PHOTOS = stringPreferencesKey("snoozed_photos")
     }
