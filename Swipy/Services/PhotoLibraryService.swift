@@ -39,15 +39,27 @@ class PhotoLibraryService: ObservableObject {
         cardCache.countLimit = offline ? 30 : 10
     }
 
-    /// Screen-pixel dimensions for card images. Computed once on first access.
-    /// Multiplied by UIScreen.main.scale so PHImageManager returns retina-density pixels.
-    lazy var cardTargetSize: CGSize = {
+    /// Screen-pixel dimensions for card images. Seeded with a screen-bounds approximation
+    /// (used by any prefetch that fires before CardStackView has laid out, e.g. onboarding's
+    /// early scans) and then corrected to CardStackView's actual measured card frame via
+    /// updateCardTargetSize() the first time it appears — see CardStackView.onAppear.
+    private(set) lazy var cardTargetSize: CGSize = {
         let scale = UIScreen.main.scale
         return CGSize(
             width:  (UIScreen.main.bounds.width  - 40) * scale,
             height:  UIScreen.main.bounds.height * 0.65 * scale
         )
     }()
+
+    /// Corrects cardTargetSize to CardStackView's real measured card frame (in points —
+    /// this converts to retina pixels internally) instead of the screen-bounds formula
+    /// above, which was only ever an approximation (flat 0.65 height fraction, no aspect-
+    /// ratio awareness) decoupled from what PhotoCardView actually renders.
+    func updateCardTargetSize(_ measuredPoints: CGSize) {
+        guard measuredPoints.width > 0, measuredPoints.height > 0 else { return }
+        let scale = UIScreen.main.scale
+        cardTargetSize = CGSize(width: measuredPoints.width * scale, height: measuredPoints.height * scale)
+    }
 
     // The raw PHFetchResult — treated as a lazy index, never fully enumerated.
     // Access individual objects with object(at:) or bounded ranges only.
@@ -355,6 +367,26 @@ class PhotoLibraryService: ObservableObject {
         cardCache.removeObject(forKey: assetID as NSString)
     }
 
+    /// Fast local-only thumbnail bridge (see loadThumbnail) — a separate, small NSCache
+    /// from cardCache, since the two hold different-resolution images under the same
+    /// asset-ID key. Only ever proactively populated for iCloud-only items during
+    /// prefetch (PhotoStackViewModel.precacheNextImages/prepareUpcomingCards) — local
+    /// items are already covered by the prepareForDisplay-decoded cardCache entry, so
+    /// there's nothing for this tier to buy them. Generously sized since entries are tiny.
+    private let thumbnailCache: NSCache<NSString, UIImage> = {
+        let c = NSCache<NSString, UIImage>()
+        c.countLimit = 40
+        return c
+    }()
+
+    func cachedThumbnail(for assetID: String) -> UIImage? {
+        thumbnailCache.object(forKey: assetID as NSString)
+    }
+
+    func cacheThumbnail(_ image: UIImage, for assetID: String) {
+        thumbnailCache.setObject(image, forKey: assetID as NSString)
+    }
+
     /// Pre-warms PHCachingImageManager's buffer for upcoming items using screen-pixel dimensions.
     func warmUpCache(for items: [PhotoItem]) {
         startCaching(for: items, targetSize: cardTargetSize)
@@ -377,6 +409,12 @@ class PhotoLibraryService: ObservableObject {
         let options = PHImageRequestOptions()
         options.isNetworkAccessAllowed = false
         options.isSynchronous = false
+        // Explicit (not relying on PhotoKit's unstated default) — .exact forces PhotoKit
+        // to always produce a bitmap at precisely cardTargetSize's aspect ratio, which is
+        // slower; .fast lets it return whatever representation it can produce quickest
+        // (sometimes reusing an already-cached one), and PhotoCardView already applies
+        // .resizable()/.scaledToFit()/.aspectFill() to handle the final fit regardless.
+        options.resizeMode = .fast
 
         if isOfflineMode {
             // highQualityFormat ensures the full-size local original is delivered.

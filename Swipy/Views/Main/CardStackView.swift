@@ -134,7 +134,10 @@ struct CardStackView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onAppear { cardSize = CGSize(width: cardW, height: cardH) }
+            .onAppear {
+                cardSize = CGSize(width: cardW, height: cardH)
+                viewModel.updateCardTargetSize(cardSize)
+            }
             .animation(.easeInOut(duration: 0.35), value: viewModel.isScanning)
             // Covers the denied/restricted → loading → cards handoff (scenePhase
             // recovery never wraps the ViewModel reload in withAnimation — per the
