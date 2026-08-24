@@ -43,12 +43,18 @@ class PhotoLibraryService: ObservableObject {
     /// (used by any prefetch that fires before CardStackView has laid out, e.g. onboarding's
     /// early scans) and then corrected to CardStackView's actual measured card frame via
     /// updateCardTargetSize() the first time it appears — see CardStackView.onAppear.
+    /// The seed formula deliberately mirrors CardStackView.body's own cardW/cardH
+    /// calculation exactly (same 9:16 aspect-ratio constraint, using UIScreen.main.bounds
+    /// as a proxy for GeometryReader's size — a close match since the app is portrait-
+    /// locked and this view fills the tab content area), so the two are already the same
+    /// in the overwhelming majority of cases and any images cached before onAppear fires
+    /// are correctly sized, not just approximately sized.
     private(set) lazy var cardTargetSize: CGSize = {
         let scale = UIScreen.main.scale
-        return CGSize(
-            width:  (UIScreen.main.bounds.width  - 40) * scale,
-            height:  UIScreen.main.bounds.height * 0.65 * scale
-        )
+        let screenSize = UIScreen.main.bounds.size
+        let cardW = min(screenSize.width - 40, screenSize.height * 9.0 / 16.0)
+        let cardH = cardW * 16.0 / 9.0
+        return CGSize(width: cardW * scale, height: cardH * scale)
     }()
 
     /// Corrects cardTargetSize to CardStackView's real measured card frame (in points —

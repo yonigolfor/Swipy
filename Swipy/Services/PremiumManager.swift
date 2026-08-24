@@ -54,9 +54,15 @@ class PremiumManager: ObservableObject {
 
     private init() {
         transactionListener = listenForTransactions()
+        // Run concurrently, not sequentially — loadProducts() is a StoreKit product-
+        // catalog network round-trip that has nothing to do with entitlement
+        // verification. Awaiting it first used to gate hasResolvedEntitlements behind
+        // however long the catalog fetch took, which could be far longer than the
+        // "narrow window" the paywall-race fix assumes on a slow network.
         Task {
-            await loadProducts()
-            await updatePremiumStatus()
+            async let products: () = loadProducts()
+            async let status: () = updatePremiumStatus()
+            _ = await (products, status)
         }
     }
 
