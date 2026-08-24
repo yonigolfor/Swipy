@@ -94,6 +94,21 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         DailyLimitService.shared.canSwipe(isPremium: PremiumManager.shared.isPremium)
     }
 
+    /// True only once StoreKit 2 entitlement resolution has actually confirmed the user
+    /// is not premium — never true while the very first `updatePremiumStatus()` pass is
+    /// still in flight. Guards the paywall trigger: `isPremium` is seeded synchronously
+    /// from `PersistenceService.cachedIsPremium` at launch, so a *returning* subscriber
+    /// never hits this window at all — it only matters for a device with no cached value
+    /// yet (fresh install/reinstall right after purchase). Without this guard, `canSwipe`
+    /// could momentarily read `isPremium` as its default `false` and incorrectly show the
+    /// paywall. The swipe is let through un-blocked during that narrow window instead;
+    /// `canSwipe` is re-evaluated fresh on every subsequent swipe, by which point
+    /// resolution — kicked off at `AppDelegate.didFinishLaunchingWithOptions`, well before
+    /// the user can reach an interactive swipe — has virtually always completed.
+    var shouldBlockSwipeForPaywall: Bool {
+        !canSwipe && PremiumManager.shared.hasResolvedEntitlements
+    }
+
     // MARK: - Shuffle Mode State
 
     /// True when the user has jumped to a random point in the timeline.
@@ -1241,7 +1256,8 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     private func scheduleSwipeLimitResetIfNeeded() {
         guard DailyLimitService.shared.hasReachedLimit,
-              !PremiumManager.shared.isPremium else { return }
+              !PremiumManager.shared.isPremium,
+              PremiumManager.shared.hasResolvedEntitlements else { return }
         NotificationManager.shared.scheduleSwipeLimitResetNotification()
     }
 
