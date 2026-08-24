@@ -413,8 +413,11 @@ struct CardStackView: View {
                 let direction = SwipeDirection.from(offset: value.translation)
 
                 if let action = direction.action, let swipedItem = viewModel.topCard {
-                    // Block keep/delete swipes when free daily limit is exhausted
-                    if (action == .keep || action == .delete), !viewModel.canSwipe {
+                    // Block keep/delete swipes when free daily limit is exhausted. Gated on
+                    // shouldBlockSwipeForPaywall (not raw canSwipe) so a StoreKit entitlement
+                    // check still in flight on a fresh install never flashes the paywall at a
+                    // soon-to-resolve premium user — see its doc comment in PhotoStackViewModel.
+                    if (action == .keep || action == .delete), viewModel.shouldBlockSwipeForPaywall {
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.52)) {
                             dragOffset = .zero
                             dragRotation = 0

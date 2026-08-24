@@ -33,11 +33,22 @@ enum PremiumTier: String, CaseIterable, Identifiable {
 class PremiumManager: ObservableObject {
     static let shared = PremiumManager()
 
-    @Published private(set) var isPremium: Bool = false
+    /// Seeded synchronously from the last-known cached value so a returning subscriber
+    /// reads `true` on frame 0 — StoreKit 2's `Transaction.currentEntitlements` is async
+    /// and, in Production, can take 500ms-1s+ to resolve on a cold launch. Without this,
+    /// isPremium defaults `false` and a fast swipe during that window incorrectly triggers
+    /// the paywall for an entitled user. See CLAUDE.md's PremiumManager section.
+    @Published private(set) var isPremium: Bool = PersistenceService.shared.cachedIsPremium
     @Published private(set) var hasActiveSubscription: Bool = false
     @Published private(set) var products: [PremiumTier: Product] = [:]
     @Published private(set) var isPurchasing: Bool = false
     @Published private(set) var errorMessage: String? = nil
+
+    /// True once the first `updatePremiumStatus()` pass has completed this process.
+    /// Lets callers distinguish "confirmed not premium" from "not resolved yet" — used
+    /// by the swipe-block guard so a cached-premium user is never blocked on a stale
+    /// `false` reading during the resolution window.
+    @Published private(set) var hasResolvedEntitlements: Bool = false
 
     private var transactionListener: Task<Void, Error>?
 
@@ -125,6 +136,12 @@ class PremiumManager: ObservableObject {
         }
         isPremium = hasPremium
         hasActiveSubscription = hasSubscription
+        hasResolvedEntitlements = true
+        // Every write site for isPremium (purchase, restore, transaction updates) routes
+        // through this function, so a single cache write here keeps it authoritative —
+        // both to flip it true on purchase and to self-heal a stale cached-true on
+        // expiry/refund/revocation.
+        PersistenceService.shared.cachedIsPremium = hasPremium
     }
 
     private func listenForTransactions() -> Task<Void, Error> {
