@@ -350,6 +350,11 @@ struct PaywallView: View {
                         Text(String(localized: "paywall.tier.savings"))
                             .font(.system(size: 12, weight: .medium, design: .rounded))
                     }
+
+                    if tier == .lifetime {
+                        Text(String(localized: "paywall.tier.lifetime.secondary"))
+                            .font(.system(size: 12, weight: .medium, design: .rounded))
+                    }
                 }
                 .foregroundStyle(.white)
                 .frame(width: 148, height: 148)

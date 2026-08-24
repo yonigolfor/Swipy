@@ -1670,13 +1670,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Unlock Lifetime Access"
+            "value" : "Get Unlimited Access"
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "קבל גישה לכל החיים"
+            "value" : "קבלת גישה מלאה"
           }
         }
       }
@@ -1687,13 +1687,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Unlock Lifetime Access — %@ total"
+            "value" : "Get Unlimited Access — %@"
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "קבל גישה לכל החיים — %@ סך הכל"
+            "value" : "קבלת גישה מלאה — %@"
           }
         }
       }
@@ -1908,13 +1908,13 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Lifetime"
+            "value" : "Pay Once"
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "לכל החיים"
+            "value" : "רכישה אחת"
           }
         }
       }
@@ -1925,13 +1925,30 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "You already have an active subscription — consider canceling it after purchasing Lifetime to avoid double billing."
+            "value" : "Please make sure to cancel your active subscription in iOS Settings after completing this one-time purchase to avoid double billing."
           }
         },
         "he" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "כבר יש לך מנוי פעיל — מומלץ לבטל אותו לאחר רכישת \"לכל החיים\" כדי למנוע חיוב כפול."
+            "value" : "יש לבטל את המנוי הקיים בהגדרות ה-iOS לאחר ביצוע הרכישה החד-פעמית כדי למנוע חיוב כפול."
+          }
+        }
+      }
+    },
+    "paywall.tier.lifetime.secondary" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unlimited Access"
+          }
+        },
+        "he" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "גישה מלאה"
           }
         }
       }
