@@ -1590,6 +1590,14 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         prefetchTask = nil
     }
 
+    /// Forwards CardStackView's measured card frame to PhotoLibraryService so
+    /// requestCardImage's targetSize matches what's actually rendered instead of a
+    /// screen-bounds approximation. Views never touch services directly — see
+    /// CardStackView.onAppear for the (single) call site.
+    func updateCardTargetSize(_ measuredPoints: CGSize) {
+        photoService.updateCardTargetSize(measuredPoints)
+    }
+
     func resumePrefetch() {
         startBackgroundPrefetch()
     }
@@ -2018,12 +2026,77 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// Starts loading the *next* cards (index 1…8) into NSCache while the user
     /// is still mid-drag, giving us the full remaining gesture duration as
     /// headstart before the new top card hits the screen.
+    /// Shared requestCardImage completion handling for prepareUpcomingCards/precacheNextImages.
+    /// The degraded pass caches/publishes immediately — it's about to be replaced by the
+    /// final pass, so predecoding a throwaway intermediate would be wasted work. The final
+    /// pass runs prepareForDisplay() (iOS 15+, off-main-thread bitmap decompression) before
+    /// caching/publishing, so a card's first SwiftUI composite never pays a decode cost —
+    /// this is the actual "true zero-latency" fix for locally-available assets. Falls back
+    /// to the original image if prepareForDisplay can't predecode it (e.g. unsupported
+    /// format; documented to return nil in that case). `onFinal` is an optional extra hook
+    /// for callers needing per-item context alongside the ready image (precacheNextImages'
+    /// debug blur-variance logging).
+    private func handlePrefetchedImage(
+        _ image: UIImage,
+        isDegraded: Bool,
+        item: PhotoItem,
+        onFinal: ((UIImage) -> Void)? = nil
+    ) {
+        guard !isDegraded else {
+            photoService.cacheImage(image, for: item.id)
+            Task { @MainActor [weak self] in
+                guard let self, self.photoStack.contains(where: { $0.id == item.id }) else { return }
+                self.loadedImageIDs.remove(item.id)
+                self.loadedImageIDs.insert(item.id)
+            }
+            return
+        }
+        image.prepareForDisplay { [weak self] prepared in
+            guard let self else { return }
+            let readyImage = prepared ?? image
+            // prepareForDisplay's completion is @Sendable — photoService is a MainActor-
+            // isolated property (PhotoStackViewModel is @MainActor), so the cache write
+            // has to happen after the hop below, not directly in this closure body.
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.photoService.cacheImage(readyImage, for: item.id)
+                guard self.photoStack.contains(where: { $0.id == item.id }) else { return }
+                self.loadedImageIDs.remove(item.id)
+                self.loadedImageIDs.insert(item.id)
+                self.finalImageIDs.insert(item.id)
+                onFinal?(readyImage)
+                self.scheduleScore(item: item, image: readyImage)
+                self.activeRequests.removeValue(forKey: item.id)
+            }
+        }
+    }
+
+    /// Proactively arms the fast local thumbnail bridge (PhotoLibraryService.loadThumbnail)
+    /// for iCloud-only items in the given window. Local items skip this entirely — their
+    /// full-res image is already prepareForDisplay-ready via handlePrefetchedImage above,
+    /// so a separate thumbnail tier buys them nothing; iCloud-only items can't be predecoded
+    /// locally until the download completes, so this is strictly a fallback bridge for that
+    /// one case, not a universal placeholder. Fire-and-forget: no activeRequests-style
+    /// tracking/cancellation, since this is cheap, local-only, no-network, and a card being
+    /// swiped past before it resolves is harmless (the cache write is simply unused).
+    private func armThumbnailBridge(for items: [PhotoItem]) {
+        for item in items where item.isCloudOnly && !item.isVideo {
+            guard photoService.cachedThumbnail(for: item.id) == nil else { continue }
+            let capturedItem = item
+            photoService.loadThumbnail(for: item.asset, targetSize: CGSize(width: 300, height: 400)) { [weak self] thumb in
+                guard let self, let thumb else { return }
+                self.photoService.cacheThumbnail(thumb, for: capturedItem.id)
+            }
+        }
+    }
+
     func prepareUpcomingCards() {
         // index 0 is the card being dragged away — skip it.
         let upcomingItems = Array(photoStack.dropFirst().prefix(8))
         guard !upcomingItems.isEmpty else { return }
 
         photoService.warmUpCache(for: upcomingItems)
+        armThumbnailBridge(for: upcomingItems)
 
         let topCardID = photoStack.first?.asset.localIdentifier
         // Wider window than the image-cache prefix above — gives VideoPlayerPool
@@ -2043,19 +2116,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             let capturedItem = item
             activeRequests[item.id] = photoService.requestCardImage(for: item.asset) { [weak self] image, isDegraded in
                 guard let self, let image else { return }
-                self.photoService.cacheImage(image, for: capturedItem.id)
-                let capturedImage = image
-                Task { @MainActor [weak self] in
-                    guard let self,
-                          self.photoStack.contains(where: { $0.id == capturedItem.id }) else { return }
-                    self.loadedImageIDs.remove(capturedItem.id)
-                    self.loadedImageIDs.insert(capturedItem.id)
-                    if !isDegraded {
-                        self.finalImageIDs.insert(capturedItem.id)
-                        self.scheduleScore(item: capturedItem, image: capturedImage)
-                        self.activeRequests.removeValue(forKey: capturedItem.id)
-                    }
-                }
+                self.handlePrefetchedImage(image, isDegraded: isDegraded, item: capturedItem)
             }
         }
     }
@@ -2070,6 +2131,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         // OS hint: give PHCachingImageManager 20 items to pre-decode in the background;
         // zero NSCache cost — iOS evicts the pipeline buffer under memory pressure automatically.
         photoService.warmUpCache(for: Array(photoStack.prefix(20)))
+        armThumbnailBridge(for: nextItems)
 
         // Wider window than nextItems (image cache) — see prepareUpcomingCards for rationale.
         let videoWindow = Array(photoStack.prefix(15))
@@ -2090,21 +2152,10 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             let capturedStackIndex = stackIndex
             activeRequests[item.id] = photoService.requestCardImage(for: item.asset) { [weak self] image, isDegraded in
                 guard let self, let image else { return }
-                self.photoService.cacheImage(image, for: capturedItem.id)
-                let capturedImage = image
-                Task { @MainActor [weak self] in
-                    guard let self,
-                          self.photoStack.contains(where: { $0.id == capturedItem.id }) else { return }
-                    self.loadedImageIDs.remove(capturedItem.id)
-                    self.loadedImageIDs.insert(capturedItem.id)
-                    if !isDegraded {
-                        self.finalImageIDs.insert(capturedItem.id)
-                        #if DEBUG
-                        self.debugLogBlurVariance(of: capturedImage, id: capturedItem.id, stackIndex: capturedStackIndex)
-                        #endif
-                        self.scheduleScore(item: capturedItem, image: capturedImage)
-                        self.activeRequests.removeValue(forKey: capturedItem.id)
-                    }
+                self.handlePrefetchedImage(image, isDegraded: isDegraded, item: capturedItem) { readyImage in
+                    #if DEBUG
+                    self.debugLogBlurVariance(of: readyImage, id: capturedItem.id, stackIndex: capturedStackIndex)
+                    #endif
                 }
             }
         }

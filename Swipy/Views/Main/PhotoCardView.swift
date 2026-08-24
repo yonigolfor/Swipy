@@ -492,13 +492,24 @@ struct PhotoCardView: View {
     private func loadImage() {
         // Pass 1 — instant local thumbnail, never touches iCloud.
         // Skip if onAppear already set a thumbnailImage (demoted cached image).
-        PhotoLibraryService.shared.loadThumbnail(
-            for: item.asset,
-            targetSize: CGSize(width: 300, height: 400)
-        ) { thumb in
-            guard let thumb, self.image == nil, self.thumbnailImage == nil else { return }
-            self.thumbnailImage = thumb
-            self.isLoading = false
+        // Check the ViewModel's proactively-armed thumbnail bridge first (populated
+        // ahead of time for iCloud-only items during prefetch, see armThumbnailBridge)
+        // before firing a brand new PHImageManager request — avoids a redundant
+        // duplicate request racing the ViewModel's own prefetch for the same asset.
+        if let prefetched = PhotoLibraryService.shared.cachedThumbnail(for: item.id) {
+            if image == nil && thumbnailImage == nil {
+                thumbnailImage = prefetched
+                isLoading = false
+            }
+        } else {
+            PhotoLibraryService.shared.loadThumbnail(
+                for: item.asset,
+                targetSize: CGSize(width: 300, height: 400)
+            ) { thumb in
+                guard let thumb, self.image == nil, self.thumbnailImage == nil else { return }
+                self.thumbnailImage = thumb
+                self.isLoading = false
+            }
         }
 
         // Pass 2 — full-res at retina card dimensions. Respects isOfflineMode via PhotoLibraryService.
