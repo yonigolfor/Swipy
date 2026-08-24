@@ -341,7 +341,12 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         guard !isRefreshingCounts else { return }
         isRefreshingCounts = true
 
-        Task.detached(priority: .userInitiated) {
+        // .utility (not .userInitiated) — Phase 1's PHFetchRequest counts are fast
+        // regardless of QoS tier, but this fires the instant the user opens Smart
+        // Filters, i.e. exactly when that screen is laying out and about to be
+        // scrolled; .userInitiated would bias the scheduler toward this task at the
+        // worst possible moment for scroll responsiveness.
+        Task.detached(priority: .utility) {
             let service = PhotoLibraryService.shared
 
             if service.fetchResult == nil {
@@ -402,14 +407,18 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             // concurrent CIFilter/Vision pipelines (BlurBurstScanEngine/BurstAnalyzer),
             // which at a higher QoS competes with the main thread for the same
             // performance cores and was the direct cause of dropped frames during
-            // swipe gestures in the first ~10s after a cold start.
+            // swipe gestures in the first ~10s after a cold start. Blurry and burst
+            // run sequentially (not as parallel async lets) — each already spends up
+            // to 6-way concurrency internally, so running both at once would stack to
+            // 12 simultaneous CIFilter/Vision pipelines, doubling the budget either
+            // engine was tuned for. Neither is user-visible enough to justify that;
+            // this is a background accuracy pass, not something a spinner is blocking on.
             let (accurateBlurry, accurateBurst): (Int?, Int?) = await Task.detached(priority: .background) {
                 guard await self.tryAcquireBlurBurstScan() else { return (nil, nil) }
-                async let blurryCount = self.accurateBlurryCount(excluding: processed)
-                async let burstCount = self.accurateBurstCount(excluding: processed)
-                let result = await (blurryCount, burstCount)
+                let blurryCount = await self.accurateBlurryCount(excluding: processed)
+                let burstCount = await self.accurateBurstCount(excluding: processed)
                 await self.releaseBlurBurstScan()
-                return result
+                return (blurryCount, burstCount)
             }.value
 
             let accurateLargeVideoCount = await largeVideoCount
@@ -420,9 +429,22 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             await MainActor.run {
                 withAnimation(.spring(response: 0.4)) {
                     self.categoryCounts[.largeVideos] = accurateLargeVideoCount
-                    if let accurateBlurry { self.categoryCounts[.blurryPhotos] = accurateBlurry }
-                    if let accurateBurst { self.categoryCounts[.burstPhotos] = accurateBurst }
-                    self.categoriesRecalculating = []
+                    self.categoriesRecalculating.remove(.largeVideos)
+                    // Only clear the dim+spinner for blurry/burst if they actually got a
+                    // fresh value this round — if the scan lock was lost to a concurrent
+                    // prescan (accurateBlurry/accurateBurst == nil), leave them recalculating
+                    // rather than silently clearing the spinner over a stale count. They'll
+                    // be picked up again by the next refreshCategoryCounts() call, since
+                    // `cached` (computed at the top of this function) still won't contain
+                    // them until one actually succeeds.
+                    if let accurateBlurry {
+                        self.categoryCounts[.blurryPhotos] = accurateBlurry
+                        self.categoriesRecalculating.remove(.blurryPhotos)
+                    }
+                    if let accurateBurst {
+                        self.categoryCounts[.burstPhotos] = accurateBurst
+                        self.categoriesRecalculating.remove(.burstPhotos)
+                    }
                 }
                 self.isRefreshingCounts = false
             }
@@ -440,6 +462,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         var cursor = 0
         var count = 0
         while count < cap, cursor < service.totalAssetCount {
+            await Self.waitForGestureIdle(viewModel: self)
             let (batch, next) = service.fetchPageOfAssets(
                 for: .blurryPhotos, startIndex: cursor, pageSize: 300, excluding: processedIDs
             )
@@ -447,6 +470,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             if !batch.isEmpty {
                 count += await BlurBurstScanEngine.shared.countBlurry(batch, cap: cap - count)
             }
+            try? await Task.sleep(for: ScanTuning.interChunkYieldDuration)
             if next == nil { break }
         }
         return min(count, cap)
@@ -460,6 +484,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         var cursor = 0
         var count = 0
         while count < cap, cursor < service.totalAssetCount {
+            await Self.waitForGestureIdle(viewModel: self)
             let (batch, next) = service.fetchPageOfAssets(
                 for: .burstPhotos, startIndex: cursor, pageSize: 500, excluding: processedIDs
             )
@@ -472,6 +497,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 )
                 count += analyzed.count
             }
+            try? await Task.sleep(for: ScanTuning.interChunkYieldDuration)
             if next == nil { break }
         }
         return min(count, cap)
@@ -571,6 +597,27 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         }
     }
 
+    /// Backs off entirely while the user is actively dragging/pinching before starting the
+    /// next page of a blur/burst scan — CIFilter/Vision work is GPU/ANE-bound, which GCD's
+    /// .background QoS does not deprioritize (see CLAUDE.md's cold-start jank notes), so
+    /// this is an explicit yield rather than relying on QoS alone to keep the compositor's
+    /// frame budget clear. Shared by `prescanBatches` (cache-warming pass) and
+    /// `accurateBlurryCount`/`accurateBurstCount` (refreshCategoryCounts()'s Phase 2) —
+    /// both page through the same expensive engines and must back off identically, or the
+    /// one call site that forgets to poll silently reintroduces the exact swipe-gesture
+    /// jank this mechanism exists to prevent.
+    private nonisolated static func waitForGestureIdle(viewModel: PhotoStackViewModel) async {
+        var waited: Duration = .zero
+        while await viewModel.isUserInteracting {
+            if waited >= ScanTuning.gestureWaitTimeout {
+                print("[PhotoStackViewModel] blur/burst scan — isUserInteracting stuck true for \(ScanTuning.gestureWaitTimeout), proceeding anyway")
+                break
+            }
+            try? await Task.sleep(for: ScanTuning.gestureInteractionPollInterval)
+            waited += ScanTuning.gestureInteractionPollInterval
+        }
+    }
+
     /// Pages through every asset matching `filter`, handing each batch to `process`.
     /// `nonisolated static` — pure pagination + delegation; `viewModel` is only used to poll
     /// `isUserInteracting` (a plain, non-@Published flag — see its declaration for why),
@@ -585,19 +632,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     ) async {
         var cursor = 0
         while cursor < service.totalAssetCount {
-            // Back off entirely while the user is actively dragging/pinching — CIFilter/Vision
-            // work is GPU/ANE-bound, which GCD's .background QoS does not deprioritize (see
-            // CLAUDE.md's cold-start jank notes), so this is an explicit yield rather than
-            // relying on QoS alone to keep the compositor's frame budget clear.
-            var waitedForGesture: Duration = .zero
-            while await viewModel.isUserInteracting {
-                if waitedForGesture >= ScanTuning.gestureWaitTimeout {
-                    print("[PhotoStackViewModel] prescanBatches — isUserInteracting stuck true for \(ScanTuning.gestureWaitTimeout), proceeding anyway")
-                    break
-                }
-                try? await Task.sleep(for: ScanTuning.gestureInteractionPollInterval)
-                waitedForGesture += ScanTuning.gestureInteractionPollInterval
-            }
+            await waitForGestureIdle(viewModel: viewModel)
             let (batch, next) = service.fetchPageOfAssets(
                 for: filter, startIndex: cursor, pageSize: pageSize, excluding: excluding
             )
