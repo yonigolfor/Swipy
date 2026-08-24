@@ -337,9 +337,18 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// (including the now-expensive blur/burst ones) concurrently on a fresh launch.
     private var isRefreshingCounts = false
 
+    /// Monotonic counter bumped each time refreshCategoryCounts() begins — lets the
+    /// watchdog Task below recognize it's no longer looking at the run it was
+    /// scheduled for, so a stale watchdog from an earlier call can't clobber a newer
+    /// call's legitimate "still recalculating" state. Same pattern as CardStackView's
+    /// undoGeneration.
+    private var categoryRefreshGeneration = 0
+
     func refreshCategoryCounts() {
         guard !isRefreshingCounts else { return }
         isRefreshingCounts = true
+        categoryRefreshGeneration += 1
+        let myGeneration = categoryRefreshGeneration
 
         // .utility (not .userInitiated) — Phase 1's PHFetchRequest counts are fast
         // regardless of QoS tier, but this fires the instant the user opens Smart
@@ -390,6 +399,25 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             await MainActor.run {
                 withAnimation { self.categoryCounts = fastCounts }
                 self.categoriesRecalculating = needsVisibleRecalc
+            }
+
+            // Failsafe: if Phase 2 below keeps losing the shared blur/burst scan lock
+            // (see the per-category .remove() logic further down, which deliberately
+            // leaves a category "recalculating" rather than clearing the spinner over
+            // a stale count), nothing else guarantees this ever resolves — a sustained
+            // race against startBackgroundBlurBurstPrescan() could otherwise leave the
+            // dim+spinner stuck for the rest of the session. Mirrors the same
+            // watchdog-Task pattern already used for this exact class of problem in
+            // FullScreenMediaView (see CLAUDE.md). Guarded by categoryRefreshGeneration
+            // so a stale watchdog from an earlier call never clobbers a newer one.
+            if !needsVisibleRecalc.isEmpty {
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: ScanTuning.recalculatingSpinnerTimeout)
+                    guard let self, self.categoryRefreshGeneration == myGeneration else { return }
+                    if !self.categoriesRecalculating.isEmpty {
+                        self.categoriesRecalculating = []
+                    }
+                }
             }
 
             // ── Phase 2: Accurate counts, in parallel, in the background ──────
@@ -531,6 +559,10 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         /// Delay before scheduleDeferredPersonaBuild() actually calls analyzeFavorites() —
         /// gives the first real swipes of a session a clean CPU/GPU window.
         static let personaDeferredDelay: Duration = .seconds(5)
+        /// Failsafe ceiling on how long the Smart Filters dim+spinner "recalculating"
+        /// state can stay stuck if refreshCategoryCounts() keeps losing the shared
+        /// blur/burst scan lock — see the watchdog Task in refreshCategoryCounts().
+        static let recalculatingSpinnerTimeout: Duration = .seconds(20)
         /// How often prescanBatches re-checks isUserInteracting while blocked on an active gesture.
         static let gestureInteractionPollInterval: Duration = .milliseconds(150)
         /// Safety-net ceiling on how long prescanBatches will wait on isUserInteracting before
@@ -2040,6 +2072,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         _ image: UIImage,
         isDegraded: Bool,
         item: PhotoItem,
+        requestID: PHImageRequestID,
         onFinal: ((UIImage) -> Void)? = nil
     ) {
         guard !isDegraded else {
@@ -2066,7 +2099,16 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 self.finalImageIDs.insert(item.id)
                 onFinal?(readyImage)
                 self.scheduleScore(item: item, image: readyImage)
-                self.activeRequests.removeValue(forKey: item.id)
+                // Only clear activeRequests if it still points at THIS request — the
+                // prepareForDisplay hop above can take long enough that a newer
+                // requestCardImage call for the same item already overwrote the entry
+                // with its own fresh request ID by the time this completion runs.
+                // Removing unconditionally would delete that newer, still-in-flight
+                // request's tracking entry, leaking it (cancelRequest would never find
+                // it if the item is later scrolled away).
+                if self.activeRequests[item.id] == requestID {
+                    self.activeRequests.removeValue(forKey: item.id)
+                }
             }
         }
     }
@@ -2080,8 +2122,16 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// tracking/cancellation, since this is cheap, local-only, no-network, and a card being
     /// swiped past before it resolves is harmless (the cache write is simply unused).
     private func armThumbnailBridge(for items: [PhotoItem]) {
-        for item in items where item.isCloudOnly && !item.isVideo {
-            guard photoService.cachedThumbnail(for: item.id) == nil else { continue }
+        // Checks isLocallyAvailable() directly rather than item.isCloudOnly — that
+        // field is populated only by the offline-mode local-universe scanner (a
+        // separate, pre-existing feature) and stays false for every item during
+        // normal online swiping, which is exactly when this bridge needs to fire.
+        // isLocallyAvailable() is a Photos-DB metadata read (no I/O), already used
+        // this way at several other call sites in this file — cheap for the ~8-item
+        // window this runs over.
+        for item in items where !item.isVideo {
+            guard photoService.cachedThumbnail(for: item.id) == nil,
+                  !photoService.isLocallyAvailable(item.asset) else { continue }
             let capturedItem = item
             photoService.loadThumbnail(for: item.asset, targetSize: CGSize(width: 300, height: 400)) { [weak self] thumb in
                 guard let self, let thumb else { return }
@@ -2114,10 +2164,17 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             }
             if let existing = activeRequests[item.id] { photoService.cancelRequest(existing) }
             let capturedItem = item
-            activeRequests[item.id] = photoService.requestCardImage(for: item.asset) { [weak self] image, isDegraded in
+            // Captured by the closure below before assignment completes — the closure
+            // isn't invoked until PHImageManager calls back, well after this line runs,
+            // so by then requestID always holds the real value. Lets
+            // handlePrefetchedImage verify it still owns this activeRequests entry
+            // before clearing it (see that function's doc comment).
+            var requestID: PHImageRequestID = PHInvalidImageRequestID
+            requestID = photoService.requestCardImage(for: item.asset) { [weak self] image, isDegraded in
                 guard let self, let image else { return }
-                self.handlePrefetchedImage(image, isDegraded: isDegraded, item: capturedItem)
+                self.handlePrefetchedImage(image, isDegraded: isDegraded, item: capturedItem, requestID: requestID)
             }
+            activeRequests[item.id] = requestID
         }
     }
 
@@ -2150,14 +2207,17 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             if let existing = activeRequests[item.id] { photoService.cancelRequest(existing) }
             let capturedItem = item
             let capturedStackIndex = stackIndex
-            activeRequests[item.id] = photoService.requestCardImage(for: item.asset) { [weak self] image, isDegraded in
+            // See prepareUpcomingCards for why requestID is captured this way.
+            var requestID: PHImageRequestID = PHInvalidImageRequestID
+            requestID = photoService.requestCardImage(for: item.asset) { [weak self] image, isDegraded in
                 guard let self, let image else { return }
-                self.handlePrefetchedImage(image, isDegraded: isDegraded, item: capturedItem) { readyImage in
+                self.handlePrefetchedImage(image, isDegraded: isDegraded, item: capturedItem, requestID: requestID) { readyImage in
                     #if DEBUG
                     self.debugLogBlurVariance(of: readyImage, id: capturedItem.id, stackIndex: capturedStackIndex)
                     #endif
                 }
             }
+            activeRequests[item.id] = requestID
         }
 
         evictStaleCacheEntries(keeping: nextItems)
