@@ -29,19 +29,11 @@
 
   <main>
     <section class="hero">
-      <p class="hero-eyebrow">🚀 Launching Soon</p>
+      <p class="hero-eyebrow">🎉 Available Now on the App Store</p>
       <h1 class="hero-title">Declutter Years of Photo Clutter in <span class="grad-text">Seconds.</span></h1>
       <p class="hero-sub">The fastest, most intuitive way to clean your iPhone photo library with simple swipes. 100% private, on-device processing.</p>
 
-      <form name="waitlist" method="POST" data-netlify="true" netlify-honeypot="bot-field" action="/?submitted=true" class="waitlist-form" id="waitlist-form">
-        <input type="hidden" name="form-name" value="waitlist">
-        <p class="hp-field"><label>Leave this field empty: <input name="bot-field"></label></p>
-        <div class="form-row">
-          <input type="email" name="email" required placeholder="Enter your email" aria-label="Email address">
-          <button type="submit">Get Notified on Launch 🚀</button>
-        </div>
-      </form>
-      <p class="form-success" id="form-success" hidden>🎉 You're on the list — we'll email you the moment Swipy launches.</p>
+      <a class="btn-download" href="https://apps.apple.com/il/app/swipy-photo-video-cleaner/id6772767520?l=he" target="_blank" rel="noopener">Download Now</a>
     </section>
 
     <section class="screens-showcase reveal">
@@ -83,32 +75,6 @@
 </div>
 
 <script>
-  (function () {
-    var form = document.getElementById('waitlist-form');
-    var success = document.getElementById('form-success');
-    if (!form || !success) return;
-
-    if (new URLSearchParams(location.search).get('submitted') === 'true') {
-      form.hidden = true;
-      success.hidden = false;
-    }
-
-    form.addEventListener('submit', function (e) {
-      e.preventDefault();
-      fetch('/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams(new FormData(form)).toString()
-      }).then(function () {
-        form.hidden = true;
-        success.hidden = false;
-        history.replaceState(null, '', location.pathname + '?submitted=true');
-      }).catch(function () {
-        form.submit();
-      });
-    });
-  })();
-
   (function () {
     var reveals = document.querySelectorAll('.reveal');
     if (!reveals.length) return;

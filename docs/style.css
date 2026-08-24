@@ -221,50 +221,22 @@ footer {
   margin: 0 auto 32px;
 }
 
-.waitlist-form { margin: 0 auto; max-width: 460px; }
-
-.hp-field { position: absolute; left: -9999px; }
-
-.form-row {
-  display: flex;
-  gap: 10px;
-}
-
-.form-row input[type="email"] {
-  flex: 1;
-  min-width: 0;
-  padding: 14px 16px;
-  font-size: 15.5px;
-  border-radius: 12px;
-  border: 1px solid var(--border);
-  background: var(--card-bg);
-  color: var(--fg);
-  font-family: inherit;
-}
-
-.form-row input[type="email"]:focus {
-  outline: 2px solid var(--accent-1);
-  outline-offset: 1px;
-}
-
-.form-row button {
+.btn-download {
   position: relative;
   overflow: hidden;
-  flex-shrink: 0;
-  padding: 14px 22px;
-  font-size: 15.5px;
+  display: inline-block;
+  padding: 15px 36px;
+  font-size: 16px;
   font-weight: 700;
   color: #fff;
+  text-decoration: none;
   background: linear-gradient(135deg, var(--accent-1), var(--accent-2));
-  border: none;
   border-radius: 12px;
-  cursor: pointer;
-  white-space: nowrap;
   box-shadow: 0 10px 24px -10px rgba(51, 136, 255, 0.55);
   transition: transform 0.2s ease, box-shadow 0.2s ease;
 }
 
-.form-row button::before {
+.btn-download::before {
   content: "";
   position: absolute;
   top: 0;
@@ -276,27 +248,15 @@ footer {
   transition: left 0.6s ease;
 }
 
-.form-row button:hover::before { left: 130%; }
+.btn-download:hover::before { left: 130%; }
 
-.form-row button:hover {
+.btn-download:hover {
+  opacity: 1;
   transform: translateY(-2px);
   box-shadow: 0 14px 30px -8px rgba(51, 136, 255, 0.65);
 }
 
-.form-row button:active { transform: translateY(0); }
-
-.form-success {
-  max-width: 460px;
-  margin: 0 auto;
-  padding: 14px 18px;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--swipe-green);
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  text-align: center;
-}
+.btn-download:active { transform: translateY(0); }
 
 /* Screenshot carousel — real app screens, swipeable via native scroll-snap */
 
@@ -416,8 +376,7 @@ footer {
 
 @media (max-width: 640px) {
   .wrap--landing { padding-top: 28px; }
-  .form-row { flex-direction: column; }
-  .form-row button { width: 100%; }
+  .btn-download { width: 100%; text-align: center; }
   .screen-slide img { height: 380px; }
   .screens-carousel { padding-left: calc(50% - 108px); padding-right: calc(50% - 108px); }
   .features { grid-template-columns: 1fr; }
