@@ -165,6 +165,7 @@ fun SwipeStackScreen(
                     onSwipeCommitted = { item, action ->
                         viewModel.onIntent(PhotoStackIntent.Swipe(item, action))
                     },
+                    canCommitSwipe = viewModel::canCommitSwipe,
                     onPinchStateChanged = { isPinching = it },
                     modifier = Modifier.padding(top = 100.dp),
                 )

@@ -81,6 +81,12 @@ fun CardStackLayer(
     onSwipeCommitted: (PhotoItem, SwipeAction) -> Unit,
     modifier: Modifier = Modifier,
     onPinchStateChanged: (Boolean) -> Unit = {},
+    // Synchronous, cheap (StateFlow.value reads only) — lets a Keep/Delete crossing the fling
+    // threshold be vetoed (daily quota exhausted) BEFORE the fling animation plays, instead of
+    // flinging the card off-screen and only then discovering the ViewModel silently ignored it.
+    // Default `{ true }` preserves prior behavior for any caller (tests, previews) that doesn't
+    // care about the quota gate. See PhotoStackViewModel.canCommitSwipe's own doc comment.
+    canCommitSwipe: (SwipeAction) -> Boolean = { true },
 ) {
     val hapticManager = rememberHapticManager()
 
@@ -243,7 +249,15 @@ fun CardStackLayer(
                             fun endDrag() {
                                 isDragging = false
                                 swipeDirection = null
-                                val direction = resolveSwipeDirection(offsetX, offsetY, thresholdPx)
+                                val rawDirection = resolveSwipeDirection(offsetX, offsetY, thresholdPx)
+                                // A Keep/Delete crossing the threshold while the daily quota is
+                                // exhausted must never fling off-screen — the card has to still
+                                // be there (untouched in the ViewModel's stack) once the paywall
+                                // is dismissed. Snooze/Undo are never quota-gated (mirrors iOS).
+                                val blocked = rawDirection != null &&
+                                    (rawDirection == SwipeAction.Keep || rawDirection == SwipeAction.Delete) &&
+                                    !canCommitSwipe(rawDirection)
+                                val direction = rawDirection.takeUnless { blocked }
                                 scope.launch {
                                     if (direction != null) {
                                         val targetX = when (direction) {
@@ -270,6 +284,10 @@ fun CardStackLayer(
                                         launch { animate(offsetX, 0f, animationSpec = snapBack) { value, _ -> offsetX = value } }
                                         launch { animate(offsetY, 0f, animationSpec = snapBack) { value, _ -> offsetY = value } }
                                         launch { animate(rotation, 0f, animationSpec = snapBack) { value, _ -> rotation = value } }
+                                        // Still notify the ViewModel of the blocked attempt (no
+                                        // haptic, no fling) so it can fire the ShowPaywall effect —
+                                        // handleSwipe re-checks the same guard and no-ops the stack.
+                                        if (blocked) onSwipeCommitted(item, rawDirection!!)
                                     }
                                 }
                             }

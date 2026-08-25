@@ -6,6 +6,9 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import com.android.billingclient.api.AcknowledgePurchaseParams
 import com.android.billingclient.api.BillingClient
 import com.android.billingclient.api.BillingClientStateListener
@@ -57,7 +60,7 @@ private const val LIFETIME_PRODUCT_ID = "swipy_lifetime_purchase"
 class BillingManager @Inject constructor(
     @ApplicationContext context: Context,
     private val dataStore: DataStore<Preferences>,
-) : PremiumRepository {
+) : PremiumRepository, DefaultLifecycleObserver {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
@@ -65,14 +68,22 @@ class BillingManager @Inject constructor(
     @Volatile private var offerTokens: Map<PremiumTier, String> = emptyMap()
 
     private val purchasesUpdatedListener = PurchasesUpdatedListener { billingResult, purchases ->
-        if (billingResult.responseCode == BillingClient.BillingResponseCode.OK && purchases != null) {
-            scope.launch {
-                purchases.forEach { handlePurchase(it) }
+        when {
+            billingResult.responseCode == BillingClient.BillingResponseCode.OK && purchases != null -> {
+                scope.launch {
+                    purchases.forEach { handlePurchase(it) }
+                    _isPurchasing.value = false
+                }
+            }
+            // Silent, matching iOS's `case .pending, .userCancelled: break` — the user backing
+            // out of the purchase sheet is not an error and must not surface one.
+            billingResult.responseCode == BillingClient.BillingResponseCode.USER_CANCELED -> {
                 _isPurchasing.value = false
             }
-        } else {
-            _errorMessage.value = billingResult.debugMessage
-            _isPurchasing.value = false
+            else -> {
+                _errorMessage.value = billingResult.debugMessage
+                _isPurchasing.value = false
+            }
         }
     }
 
@@ -110,11 +121,36 @@ class BillingManager @Inject constructor(
         scope.launch {
             _isPremium.value = dataStore.data.first()[CACHED_IS_PREMIUM] ?: false
         }
+        // Play Billing's PurchasesUpdatedListener only fires for purchases initiated via
+        // launchBillingFlow() in THIS process — unlike iOS's Transaction.updates (a live async
+        // sequence for the whole app lifetime), it is never notified about a purchase that
+        // resolves elsewhere: a pending transaction (e.g. a delayed payment method) completing
+        // while the app is backgrounded, or an entitlement change from another device. Re-running
+        // queryPurchases() on every foreground is Play's documented mitigation for this gap.
+        ProcessLifecycleOwner.get().lifecycle.addObserver(this)
+        connect()
+    }
+
+    override fun onStart(owner: LifecycleOwner) {
+        when (billingClient.connectionState) {
+            BillingClient.ConnectionState.CONNECTED -> scope.launch { queryPurchases() }
+            // DISCONNECTED only — not CONNECTING, which the very first cold-start onStart (fired
+            // right after initialize()'s own connect() call, before it has finished) would
+            // otherwise race, opening a redundant second connection attempt.
+            BillingClient.ConnectionState.DISCONNECTED -> connect()
+            else -> Unit
+        }
+    }
+
+    private fun connect() {
         billingClient.startConnection(object : BillingClientStateListener {
             override fun onBillingSetupFinished(billingResult: BillingResult) {
                 if (billingResult.responseCode != BillingClient.BillingResponseCode.OK) {
                     // No in-app recovery path for a broken Play Store connection — resolve to
-                    // "not premium" rather than hang the swipe-block guard forever.
+                    // "not premium" rather than hang the swipe-block guard forever, but still
+                    // surface why (unlike a silent failure, the user can at least see something
+                    // went wrong if they open the paywall right now).
+                    _errorMessage.value = billingResult.debugMessage
                     _hasResolvedEntitlements.value = true
                     return
                 }
@@ -126,9 +162,10 @@ class BillingManager @Inject constructor(
             }
 
             override fun onBillingServiceDisconnected() {
-                // BillingClient recommends a retry-with-backoff reconnect; not implemented here —
-                // the next explicit purchase()/restorePurchases() call surfaces a clear error via
-                // billingClient's own response code instead of silently retrying in the background.
+                // BillingClient recommends a retry-with-backoff reconnect; not implemented as a
+                // timed loop here — onStart above already retries the connection-dependent parts
+                // opportunistically on every foreground, which covers the common case (Play
+                // Store process died while Swipy was backgrounded) without extra machinery.
             }
         })
     }
@@ -158,6 +195,16 @@ class BillingManager @Inject constructor(
                 )
                 .build(),
         )
+
+        // queryProductDetails' suspend wrapper never throws for a billing-level failure (e.g. a
+        // network drop) — it returns a result whose own BillingResult must be checked; silently
+        // reading a null/empty productDetailsList otherwise looks identical to "no such product
+        // configured yet," leaving the CTA disabled forever with no explanation to the user.
+        if (subResult.billingResult.responseCode != BillingClient.BillingResponseCode.OK ||
+            lifetimeResult.billingResult.responseCode != BillingClient.BillingResponseCode.OK
+        ) {
+            _errorMessage.value = subResult.billingResult.debugMessage.ifBlank { lifetimeResult.billingResult.debugMessage }
+        }
 
         val newProductDetails = mutableMapOf<PremiumTier, ProductDetails>()
         val newOfferTokens = mutableMapOf<PremiumTier, String>()
@@ -193,6 +240,17 @@ class BillingManager @Inject constructor(
         val inapp = billingClient.queryPurchasesAsync(
             QueryPurchasesParams.newBuilder().setProductType(BillingClient.ProductType.INAPP).build(),
         )
+        // A failed query (e.g. mid-flight network drop) must not be allowed to overwrite a
+        // known-good isPremium/hasActiveSubscription with a false negative, nor flip
+        // hasResolvedEntitlements — leaving both untouched keeps the swipe-block guard's existing,
+        // safe behavior (a not-yet-resolved user is let through unblocked) until the next
+        // successful query, rather than wrongly resolving to "confirmed not premium."
+        if (subs.billingResult.responseCode != BillingClient.BillingResponseCode.OK ||
+            inapp.billingResult.responseCode != BillingClient.BillingResponseCode.OK
+        ) {
+            _errorMessage.value = subs.billingResult.debugMessage.ifBlank { inapp.billingResult.debugMessage }
+            return
+        }
 
         var hasPremium = false
         var hasSubscription = false
@@ -246,10 +304,19 @@ class BillingManager @Inject constructor(
             productParams.setOfferToken(offerToken)
         }
 
-        billingClient.launchBillingFlow(
+        // launchBillingFlow returns synchronously and does NOT invoke purchasesUpdatedListener
+        // when it fails outright (e.g. BILLING_UNAVAILABLE, ITEM_ALREADY_OWNED, DEVELOPER_ERROR)
+        // — the listener only fires for a flow that actually launched. Ignoring this return value
+        // (as the first draft of this method did) left isPurchasing stuck true forever on any
+        // such failure, since nothing else would ever reset it.
+        val launchResult = billingClient.launchBillingFlow(
             activity,
             BillingFlowParams.newBuilder().setProductDetailsParamsList(listOf(productParams.build())).build(),
         )
+        if (launchResult.responseCode != BillingClient.BillingResponseCode.OK) {
+            _errorMessage.value = launchResult.debugMessage
+            _isPurchasing.value = false
+        }
     }
 
     suspend fun restorePurchases() {

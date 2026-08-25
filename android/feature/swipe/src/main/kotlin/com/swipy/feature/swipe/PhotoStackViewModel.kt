@@ -137,19 +137,28 @@ class PhotoStackViewModel @Inject constructor(
         }
     }
 
+    /**
+     * Port of iOS CardStackView.dragGesture.onEnded's `shouldBlockSwipeForPaywall` gate — only
+     * Keep/Delete count against the daily quota (Snooze/Undo never do, matching iOS). The
+     * `hasResolvedEntitlements` guard mirrors iOS exactly: a fresh-install cold-start race where
+     * Play Billing's entitlement query hasn't resolved yet must never block a real subscriber, so
+     * the swipe is let through un-blocked during that narrow window instead.
+     *
+     * Public (not just an internal [handleSwipe] guard) — `CardStackLayer` calls this
+     * synchronously at gesture-end, *before* choosing its fling-vs-snap-back animation, so a
+     * blocked Keep/Delete never visually flies off-screen only to be silently ignored here. Cheap:
+     * both reads are already-in-memory `StateFlow.value`s, safe to call from a gesture callback.
+     */
+    fun canCommitSwipe(action: SwipeAction): Boolean {
+        if (action != SwipeAction.Keep && action != SwipeAction.Delete) return true
+        return swipeQuotaRepository.canSwipe(premiumRepository.isPremium.value) ||
+            !premiumRepository.hasResolvedEntitlements.value
+    }
+
     private fun handleSwipe(item: PhotoItem, action: SwipeAction) {
-        // Port of iOS CardStackView.dragGesture.onEnded's shouldBlockSwipeForPaywall gate — only
-        // Keep/Delete count against the daily quota (Snooze/Undo never do, matching iOS). The
-        // hasResolvedEntitlements guard mirrors iOS exactly: a fresh-install cold-start race
-        // where Play Billing's entitlement query hasn't resolved yet must never block a real
-        // subscriber, so the swipe is let through un-blocked during that narrow window instead.
-        if (action == SwipeAction.Keep || action == SwipeAction.Delete) {
-            val blocked = !swipeQuotaRepository.canSwipe(premiumRepository.isPremium.value) &&
-                premiumRepository.hasResolvedEntitlements.value
-            if (blocked) {
-                _effects.trySend(PhotoStackEffect.ShowPaywall)
-                return
-            }
+        if (!canCommitSwipe(action)) {
+            _effects.trySend(PhotoStackEffect.ShowPaywall)
+            return
         }
 
         excludedIds += item.id

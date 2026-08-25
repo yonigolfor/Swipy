@@ -31,6 +31,12 @@ dependencies {
 
     implementation(libs.android.billing.ktx)
 
+    // ProcessLifecycleOwner — re-checks entitlements/reconnects on every app foreground (Play
+    // Billing's PurchasesUpdatedListener has no equivalent of iOS's always-live Transaction.updates
+    // for purchases that resolve outside the current launchBillingFlow call). Same dependency
+    // :core:notifications already uses for its own foreground coordinator.
+    implementation(libs.androidx.lifecycle.process)
+
     // DataStore<Preferences> type only — resolves against :data:datastore's app-wide
     // @Provides binding via Hilt's aggregated graph, same pattern NotificationStateStore
     // already uses. No project(":data:datastore") dependency needed for this.
