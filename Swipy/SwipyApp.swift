@@ -42,6 +42,12 @@ class AppDelegate: NSObject, UIApplicationDelegate {
 
         NotificationDelegate.shared.setupInApp()
 
+        // Touch PremiumManager.shared as early as possible so its async StoreKit 2
+        // entitlement resolution races the whole launch pipeline (permission checks,
+        // stack load) instead of racing the user's first swipe gesture. Without this,
+        // the singleton's lazy init doesn't fire until the first canSwipe check.
+        _ = PremiumManager.shared
+
         return true
     }
 }

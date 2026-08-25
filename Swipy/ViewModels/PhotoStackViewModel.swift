@@ -63,6 +63,16 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     private var networkFailureCount = 0
     private var lastNetworkFailureDate: Date? = nil
 
+    /// Mirrors CardStackView's isDragging/isPinching — true while the user is actively
+    /// touching the card stack. Deliberately NOT @Published: this is set on every gesture
+    /// start/end (only twice per gesture, so the cost of setting it is nil), but making it
+    /// @Published would fire objectWillChange on every mutation regardless of whether any
+    /// view actually reads it in `body`, forcing SwiftUI to re-diff the whole card ForEach —
+    /// the exact mechanism that caused the regression documented in CLAUDE.md under
+    /// "Swipe Gesture Performance" (Round 4). Background scans (startBackgroundBlurBurstPrescan)
+    /// poll this directly to yield GPU/CPU priority to an active gesture.
+    var isUserInteracting = false
+
     /// Background pre-fetch task. Cancelled on drag start, restarted on drag end.
     private var prefetchTask: Task<Void, Never>?
     /// Long-lived task that observes NetworkMonitorService.$isOnline.
@@ -82,6 +92,21 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     var canSwipe: Bool {
         DailyLimitService.shared.canSwipe(isPremium: PremiumManager.shared.isPremium)
+    }
+
+    /// True only once StoreKit 2 entitlement resolution has actually confirmed the user
+    /// is not premium — never true while the very first `updatePremiumStatus()` pass is
+    /// still in flight. Guards the paywall trigger: `isPremium` is seeded synchronously
+    /// from `PersistenceService.cachedIsPremium` at launch, so a *returning* subscriber
+    /// never hits this window at all — it only matters for a device with no cached value
+    /// yet (fresh install/reinstall right after purchase). Without this guard, `canSwipe`
+    /// could momentarily read `isPremium` as its default `false` and incorrectly show the
+    /// paywall. The swipe is let through un-blocked during that narrow window instead;
+    /// `canSwipe` is re-evaluated fresh on every subsequent swipe, by which point
+    /// resolution — kicked off at `AppDelegate.didFinishLaunchingWithOptions`, well before
+    /// the user can reach an interactive swipe — has virtually always completed.
+    var shouldBlockSwipeForPaywall: Bool {
+        !canSwipe && PremiumManager.shared.hasResolvedEntitlements
     }
 
     // MARK: - Shuffle Mode State
@@ -312,11 +337,25 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// (including the now-expensive blur/burst ones) concurrently on a fresh launch.
     private var isRefreshingCounts = false
 
+    /// Monotonic counter bumped each time refreshCategoryCounts() begins — lets the
+    /// watchdog Task below recognize it's no longer looking at the run it was
+    /// scheduled for, so a stale watchdog from an earlier call can't clobber a newer
+    /// call's legitimate "still recalculating" state. Same pattern as CardStackView's
+    /// undoGeneration.
+    private var categoryRefreshGeneration = 0
+
     func refreshCategoryCounts() {
         guard !isRefreshingCounts else { return }
         isRefreshingCounts = true
+        categoryRefreshGeneration += 1
+        let myGeneration = categoryRefreshGeneration
 
-        Task.detached(priority: .userInitiated) {
+        // .utility (not .userInitiated) — Phase 1's PHFetchRequest counts are fast
+        // regardless of QoS tier, but this fires the instant the user opens Smart
+        // Filters, i.e. exactly when that screen is laying out and about to be
+        // scrolled; .userInitiated would bias the scheduler toward this task at the
+        // worst possible moment for scroll responsiveness.
+        Task.detached(priority: .utility) {
             let service = PhotoLibraryService.shared
 
             if service.fetchResult == nil {
@@ -362,6 +401,25 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 self.categoriesRecalculating = needsVisibleRecalc
             }
 
+            // Failsafe: if Phase 2 below keeps losing the shared blur/burst scan lock
+            // (see the per-category .remove() logic further down, which deliberately
+            // leaves a category "recalculating" rather than clearing the spinner over
+            // a stale count), nothing else guarantees this ever resolves — a sustained
+            // race against startBackgroundBlurBurstPrescan() could otherwise leave the
+            // dim+spinner stuck for the rest of the session. Mirrors the same
+            // watchdog-Task pattern already used for this exact class of problem in
+            // FullScreenMediaView (see CLAUDE.md). Guarded by categoryRefreshGeneration
+            // so a stale watchdog from an earlier call never clobbers a newer one.
+            if !needsVisibleRecalc.isEmpty {
+                Task { @MainActor [weak self] in
+                    try? await Task.sleep(for: ScanTuning.recalculatingSpinnerTimeout)
+                    guard let self, self.categoryRefreshGeneration == myGeneration else { return }
+                    if !self.categoriesRecalculating.isEmpty {
+                        self.categoriesRecalculating = []
+                    }
+                }
+            }
+
             // ── Phase 2: Accurate counts, in parallel, in the background ──────
             // Large videos is cheap (file-size metadata only) and always runs.
             // Blurry/burst share a scan lock with startBackgroundBlurBurstPrescan() —
@@ -377,14 +435,18 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             // concurrent CIFilter/Vision pipelines (BlurBurstScanEngine/BurstAnalyzer),
             // which at a higher QoS competes with the main thread for the same
             // performance cores and was the direct cause of dropped frames during
-            // swipe gestures in the first ~10s after a cold start.
+            // swipe gestures in the first ~10s after a cold start. Blurry and burst
+            // run sequentially (not as parallel async lets) — each already spends up
+            // to 6-way concurrency internally, so running both at once would stack to
+            // 12 simultaneous CIFilter/Vision pipelines, doubling the budget either
+            // engine was tuned for. Neither is user-visible enough to justify that;
+            // this is a background accuracy pass, not something a spinner is blocking on.
             let (accurateBlurry, accurateBurst): (Int?, Int?) = await Task.detached(priority: .background) {
                 guard await self.tryAcquireBlurBurstScan() else { return (nil, nil) }
-                async let blurryCount = self.accurateBlurryCount(excluding: processed)
-                async let burstCount = self.accurateBurstCount(excluding: processed)
-                let result = await (blurryCount, burstCount)
+                let blurryCount = await self.accurateBlurryCount(excluding: processed)
+                let burstCount = await self.accurateBurstCount(excluding: processed)
                 await self.releaseBlurBurstScan()
-                return result
+                return (blurryCount, burstCount)
             }.value
 
             let accurateLargeVideoCount = await largeVideoCount
@@ -395,9 +457,22 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             await MainActor.run {
                 withAnimation(.spring(response: 0.4)) {
                     self.categoryCounts[.largeVideos] = accurateLargeVideoCount
-                    if let accurateBlurry { self.categoryCounts[.blurryPhotos] = accurateBlurry }
-                    if let accurateBurst { self.categoryCounts[.burstPhotos] = accurateBurst }
-                    self.categoriesRecalculating = []
+                    self.categoriesRecalculating.remove(.largeVideos)
+                    // Only clear the dim+spinner for blurry/burst if they actually got a
+                    // fresh value this round — if the scan lock was lost to a concurrent
+                    // prescan (accurateBlurry/accurateBurst == nil), leave them recalculating
+                    // rather than silently clearing the spinner over a stale count. They'll
+                    // be picked up again by the next refreshCategoryCounts() call, since
+                    // `cached` (computed at the top of this function) still won't contain
+                    // them until one actually succeeds.
+                    if let accurateBlurry {
+                        self.categoryCounts[.blurryPhotos] = accurateBlurry
+                        self.categoriesRecalculating.remove(.blurryPhotos)
+                    }
+                    if let accurateBurst {
+                        self.categoryCounts[.burstPhotos] = accurateBurst
+                        self.categoriesRecalculating.remove(.burstPhotos)
+                    }
                 }
                 self.isRefreshingCounts = false
             }
@@ -415,6 +490,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         var cursor = 0
         var count = 0
         while count < cap, cursor < service.totalAssetCount {
+            await Self.waitForGestureIdle(viewModel: self)
             let (batch, next) = service.fetchPageOfAssets(
                 for: .blurryPhotos, startIndex: cursor, pageSize: 300, excluding: processedIDs
             )
@@ -422,6 +498,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             if !batch.isEmpty {
                 count += await BlurBurstScanEngine.shared.countBlurry(batch, cap: cap - count)
             }
+            try? await Task.sleep(for: ScanTuning.interChunkYieldDuration)
             if next == nil { break }
         }
         return min(count, cap)
@@ -435,6 +512,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         var cursor = 0
         var count = 0
         while count < cap, cursor < service.totalAssetCount {
+            await Self.waitForGestureIdle(viewModel: self)
             let (batch, next) = service.fetchPageOfAssets(
                 for: .burstPhotos, startIndex: cursor, pageSize: 500, excluding: processedIDs
             )
@@ -447,6 +525,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 )
                 count += analyzed.count
             }
+            try? await Task.sleep(for: ScanTuning.interChunkYieldDuration)
             if next == nil { break }
         }
         return min(count, cap)
@@ -474,6 +553,41 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         isBlurBurstScanActive = false
     }
 
+    /// Tuning constants for the fresh-install CPU-spike mitigations — see CLAUDE.md's
+    /// "Fresh-install first-swipe CPU spike (fixed)" for the full rationale behind each value.
+    private enum ScanTuning {
+        /// Delay before scheduleDeferredPersonaBuild() actually calls analyzeFavorites() —
+        /// gives the first real swipes of a session a clean CPU/GPU window.
+        static let personaDeferredDelay: Duration = .seconds(5)
+        /// Failsafe ceiling on how long the Smart Filters dim+spinner "recalculating"
+        /// state can stay stuck if refreshCategoryCounts() keeps losing the shared
+        /// blur/burst scan lock — see the watchdog Task in refreshCategoryCounts().
+        static let recalculatingSpinnerTimeout: Duration = .seconds(20)
+        /// How often prescanBatches re-checks isUserInteracting while blocked on an active gesture.
+        static let gestureInteractionPollInterval: Duration = .milliseconds(150)
+        /// Safety-net ceiling on how long prescanBatches will wait on isUserInteracting before
+        /// giving up and proceeding anyway. SwipeStackView's scenePhase observer is the primary
+        /// fix for isUserInteracting getting stuck `true` (a gesture whose onEnded never fires
+        /// because the app backgrounds mid-drag) — this is defense-in-depth for any other way
+        /// it could happen, since the consequence of hanging here forever isn't just "this scan
+        /// pauses": it never calls releaseBlurBurstScan(), permanently starving the shared lock
+        /// and silently disabling Smart Filters' Blurry/Burst accurate counts for the session.
+        static let gestureWaitTimeout: Duration = .seconds(30)
+        /// Cooperative pause between prescan chunks, independent of gesture state — gives the
+        /// compositor headroom even when the user isn't actively gesturing (e.g. reading a card).
+        static let interChunkYieldDuration: Duration = .milliseconds(100)
+        /// Blurry prescan chunk size — each verdict is fully independent per-asset (no chain
+        /// state), so this can be small purely to give the gesture-guard check above frequent
+        /// checkpoints, at zero accuracy cost.
+        static let blurPrescanPageSize = 30
+        /// Burst prescan chunk size — deliberately matches accurateBurstCount()'s own page size
+        /// (PhotoStackViewModel.accurateBurstCount) so both burst-scanning entry points agree on
+        /// chain boundaries and never disagree on what gets cached for a boundary-adjacent asset.
+        /// BurstAnalyzer.analyze() has no cross-call state, so a smaller value here would risk
+        /// splitting a real long burst across two page boundaries.
+        static let burstPrescanPageSize = 500
+    }
+
     /// Walks the full library at background priority, populating BlurBurstCacheService
     /// so Blurry/Burst Smart Filters are already warm by the time the user taps into
     /// them. Cache-first throughout — re-running this after it already completed once
@@ -494,10 +608,16 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         Task.detached(priority: .background) {
             if service.fetchResult == nil { service.fetchAllPhotos() }
 
-            await Self.prescanBatches(filter: .blurryPhotos, service: service, excluding: excluded) { batch in
+            await Self.prescanBatches(
+                filter: .blurryPhotos, service: service, excluding: excluded,
+                pageSize: ScanTuning.blurPrescanPageSize, viewModel: self
+            ) { batch in
                 await BlurBurstScanEngine.shared.scanBlurry(batch, maxConcurrency: prescanConcurrency) { _ in }
             }
-            await Self.prescanBatches(filter: .burstPhotos, service: service, excluding: excluded, pageSize: 500) { batch in
+            await Self.prescanBatches(
+                filter: .burstPhotos, service: service, excluding: excluded,
+                pageSize: ScanTuning.burstPrescanPageSize, viewModel: self
+            ) { batch in
                 let analyzed = await BurstAnalyzer.shared.analyze(batch, maxConcurrency: prescanConcurrency)
                 let analyzedIDs = Set(analyzed.map { $0.id })
                 BlurBurstCacheService.shared.setBurstVerdicts(
@@ -509,23 +629,48 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         }
     }
 
+    /// Backs off entirely while the user is actively dragging/pinching before starting the
+    /// next page of a blur/burst scan — CIFilter/Vision work is GPU/ANE-bound, which GCD's
+    /// .background QoS does not deprioritize (see CLAUDE.md's cold-start jank notes), so
+    /// this is an explicit yield rather than relying on QoS alone to keep the compositor's
+    /// frame budget clear. Shared by `prescanBatches` (cache-warming pass) and
+    /// `accurateBlurryCount`/`accurateBurstCount` (refreshCategoryCounts()'s Phase 2) —
+    /// both page through the same expensive engines and must back off identically, or the
+    /// one call site that forgets to poll silently reintroduces the exact swipe-gesture
+    /// jank this mechanism exists to prevent.
+    private nonisolated static func waitForGestureIdle(viewModel: PhotoStackViewModel) async {
+        var waited: Duration = .zero
+        while await viewModel.isUserInteracting {
+            if waited >= ScanTuning.gestureWaitTimeout {
+                print("[PhotoStackViewModel] blur/burst scan — isUserInteracting stuck true for \(ScanTuning.gestureWaitTimeout), proceeding anyway")
+                break
+            }
+            try? await Task.sleep(for: ScanTuning.gestureInteractionPollInterval)
+            waited += ScanTuning.gestureInteractionPollInterval
+        }
+    }
+
     /// Pages through every asset matching `filter`, handing each batch to `process`.
-    /// `nonisolated static` — pure pagination + delegation, no actor-isolated state.
+    /// `nonisolated static` — pure pagination + delegation; `viewModel` is only used to poll
+    /// `isUserInteracting` (a plain, non-@Published flag — see its declaration for why),
+    /// never mutated here.
     private nonisolated static func prescanBatches(
         filter: FilterCategory,
         service: PhotoLibraryService,
         excluding: Set<String>,
-        pageSize: Int = 300,
+        pageSize: Int,
+        viewModel: PhotoStackViewModel,
         process: ([PhotoItem]) async -> Void
     ) async {
         var cursor = 0
         while cursor < service.totalAssetCount {
+            await waitForGestureIdle(viewModel: viewModel)
             let (batch, next) = service.fetchPageOfAssets(
                 for: filter, startIndex: cursor, pageSize: pageSize, excluding: excluding
             )
             cursor = next ?? service.totalAssetCount
             if !batch.isEmpty { await process(batch) }
-            await Task.yield()
+            try? await Task.sleep(for: ScanTuning.interChunkYieldDuration)
             if next == nil { break }
         }
     }
@@ -612,15 +757,16 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             await MainActor.run {
                 withAnimation(.spring(response: 0.6)) { self.onboardingLargeVideoCount = finalLarge }
             }
-            // Kick off persona building while the user finishes the last onboarding step.
-            await AestheticScoringService.shared.analyzeFavorites()
-            await MainActor.run { self.scoreCachedCardsIfNeeded() }
-
-            // Sequenced, not parallel: starting this alongside the work above (both used
-            // to fire together right at permission grant, during onboarding's own animated
-            // steps) doubled up CPU load at the worst possible time — two unrelated heavy
-            // background scans competing with onboarding's UI animations for the same cores.
-            await MainActor.run { self.startBackgroundBlurBurstPrescan() }
+            // Persona building is deliberately NOT awaited here — buildPersonaBlocking() is a
+            // synchronous, unconcurrent scan of up to 200 Favorites (real PHImageManager +
+            // CIFilter + Vision work, one at a time), and awaiting it used to serialize the
+            // entire prescan below behind it. scheduleDeferredPersonaBuild() fires it off on
+            // its own delayed timer instead, so it never blocks the prescan's start and never
+            // stacks GPU/ANE work on top of the user's very first real swipes.
+            await MainActor.run {
+                self.scheduleDeferredPersonaBuild()
+                self.startBackgroundBlurBurstPrescan()
+            }
         }
     }
 
@@ -790,13 +936,9 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         preShuffleStack = nil
         invalidatePendingUndo()
 
-        // Build aesthetic persona once — no-op when already ready or in-flight.
-        // After it completes, score any cards that were already cached while it was building.
-        Task.detached(priority: .utility) { [weak self] in
-            await AestheticScoringService.shared.analyzeFavorites()
-            guard let self else { return }
-            await MainActor.run { [self] in self.scoreCachedCardsIfNeeded() }
-        }
+        // Aesthetic persona build is intentionally NOT triggered here — see
+        // scheduleDeferredPersonaBuild() below for why it's deferred off the cold-start path.
+        scheduleDeferredPersonaBuild()
 
         Task {
             if photoService.fetchResult == nil { photoService.fetchAllPhotos() }
@@ -1181,7 +1323,8 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
 
     private func scheduleSwipeLimitResetIfNeeded() {
         guard DailyLimitService.shared.hasReachedLimit,
-              !PremiumManager.shared.isPremium else { return }
+              !PremiumManager.shared.isPremium,
+              PremiumManager.shared.hasResolvedEntitlements else { return }
         NotificationManager.shared.scheduleSwipeLimitResetNotification()
     }
 
@@ -1477,6 +1620,14 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     func cancelPrefetch() {
         prefetchTask?.cancel()
         prefetchTask = nil
+    }
+
+    /// Forwards CardStackView's measured card frame to PhotoLibraryService so
+    /// requestCardImage's targetSize matches what's actually rendered instead of a
+    /// screen-bounds approximation. Views never touch services directly — see
+    /// CardStackView.onAppear for the (single) call site.
+    func updateCardTargetSize(_ measuredPoints: CGSize) {
+        photoService.updateCardTargetSize(measuredPoints)
     }
 
     func resumePrefetch() {
@@ -1907,12 +2058,95 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// Starts loading the *next* cards (index 1…8) into NSCache while the user
     /// is still mid-drag, giving us the full remaining gesture duration as
     /// headstart before the new top card hits the screen.
+    /// Shared requestCardImage completion handling for prepareUpcomingCards/precacheNextImages.
+    /// The degraded pass caches/publishes immediately — it's about to be replaced by the
+    /// final pass, so predecoding a throwaway intermediate would be wasted work. The final
+    /// pass runs prepareForDisplay() (iOS 15+, off-main-thread bitmap decompression) before
+    /// caching/publishing, so a card's first SwiftUI composite never pays a decode cost —
+    /// this is the actual "true zero-latency" fix for locally-available assets. Falls back
+    /// to the original image if prepareForDisplay can't predecode it (e.g. unsupported
+    /// format; documented to return nil in that case). `onFinal` is an optional extra hook
+    /// for callers needing per-item context alongside the ready image (precacheNextImages'
+    /// debug blur-variance logging).
+    private func handlePrefetchedImage(
+        _ image: UIImage,
+        isDegraded: Bool,
+        item: PhotoItem,
+        requestID: PHImageRequestID,
+        onFinal: ((UIImage) -> Void)? = nil
+    ) {
+        guard !isDegraded else {
+            photoService.cacheImage(image, for: item.id)
+            Task { @MainActor [weak self] in
+                guard let self, self.photoStack.contains(where: { $0.id == item.id }) else { return }
+                self.loadedImageIDs.remove(item.id)
+                self.loadedImageIDs.insert(item.id)
+            }
+            return
+        }
+        image.prepareForDisplay { [weak self] prepared in
+            guard let self else { return }
+            let readyImage = prepared ?? image
+            // prepareForDisplay's completion is @Sendable — photoService is a MainActor-
+            // isolated property (PhotoStackViewModel is @MainActor), so the cache write
+            // has to happen after the hop below, not directly in this closure body.
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.photoService.cacheImage(readyImage, for: item.id)
+                guard self.photoStack.contains(where: { $0.id == item.id }) else { return }
+                self.loadedImageIDs.remove(item.id)
+                self.loadedImageIDs.insert(item.id)
+                self.finalImageIDs.insert(item.id)
+                onFinal?(readyImage)
+                self.scheduleScore(item: item, image: readyImage)
+                // Only clear activeRequests if it still points at THIS request — the
+                // prepareForDisplay hop above can take long enough that a newer
+                // requestCardImage call for the same item already overwrote the entry
+                // with its own fresh request ID by the time this completion runs.
+                // Removing unconditionally would delete that newer, still-in-flight
+                // request's tracking entry, leaking it (cancelRequest would never find
+                // it if the item is later scrolled away).
+                if self.activeRequests[item.id] == requestID {
+                    self.activeRequests.removeValue(forKey: item.id)
+                }
+            }
+        }
+    }
+
+    /// Proactively arms the fast local thumbnail bridge (PhotoLibraryService.loadThumbnail)
+    /// for iCloud-only items in the given window. Local items skip this entirely — their
+    /// full-res image is already prepareForDisplay-ready via handlePrefetchedImage above,
+    /// so a separate thumbnail tier buys them nothing; iCloud-only items can't be predecoded
+    /// locally until the download completes, so this is strictly a fallback bridge for that
+    /// one case, not a universal placeholder. Fire-and-forget: no activeRequests-style
+    /// tracking/cancellation, since this is cheap, local-only, no-network, and a card being
+    /// swiped past before it resolves is harmless (the cache write is simply unused).
+    private func armThumbnailBridge(for items: [PhotoItem]) {
+        // Checks isLocallyAvailable() directly rather than item.isCloudOnly — that
+        // field is populated only by the offline-mode local-universe scanner (a
+        // separate, pre-existing feature) and stays false for every item during
+        // normal online swiping, which is exactly when this bridge needs to fire.
+        // isLocallyAvailable() is a Photos-DB metadata read (no I/O), already used
+        // this way at several other call sites in this file — cheap for the ~8-item
+        // window this runs over.
+        for item in items where !item.isVideo {
+            guard photoService.cachedThumbnail(for: item.id) == nil,
+                  !photoService.isLocallyAvailable(item.asset) else { continue }
+            let capturedItem = item
+            photoService.loadThumbnail(for: item.asset, targetSize: CGSize(width: 300, height: 400)) { [weak self] thumb in
+                guard let self, let thumb else { return }
+                self.photoService.cacheThumbnail(thumb, for: capturedItem.id)
+            }
+        }
+    }
+
     func prepareUpcomingCards() {
         // index 0 is the card being dragged away — skip it.
         let upcomingItems = Array(photoStack.dropFirst().prefix(8))
         guard !upcomingItems.isEmpty else { return }
 
         photoService.warmUpCache(for: upcomingItems)
+        armThumbnailBridge(for: upcomingItems)
 
         let topCardID = photoStack.first?.asset.localIdentifier
         // Wider window than the image-cache prefix above — gives VideoPlayerPool
@@ -1930,22 +2164,17 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             }
             if let existing = activeRequests[item.id] { photoService.cancelRequest(existing) }
             let capturedItem = item
-            activeRequests[item.id] = photoService.requestCardImage(for: item.asset) { [weak self] image, isDegraded in
+            // Captured by the closure below before assignment completes — the closure
+            // isn't invoked until PHImageManager calls back, well after this line runs,
+            // so by then requestID always holds the real value. Lets
+            // handlePrefetchedImage verify it still owns this activeRequests entry
+            // before clearing it (see that function's doc comment).
+            var requestID: PHImageRequestID = PHInvalidImageRequestID
+            requestID = photoService.requestCardImage(for: item.asset) { [weak self] image, isDegraded in
                 guard let self, let image else { return }
-                self.photoService.cacheImage(image, for: capturedItem.id)
-                let capturedImage = image
-                Task { @MainActor [weak self] in
-                    guard let self,
-                          self.photoStack.contains(where: { $0.id == capturedItem.id }) else { return }
-                    self.loadedImageIDs.remove(capturedItem.id)
-                    self.loadedImageIDs.insert(capturedItem.id)
-                    if !isDegraded {
-                        self.finalImageIDs.insert(capturedItem.id)
-                        self.scheduleScore(item: capturedItem, image: capturedImage)
-                        self.activeRequests.removeValue(forKey: capturedItem.id)
-                    }
-                }
+                self.handlePrefetchedImage(image, isDegraded: isDegraded, item: capturedItem, requestID: requestID)
             }
+            activeRequests[item.id] = requestID
         }
     }
 
@@ -1959,6 +2188,7 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         // OS hint: give PHCachingImageManager 20 items to pre-decode in the background;
         // zero NSCache cost — iOS evicts the pipeline buffer under memory pressure automatically.
         photoService.warmUpCache(for: Array(photoStack.prefix(20)))
+        armThumbnailBridge(for: nextItems)
 
         // Wider window than nextItems (image cache) — see prepareUpcomingCards for rationale.
         let videoWindow = Array(photoStack.prefix(15))
@@ -1977,28 +2207,50 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             if let existing = activeRequests[item.id] { photoService.cancelRequest(existing) }
             let capturedItem = item
             let capturedStackIndex = stackIndex
-            activeRequests[item.id] = photoService.requestCardImage(for: item.asset) { [weak self] image, isDegraded in
+            // See prepareUpcomingCards for why requestID is captured this way.
+            var requestID: PHImageRequestID = PHInvalidImageRequestID
+            requestID = photoService.requestCardImage(for: item.asset) { [weak self] image, isDegraded in
                 guard let self, let image else { return }
-                self.photoService.cacheImage(image, for: capturedItem.id)
-                let capturedImage = image
-                Task { @MainActor [weak self] in
-                    guard let self,
-                          self.photoStack.contains(where: { $0.id == capturedItem.id }) else { return }
-                    self.loadedImageIDs.remove(capturedItem.id)
-                    self.loadedImageIDs.insert(capturedItem.id)
-                    if !isDegraded {
-                        self.finalImageIDs.insert(capturedItem.id)
-                        #if DEBUG
-                        self.debugLogBlurVariance(of: capturedImage, id: capturedItem.id, stackIndex: capturedStackIndex)
-                        #endif
-                        self.scheduleScore(item: capturedItem, image: capturedImage)
-                        self.activeRequests.removeValue(forKey: capturedItem.id)
-                    }
+                self.handlePrefetchedImage(image, isDegraded: isDegraded, item: capturedItem, requestID: requestID) { readyImage in
+                    #if DEBUG
+                    self.debugLogBlurVariance(of: readyImage, id: capturedItem.id, stackIndex: capturedStackIndex)
+                    #endif
                 }
             }
+            activeRequests[item.id] = requestID
         }
 
         evictStaleCacheEntries(keeping: nextItems)
+    }
+
+    /// True while a deferred persona build (below) is scheduled or in flight — prevents
+    /// piling up redundant sleep-then-noop Tasks if this is called from multiple cold-start
+    /// entry points (resetAndLoad for a returning user, startOnboardingScan for a fresh
+    /// install) in close succession. Reset once the scheduled attempt actually runs, so a
+    /// premature attempt (e.g. permission still not granted yet) doesn't permanently block
+    /// a later, real attempt from scheduling its own.
+    private var personaBuildScheduled = false
+
+    /// Schedules the aesthetic persona build off the critical cold-start / first-swipe path.
+    /// buildPersonaBlocking() (AestheticScoringService) is a synchronous, unconcurrent scan of
+    /// up to 200 Favorites — real PHImageManager + CIFilter + Vision work, one at a time, no
+    /// TaskGroup — so running it immediately at cold start or right at onboarding permission
+    /// grant used to compete directly with the very first swipe's drag rendering. Deferring by
+    /// a fixed delay gives the initial swipe experience a clean window; analyzeFavorites()
+    /// itself is idempotent (no-ops if already built or in flight), so calling this multiple
+    /// times per session is safe. Score badges simply appear a few seconds later than before —
+    /// scoreCachedCardsIfNeeded() catches up any cards that were already on-screen and cached.
+    private func scheduleDeferredPersonaBuild() {
+        guard !personaBuildScheduled else { return }
+        personaBuildScheduled = true
+        Task.detached(priority: .utility) { [weak self] in
+            try? await Task.sleep(for: ScanTuning.personaDeferredDelay)
+            await AestheticScoringService.shared.analyzeFavorites()
+            await MainActor.run {
+                self?.personaBuildScheduled = false
+                self?.scoreCachedCardsIfNeeded()
+            }
+        }
     }
 
     /// Scores all cards currently in the image cache.

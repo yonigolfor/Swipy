@@ -151,6 +151,15 @@ class PersistenceService {
         set { _totalSpaceSavedLifetime = Double(newValue) }
     }
 
+    // MARK: - Premium Entitlement Cache
+
+    /// Mirrors PremiumManager's last-known `isPremium` so a returning subscriber reads
+    /// `true` synchronously on cold start, before StoreKit 2's async
+    /// `Transaction.currentEntitlements` verification resolves. Not a security boundary —
+    /// StoreKit's own JWS verification remains the source of truth; this only prevents a
+    /// UI flicker during the resolution window. See CLAUDE.md's PremiumManager section.
+    @AppStorage("cachedIsPremium") var cachedIsPremium: Bool = false
+
     // MARK: - Kept IDs
 
     var keptPhotoIDs: Set<String> {

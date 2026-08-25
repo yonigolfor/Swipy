@@ -134,7 +134,10 @@ struct CardStackView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onAppear { cardSize = CGSize(width: cardW, height: cardH) }
+            .onAppear {
+                cardSize = CGSize(width: cardW, height: cardH)
+                viewModel.updateCardTargetSize(cardSize)
+            }
             .animation(.easeInOut(duration: 0.35), value: viewModel.isScanning)
             // Covers the denied/restricted → loading → cards handoff (scenePhase
             // recovery never wraps the ViewModel reload in withAnimation — per the
@@ -316,6 +319,7 @@ struct CardStackView: View {
                 pinchScale = max(1.0, scale)
                 if !isPinching, pinchScale > 1.01 {
                     isPinching = true
+                    viewModel.isUserInteracting = true
                     // A single-finger drag may already be mid-flight when the second
                     // finger lands — dragGesture.onChanged bails out once isPinching
                     // is true, so without this reset dragOffset/dragRotation would
@@ -334,6 +338,7 @@ struct CardStackView: View {
             .onEnded { _ in
                 // Spring reset handled by onChange(of: isPinching) above.
                 isPinching = false
+                viewModel.isUserInteracting = isDragging
                 pinchPanOrigin = .zero
             }
             .simultaneously(with:
@@ -374,6 +379,7 @@ struct CardStackView: View {
                 guard !isPinching, !isUndoAnimating else { return }
                 if !isDragging {
                     isDragging = true
+                    viewModel.isUserInteracting = true
                     viewModel.cancelPrefetch()
                 }
                 dragOffset = value.translation
@@ -393,6 +399,7 @@ struct CardStackView: View {
             .onEnded { value in
                 guard !isUndoAnimating else { return }
                 isDragging = false
+                viewModel.isUserInteracting = isPinching
                 hasFiredEarlyPrecache = false
                 swipeDirection = .none
                 // If a pinch is active or scale hasn't fully reset, discard swipe.
@@ -409,8 +416,11 @@ struct CardStackView: View {
                 let direction = SwipeDirection.from(offset: value.translation)
 
                 if let action = direction.action, let swipedItem = viewModel.topCard {
-                    // Block keep/delete swipes when free daily limit is exhausted
-                    if (action == .keep || action == .delete), !viewModel.canSwipe {
+                    // Block keep/delete swipes when free daily limit is exhausted. Gated on
+                    // shouldBlockSwipeForPaywall (not raw canSwipe) so a StoreKit entitlement
+                    // check still in flight on a fresh install never flashes the paywall at a
+                    // soon-to-resolve premium user — see its doc comment in PhotoStackViewModel.
+                    if (action == .keep || action == .delete), viewModel.shouldBlockSwipeForPaywall {
                         withAnimation(.spring(response: 0.35, dampingFraction: 0.52)) {
                             dragOffset = .zero
                             dragRotation = 0
