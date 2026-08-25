@@ -43,6 +43,8 @@ import com.swipy.core.notifications.SwipyNotificationManager
 import com.swipy.domain.model.FilterCategory
 import com.swipy.feature.filters.FilterCategoriesScreen
 import com.swipy.feature.onboarding.OnboardingScreen
+import com.swipy.feature.paywall.PaywallContext
+import com.swipy.feature.paywall.PaywallScreen
 import com.swipy.feature.reviewbin.ReviewBinScreen
 import com.swipy.feature.swipe.PhotoStackIntent
 import com.swipy.feature.swipe.PhotoStackViewModel
@@ -84,6 +86,12 @@ private const val ROUTE_FILTERS = "filters"
 private const val ROUTE_SWIPE = "swipe"
 private const val ROUTE_REVIEW_BIN = "reviewbin"
 
+/** Pushed on top of the back stack from [ROUTE_SWIPE] when the daily swipe quota blocks a Keep/
+ * Delete — deliberately not a bottom-nav tab, not in [KNOWN_ROUTES]/deep-link-reachable. See
+ * android/TODO.md item 8 "Paywall Presentation Wiring" for why the `.postOnboarding` context is
+ * handled separately in [AppRoot] instead of a NavHost destination. */
+private const val ROUTE_PAYWALL = "paywall"
+
 /** Guards against a malformed/unexpected `SwipyNotificationManager.EXTRA_DEEP_LINK_ROUTE` value
  * crashing `NavHost` with "no destination found" — must be kept in sync with the 3
  * `composable(...)` registrations below and with `NotificationTrigger.deepLinkRoute`'s values
@@ -112,9 +120,19 @@ private fun AppRoot(pendingDeepLinkRoute: String?, onDeepLinkConsumed: () -> Uni
     val splashViewModel: SplashViewModel = hiltViewModel()
     val hasCompletedOnboarding by splashViewModel.hasCompletedOnboarding.collectAsStateWithLifecycle()
 
+    // One-shot: shown exactly once, immediately after onboarding completes — the Android
+    // orchestration equivalent of iOS embedding PaywallView as onboarding's own literal last
+    // page. Kept here (not inside :feature:onboarding) so no feature module needs to depend on
+    // :feature:paywall; :app already owns this sequencing (Splash -> Onboarding -> NavHost).
+    var showPostOnboardingPaywall by remember { mutableStateOf(false) }
+
     when {
         showSplash -> SplashScreen(onFinished = { showSplash = false })
-        hasCompletedOnboarding == false -> OnboardingScreen(onComplete = {})
+        hasCompletedOnboarding == false -> OnboardingScreen(onComplete = { showPostOnboardingPaywall = true })
+        hasCompletedOnboarding == true && showPostOnboardingPaywall -> PaywallScreen(
+            context = PaywallContext.PostOnboarding,
+            onDismiss = { showPostOnboardingPaywall = false },
+        )
         hasCompletedOnboarding == true -> SwipyNavHost(
             pendingDeepLinkRoute = pendingDeepLinkRoute,
             onDeepLinkConsumed = onDeepLinkConsumed,
@@ -261,10 +279,19 @@ private fun SwipyNavHost(pendingDeepLinkRoute: String?, onDeepLinkConsumed: () -
                 )
             }
             composable(ROUTE_SWIPE) {
-                SwipeStackScreen(viewModel = photoStackViewModel)
+                SwipeStackScreen(
+                    viewModel = photoStackViewModel,
+                    onShowPaywall = { navController.navigate(ROUTE_PAYWALL) },
+                )
             }
             composable(ROUTE_REVIEW_BIN) {
                 ReviewBinScreen(onBack = { navController.navigateToTab(ROUTE_SWIPE) })
+            }
+            composable(ROUTE_PAYWALL) {
+                PaywallScreen(
+                    context = PaywallContext.SwipeLimitReached,
+                    onDismiss = { navController.popBackStack() },
+                )
             }
         }
     }

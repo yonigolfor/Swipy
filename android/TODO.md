@@ -207,7 +207,7 @@ asset as source of truth per the explicit instruction to pull it from the iOS ap
 
 ---
 
-## 7. Local Notifications Engine & Scheduling — 🟡 5/6 TRIGGERS WIRED, NOT YET VERIFIED ON-DEVICE
+## 7. Local Notifications Engine & Scheduling — 🟡 6/6 TRIGGERS WIRED, NOT YET VERIFIED ON-DEVICE
 
 iOS has a fully built-out system (`NOTIFICATIONS.md`,
 `Services/NotificationManager.swift`/`NotificationScheduler.swift`/`NotificationDelegate.swift`)
@@ -318,11 +318,14 @@ wired into `:app`:
    only captured once media permission is confirmed granted (`ContextCompat.checkSelfPermission`),
    never seeded as a false `0` before onboarding requests access. Both paths share
    `NotificationStateStore.lastBurstNotifiedAt` (24h re-fire cooldown) and the existing daily quota.
-3. **Swipe-limit-reset trigger** — `NotificationScheduler.scheduleExact(SwipeLimitReset, ...)`
-   is a complete, callable API, but nothing calls it yet — there's no Android port of iOS's
-   `DailyLimitService`/swipe-cap state in `PhotoStackViewModel` for it to hook into. **Deliberately
-   still deferred** — tightly coupled to the Paywall (item 8) and Swipe Quota (item 9), which are
-   their own separate feature, not part of "the notification system." Wire it in once item 9 exists.
+3. ~~Swipe-limit-reset trigger~~ — ✅ RESOLVED, now that item 9's `SwipeQuotaRepository` exists.
+   `PhotoStackViewModel.scheduleSwipeLimitResetIfNeeded()` calls
+   `NotificationScheduler.scheduleExact(SwipeLimitReset, nextMidnightPlusOneMinuteMillis())`
+   (new public helper, `core/notifications/NotificationTiming.kt`) the moment a Keep/Delete swipe
+   exhausts the daily quota for a non-premium, entitlement-resolved user — same three-way guard
+   as iOS's `scheduleSwipeLimitResetIfNeeded()`. `NotificationForegroundCoordinator.onStart` also
+   opportunistically cancels a stale alarm once the quota is no longer exhausted (mirrors iOS's
+   own `resetIfNewDay()` cancellation — also not a dedicated day-boundary watcher on iOS either).
 4. ~~Review Bin reminder's 24h condition is a coarser proxy than iOS's real one~~ — ✅ RESOLVED.
    `PhotoStateRepository` gained `reviewBinAddedAt: Flow<Map<Long, Long>>` (epoch millis, set only
    on an id's *first* addition — an undo/re-swipe of an already-binned id doesn't reset its
@@ -354,33 +357,90 @@ test` passes; this pass verifies the new logic by compilation and code review, n
 
 ---
 
-## 8. Paywall Integration & Play Billing — 🔴 NOT STARTED
+## 8. Paywall Integration & Play Billing — 🟡 IMPLEMENTED, NOT YET VERIFIED WITH REAL PURCHASES
 
-Confirmed via grep: `:feature:paywall` is registered in `settings.gradle.kts` and exists only as
-an empty directory containing a bare `build.gradle.kts` — no screen, no ViewModel, no strings.
-**Play Billing Library is not in the dependency catalog at all** (`gradle/libs.versions.toml` has
-zero hits for `billing`). This is the Android port of iOS's `PaywallView.swift` (3-tier
-Monthly/Yearly/Lifetime pricing, gold-glow selection, dynamic CTA) + `PremiumManager.swift`
-(StoreKit 2 — `PremiumTier` enum, entitlement status, purchase/restore). See root `CLAUDE.md`
-→ "Key Behavioral Constraints" → "Paywall (3-tier)" for the full iOS spec to port from,
-including the two presentation contexts (`postOnboarding`/`swipeLimitReached`).
+Full port of iOS `PaywallView.swift` + `PremiumManager.swift`, including both presentation
+contexts. `:feature:paywall` (`PaywallContext`, `PaywallUiState`, `PaywallIntent`,
+`PaywallViewModel`, `PaywallScreen` + strings in `values`/`values-he`) and a new `:data:billing`
+module (`BillingManager`, Play Billing Library 7.1.1 via `libs.android.billing.ktx`).
 
-Tightly coupled to item 9 below — the swipe-limit-reached trigger is what actually presents the
-paywall on iOS, so these two are one track, not two independent features.
+**Module design** — `PremiumRepository` (`:domain`) is deliberately state-only
+(`isPremium`/`hasActiveSubscription`/`hasResolvedEntitlements`), not the full iOS
+`PremiumManager` surface: `BillingClient.launchBillingFlow` requires an `Activity`, which
+`:domain` can never reference. Products/purchase/restore/isPurchasing/errorMessage all live on
+`BillingManager` (`:data:billing`) directly — `:feature:paywall` injects it concretely, the same
+pattern `:feature:swipe` already uses for `:data:mediastore`'s `VideoPlayerPool`
+(`VideoPlayerPoolAccess.kt`). `:feature:swipe`'s swipe-block gate (item 9) only ever needs the
+three state flows, so it depends on `:domain`'s `PremiumRepository` alone — zero dependency on
+`:feature:paywall` or `:data:billing`.
+
+**Play Console product model (a real platform difference from iOS, not an oversight)**: iOS uses
+two flat subscription product ids (`monthlySubscription`/`yearlySubscription`) in one
+subscription group so StoreKit treats switching between them as upgrade/downgrade. Play Billing's
+equivalent is **one subscription product with two base plans** (`monthly`/`yearly`) — Google's
+recommended shape for the same upgrade/downgrade behavior — plus one separate one-time product
+for Lifetime. `BillingManager` assumes product ids `swipy_premium_subscription` (base plans
+`monthly`/`yearly`) and `swipy_lifetime_purchase` — **these must be created in Play Console
+before any real purchase/restore flow can be tested**; nothing in this pass can verify that
+independently of Play Console configuration existing.
+
+Entitlement-resolution race ported exactly: `BillingManager.isPremium` seeds from a cached
+DataStore boolean (`cached_is_premium`) at construction — the closest achievable Android analogue
+of iOS's literal synchronous `PersistenceService.cachedIsPremium` seed (DataStore has no
+synchronous read API, so this resolves on the next coroutine dispatch rather than truly frame-0,
+but in practice completes well before first composition). `hasResolvedEntitlements` only flips
+true once `queryPurchasesAsync` completes, run concurrently with `queryProductDetails` (not
+sequentially) — the same fix iOS's `PremiumManager` doc already documents needing.
+
+**Verified**: `:domain`/`:data:billing`/`:feature:paywall` all compile cleanly,
+`./gradlew :app:assembleDebug test` passes. **Not verified**: an actual Play Billing purchase,
+restore, or subscription upgrade/downgrade flow — that needs the Play Console products above
+plus a license-tester account, neither of which exist yet.
 
 ---
 
-## 9. Swipe Quota (DailyLimitService) — 🔴 NOT STARTED
+## 9. Swipe Quota (DailyLimitService) — 🟡 IMPLEMENTED, NOT YET VERIFIED ON-DEVICE
 
-No `DailyLimitService`/swipe-cap use case exists anywhere under `:domain` or `:feature:swipe`
-(confirmed via grep — zero hits for `dailylimit`/`swipequota`/`swipelimit` outside of
-`:core:notifications`' already-built `SwipeLimitReset` trigger, which has nothing to call it).
-iOS's `DailyLimitService` gates keep/delete swipes at 120/day + a one-time +50 share bonus, then
-triggers the paywall (item 8) via `viewModel.shouldShowPaywall = true` — see
-`CardStackView.swift`'s `dragGesture.onEnded`, the `!viewModel.canSwipe` branch, for the exact
-trigger point to port. Right now Android has **no daily swipe limit at all**. This is also the
-reason notification trigger 4 (Swipe Limit Reset) is listed as unreachable in item 7 above — it
-needs this service to exist before anything can call `NotificationScheduler.scheduleExact(SwipeLimitReset, ...)`.
+Full port of iOS `DailyLimitService`. New `:domain` interface `SwipeQuotaRepository`
+(`dailyLimit`/`swipesUsedToday`/`bonusSwipesGranted`/`remainingSwipes`/`hasReachedLimit`/
+`hasSharedToday` as eagerly-collected `StateFlow`s, plus `canSwipe`/`recordSwipe`/
+`applyShareBonus`), implemented by `:data:datastore`'s `DataStoreSwipeQuotaRepository` — same
+`dataStore.edit{}` atomicity pattern as `DataStorePhotoStateRepository`, persisted as 4 flat keys
+in the existing shared `swipy_prefs` DataStore (`swipe_quota_used_today`,
+`swipe_quota_date_epoch_day`, `swipe_quota_bonus`, `swipe_quota_bonus_date_epoch_day` — epoch-day
+integers, the DataStore-friendly analogue of iOS's `Calendar.startOfDay` comparison). 120/day +
+one-time +50 share bonus, identical constants to iOS.
+
+**Why `StateFlow`, not a suspend/cold read**: iOS's gate check
+(`shouldBlockSwipeForPaywall`) is synchronous, evaluated inline inside a perf-critical
+gesture-end handler. `DataStoreSwipeQuotaRepository` eagerly collects (`SharingStarted.Eagerly`)
+into `StateFlow`s so `canSwipe(isPremium: Boolean): Boolean` can read `.value` with zero
+suspension — the direct Android analogue of iOS's `@Published` properties being readable without
+an `await`.
+
+`PhotoStackViewModel.handleSwipe` ports `CardStackView.dragGesture.onEnded`'s
+`shouldBlockSwipeForPaywall` gate exactly (only Keep/Delete count against quota, never
+Snooze/Undo; blocked only once `PremiumRepository.hasResolvedEntitlements` is true, matching
+iOS's fresh-install cold-start race guard) and fires `PhotoStackEffect.ShowPaywall` — the exact
+"navigate to paywall" example android/CLAUDE.md's Architecture section already names as the
+canonical thing that must be an Effect, never boolean state. `SwipeStackScreen` takes a new
+`onShowPaywall` param (same shape as `ReviewBinScreen`'s `onBack`) so `:feature:swipe` never
+depends on `:feature:paywall`; `MainActivity` wires it to a `navController.navigate("paywall")`
+push. The `.postOnboarding` presentation context is handled by `MainActivity.AppRoot` itself (a
+local one-shot `showPostOnboardingPaywall` flag flipped by `OnboardingScreen`'s existing
+`onComplete` callback) rather than embedding `PaywallScreen` inside `:feature:onboarding` — same
+end-to-end sequence as iOS (onboarding → paywall → main app) without a new feature-to-feature
+module dependency.
+
+**Documented platform deviation**: the in-paywall "Share & Get Free Swipes" bonus is granted the
+moment Android's `Intent.createChooser` share sheet returns control to the app — unlike iOS's
+`UIActivityViewController` completion handler, `ACTION_SEND` gives no reliable signal that the
+user actually completed (vs. cancelled) the share. This is a real Android platform limitation,
+not an oversight (see `PaywallIntent.ShareCompleted`'s doc comment).
+
+**Verified**: compiles cleanly, `./gradlew :app:assembleDebug test` passes. **Not verified**: the
+120-swipe cap, day-rollover reset, and share bonus have not been exercised live on a device or
+over real elapsed time — same class of caveat as items 2/7's notification timers.
 
 ---
 

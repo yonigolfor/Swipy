@@ -3,6 +3,7 @@ package com.swipy.core.notifications
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.swipy.domain.repository.SwipeQuotaRepository
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -18,6 +19,7 @@ import javax.inject.Singleton
 class NotificationForegroundCoordinator @Inject constructor(
     private val photoBurstMonitor: PhotoBurstMonitor,
     private val scheduler: NotificationScheduler,
+    private val swipeQuotaRepository: SwipeQuotaRepository,
 ) : DefaultLifecycleObserver {
 
     /** Call once from `SwipyApplication.onCreate()`. */
@@ -31,5 +33,13 @@ class NotificationForegroundCoordinator @Inject constructor(
         // weekly-cleanup/inactivity alarms — safe to call on every foreground, matching iOS's
         // own "re-arm on every scenePhase == .active" behavior for both.
         scheduler.armPersistentReminders()
+        // Opportunistic cleanup for the swipe-limit-reset alarm — mirrors iOS's own
+        // resetIfNewDay() cancellation (also only ever runs when some other call happens to
+        // trigger it, not a dedicated day-boundary watcher). If the quota is no longer
+        // exhausted (a new calendar day rolled over since the alarm was scheduled), a stale
+        // "you can swipe again!" notification would otherwise still fire at the original time.
+        if (!swipeQuotaRepository.hasReachedLimit.value) {
+            scheduler.cancel(NotificationTrigger.SwipeLimitReset)
+        }
     }
 }

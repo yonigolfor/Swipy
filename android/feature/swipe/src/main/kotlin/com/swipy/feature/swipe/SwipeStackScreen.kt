@@ -63,6 +63,7 @@ private val monthYearFormatter = DateTimeFormatter.ofPattern("MMMM yyyy")
 @Composable
 fun SwipeStackScreen(
     modifier: Modifier = Modifier,
+    onShowPaywall: () -> Unit = {},
     viewModel: PhotoStackViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
@@ -116,6 +117,7 @@ fun SwipeStackScreen(
         viewModel.effects.collect { effect ->
             when (effect) {
                 PhotoStackEffect.NothingToUndo -> Unit
+                PhotoStackEffect.ShowPaywall -> onShowPaywall()
                 is PhotoStackEffect.ShuffleLanded -> {
                     hapticManager.shuffleLand()
                     coroutineScope {

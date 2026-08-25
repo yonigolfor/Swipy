@@ -8,6 +8,7 @@ import com.swipy.core.notifications.NotificationForegroundCoordinator
 import com.swipy.core.notifications.PhotoBurstMonitor
 import com.swipy.core.notifications.SwipyNotificationManager
 import com.swipy.core.notifications.SwipyNotificationWorker
+import com.swipy.data.billing.BillingManager
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 
@@ -21,6 +22,8 @@ class SwipyApplication : Application(), Configuration.Provider {
     @Inject lateinit var photoBurstMonitor: PhotoBurstMonitor
 
     @Inject lateinit var notificationForegroundCoordinator: NotificationForegroundCoordinator
+
+    @Inject lateinit var billingManager: BillingManager
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder().setWorkerFactory(workerFactory).build()
@@ -36,5 +39,9 @@ class SwipyApplication : Application(), Configuration.Provider {
         // evaluateAndScheduleNotifications()/reschedule calls to `scenePhase == .active` rather
         // than `didFinishLaunching`. BootReceiver covers the "reboot with no UI opened" case.
         notificationForegroundCoordinator.start()
+        // Mirrors iOS touching PremiumManager.shared at didFinishLaunchingWithOptions — starts
+        // Play Billing connection + entitlement resolution racing the whole launch pipeline
+        // instead of racing the user's first interactive purchase attempt.
+        billingManager.initialize()
     }
 }

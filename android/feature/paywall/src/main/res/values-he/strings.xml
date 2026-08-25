@@ -1,0 +1,34 @@
+<resources>
+    <string name="paywall_benefit_unlimited">החלקות ללא הגבלה, כל יום</string>
+    <string name="paywall_benefit_speed">נקה את הגלריה במהירות מלאה</string>
+    <string name="paywall_benefit_support">חוויה נטולת פרסומות ב-100%</string>
+    <string name="paywall_benefit_features">כל הפיצ\'רים העתידיים, כלולים</string>
+
+    <string name="paywall_tier_monthly">חודשי</string>
+    <string name="paywall_tier_yearly">שנתי</string>
+    <string name="paywall_tier_lifetime">רכישה אחת</string>
+    <string name="paywall_tier_best_value">פופולרי</string>
+    <string name="paywall_tier_savings">חיסכון של 65%</string>
+    <string name="paywall_tier_lifetime_secondary">גישה מלאה</string>
+    <string name="paywall_tier_lifetime_double_billing_note">יש לבטל את המנוי הקיים במנויי Play Store לאחר ביצוע הרכישה החד-פעמית כדי למנוע חיוב כפול.</string>
+
+    <string name="paywall_cta_subscribe">הירשם עכשיו</string>
+    <string name="paywall_cta_subscribe_monthly_with_price">הירשם עכשיו — %1$s לחודש</string>
+    <string name="paywall_cta_subscribe_yearly_with_price">הירשם עכשיו — %1$s לשנה</string>
+    <string name="paywall_cta_lifetime">קבלת גישה מלאה</string>
+    <string name="paywall_cta_lifetime_with_price">קבלת גישה מלאה — %1$s</string>
+
+    <string name="paywall_restore">שחזר רכישות</string>
+    <string name="paywall_legal_privacy">מדיניות פרטיות</string>
+    <string name="paywall_legal_terms">תנאי שימוש</string>
+
+    <string name="paywall_share_button">שתף וקבל החלקות חינם</string>
+    <string name="paywall_share_bonus_toast">קיבלת סוויפים נוספים 🔥</string>
+    <string name="paywall_share_message">כמה דקות באפליקציה הזאת ועכשיו יש לי מקום בטלפון 🤯</string>
+
+    <string name="paywall_title_a">אל תעצרו עכשיו!</string>
+    <string name="paywall_title_b">שמרו על המומנטום!</string>
+    <string name="paywall_title_onboarding">פתחו את Swipy Premium</string>
+    <string name="paywall_subtitle">השתמשת בכל ההחלקות החינמיות של היום.\nשדרג פעם אחת — החלק לנצח, כל יום.</string>
+    <string name="paywall_subtitle_onboarding">קבלו החלקות ללא הגבלה וללא פרסומות כדי לנקות שנים של בלגן בתמונות תוך דקות.</string>
+</resources>

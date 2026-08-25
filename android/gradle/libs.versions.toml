@@ -40,6 +40,9 @@ kotlinxSerializationJson = "1.7.1"
 # Video — see android/CLAUDE.md "Video via Media3 ExoPlayer, pooled"
 media3 = "1.3.1"
 
+# Billing (:data:billing) — StoreKit 2 analogue, see android/CLAUDE.md "Core Tech Stack"
+billing = "7.1.1"
+
 # Notifications (:core:notifications) — periodic background checks + Hilt-injected Workers
 workManager = "2.9.1"
 hiltWork = "1.2.0"
@@ -82,6 +85,8 @@ kotlinx-serialization-json = { group = "org.jetbrains.kotlinx", name = "kotlinx-
 
 androidx-media3-exoplayer = { group = "androidx.media3", name = "media3-exoplayer", version.ref = "media3" }
 androidx-media3-ui = { group = "androidx.media3", name = "media3-ui", version.ref = "media3" }
+
+android-billing-ktx = { group = "com.android.billingclient", name = "billing-ktx", version.ref = "billing" }
 
 androidx-work-runtime-ktx = { group = "androidx.work", name = "work-runtime-ktx", version.ref = "workManager" }
 androidx-hilt-work = { group = "androidx.hilt", name = "hilt-work", version.ref = "hiltWork" }

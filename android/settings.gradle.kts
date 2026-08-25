@@ -30,6 +30,7 @@ include(":data:mediastore")
 include(":data:datastore")
 include(":data:cache")
 include(":data:vision")
+include(":data:billing")
 
 include(":feature:swipe")
 include(":feature:filters")

@@ -50,7 +50,9 @@ dependencies {
     implementation(project(":feature:reviewbin"))
     implementation(project(":feature:filters"))
     implementation(project(":feature:onboarding"))
+    implementation(project(":feature:paywall"))
     implementation(project(":core:notifications"))
+    implementation(project(":data:billing"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)

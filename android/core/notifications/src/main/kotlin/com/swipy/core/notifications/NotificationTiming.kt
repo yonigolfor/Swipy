@@ -30,3 +30,20 @@ internal fun nextSundayAt2130Millis(): Long {
     }
     return calendar.timeInMillis
 }
+
+/**
+ * 00:01 (local time) on the next calendar day — mirrors iOS `DailyLimitService`'s swipe-limit-
+ * reset notification timing exactly. Public (unlike the other helpers in this file) since
+ * `:feature:swipe`'s `PhotoStackViewModel` is the caller, scheduling this the moment a swipe
+ * exhausts the daily quota — see `SwipeQuotaRepository`/android/TODO.md item 9.
+ */
+fun nextMidnightPlusOneMinuteMillis(): Long {
+    val calendar = Calendar.getInstance().apply {
+        add(Calendar.DAY_OF_YEAR, 1)
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 1)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }
+    return calendar.timeInMillis
+}

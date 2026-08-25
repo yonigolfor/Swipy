@@ -3,10 +3,15 @@ package com.swipy.feature.swipe
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.swipy.core.notifications.NotificationScheduler
+import com.swipy.core.notifications.NotificationTrigger
+import com.swipy.core.notifications.nextMidnightPlusOneMinuteMillis
 import com.swipy.domain.model.FilterCategory
 import com.swipy.domain.model.PhotoItem
 import com.swipy.domain.model.SwipeAction
 import com.swipy.domain.repository.PhotoStateRepository
+import com.swipy.domain.repository.PremiumRepository
+import com.swipy.domain.repository.SwipeQuotaRepository
 import com.swipy.domain.usecase.ActivateShuffleUseCase
 import com.swipy.domain.usecase.DeactivateShuffleUseCase
 import com.swipy.domain.usecase.DeletePhotoUseCase
@@ -49,6 +54,9 @@ class PhotoStackViewModel @Inject constructor(
     private val filterBlurryPhotosUseCase: FilterBlurryPhotosUseCase,
     private val filterBurstPhotosUseCase: FilterBurstPhotosUseCase,
     private val photoStateRepository: PhotoStateRepository,
+    private val premiumRepository: PremiumRepository,
+    private val swipeQuotaRepository: SwipeQuotaRepository,
+    private val notificationScheduler: NotificationScheduler,
     private val savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
@@ -130,6 +138,20 @@ class PhotoStackViewModel @Inject constructor(
     }
 
     private fun handleSwipe(item: PhotoItem, action: SwipeAction) {
+        // Port of iOS CardStackView.dragGesture.onEnded's shouldBlockSwipeForPaywall gate — only
+        // Keep/Delete count against the daily quota (Snooze/Undo never do, matching iOS). The
+        // hasResolvedEntitlements guard mirrors iOS exactly: a fresh-install cold-start race
+        // where Play Billing's entitlement query hasn't resolved yet must never block a real
+        // subscriber, so the swipe is let through un-blocked during that narrow window instead.
+        if (action == SwipeAction.Keep || action == SwipeAction.Delete) {
+            val blocked = !swipeQuotaRepository.canSwipe(premiumRepository.isPremium.value) &&
+                premiumRepository.hasResolvedEntitlements.value
+            if (blocked) {
+                _effects.trySend(PhotoStackEffect.ShowPaywall)
+                return
+            }
+        }
+
         excludedIds += item.id
         lastSwipe = LastSwipe(item, action)
         // Optimistic, synchronous removal — the use-case call below is async, but the card
@@ -147,7 +169,22 @@ class PhotoStackViewModel @Inject constructor(
                 SwipeAction.Snooze -> snoozePhotoUseCase(item.id)
                 SwipeAction.Undo -> Unit
             }
+            if (action == SwipeAction.Keep || action == SwipeAction.Delete) {
+                swipeQuotaRepository.recordSwipe()
+                scheduleSwipeLimitResetIfNeeded()
+            }
             maybeLoadMore()
+        }
+    }
+
+    /** Port of iOS `scheduleSwipeLimitResetIfNeeded()` — schedules the 00:01 "you can swipe
+     * again" alarm the moment a swipe exhausts the daily quota for a non-premium user. */
+    private fun scheduleSwipeLimitResetIfNeeded() {
+        if (swipeQuotaRepository.hasReachedLimit.value &&
+            !premiumRepository.isPremium.value &&
+            premiumRepository.hasResolvedEntitlements.value
+        ) {
+            notificationScheduler.scheduleExact(NotificationTrigger.SwipeLimitReset, nextMidnightPlusOneMinuteMillis())
         }
     }
 

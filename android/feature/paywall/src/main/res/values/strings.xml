@@ -1,0 +1,34 @@
+<resources>
+    <string name="paywall_benefit_unlimited">Unlimited swipes, every single day</string>
+    <string name="paywall_benefit_speed">Clean your library at full speed</string>
+    <string name="paywall_benefit_support">100% Ad-Free Experience</string>
+    <string name="paywall_benefit_features">All future features, included</string>
+
+    <string name="paywall_tier_monthly">Monthly</string>
+    <string name="paywall_tier_yearly">Yearly</string>
+    <string name="paywall_tier_lifetime">Pay Once</string>
+    <string name="paywall_tier_best_value">Popular</string>
+    <string name="paywall_tier_savings">Save 65%</string>
+    <string name="paywall_tier_lifetime_secondary">Unlimited Access</string>
+    <string name="paywall_tier_lifetime_double_billing_note">Please make sure to cancel your active subscription in Play Store subscriptions after completing this one-time purchase to avoid double billing.</string>
+
+    <string name="paywall_cta_subscribe">Subscribe Now</string>
+    <string name="paywall_cta_subscribe_monthly_with_price">Subscribe Now — %1$s/month</string>
+    <string name="paywall_cta_subscribe_yearly_with_price">Subscribe Now — %1$s/year</string>
+    <string name="paywall_cta_lifetime">Get Unlimited Access</string>
+    <string name="paywall_cta_lifetime_with_price">Get Unlimited Access — %1$s</string>
+
+    <string name="paywall_restore">Restore Purchases</string>
+    <string name="paywall_legal_privacy">Privacy Policy</string>
+    <string name="paywall_legal_terms">Terms of Use</string>
+
+    <string name="paywall_share_button">Share &amp; Get Free Swipes</string>
+    <string name="paywall_share_bonus_toast">You got bonus swipes 🔥</string>
+    <string name="paywall_share_message">A few minutes in this app and I finally have storage on my phone again 🤯</string>
+
+    <string name="paywall_title_a">Don\'t Stop Now!</string>
+    <string name="paywall_title_b">Keep the Momentum Going!</string>
+    <string name="paywall_title_onboarding">Unlock Swipy Premium</string>
+    <string name="paywall_subtitle">You\'ve used all your free swipes for today.\nUpgrade once — swipe forever, every day.</string>
+    <string name="paywall_subtitle_onboarding">Get unlimited swipes and ads-free to clean years of photo clutter in minutes.</string>
+</resources>
