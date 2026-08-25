@@ -397,6 +397,15 @@ sequentially) — the same fix iOS's `PremiumManager` doc already documents need
 restore, or subscription upgrade/downgrade flow — that needs the Play Console products above
 plus a license-tester account, neither of which exist yet.
 
+**Code-review pass (post-implementation)** hardened `BillingManager`'s error handling: checks
+`launchBillingFlow`'s return value (was leaving `isPurchasing` stuck `true` on a synchronous
+failure), silences `USER_CANCELED` instead of surfacing it as an error (matches iOS's
+`case .userCancelled: break`), checks `BillingResult.responseCode` on both product/purchase
+queries instead of treating a network drop as "no products," and adds a `ProcessLifecycleOwner`
+observer that re-verifies entitlements on every foreground (Play Billing has no equivalent of
+iOS's always-live `Transaction.updates` for a purchase resolving outside the current session). See
+`android/CLAUDE.md` "Paywall & Swipe Quota" for the full design this now reflects.
+
 ---
 
 ## 9. Swipe Quota (DailyLimitService) — 🟡 IMPLEMENTED, NOT YET VERIFIED ON-DEVICE
@@ -441,6 +450,15 @@ not an oversight (see `PaywallIntent.ShareCompleted`'s doc comment).
 **Verified**: compiles cleanly, `./gradlew :app:assembleDebug test` passes. **Not verified**: the
 120-swipe cap, day-rollover reset, and share bonus have not been exercised live on a device or
 over real elapsed time — same class of caveat as items 2/7's notification timers.
+
+**Code-review pass (post-implementation)** found a real bug in the gesture layer, not this
+repository: `CardStackLayer.endDrag()` was flinging a Keep/Delete off-screen unconditionally,
+with no awareness that `handleSwipe` was about to silently block it — the card ended up stranded
+off-screen once the Paywall was dismissed, since the stack itself was never mutated. Fixed by
+extracting the gate into a public `PhotoStackViewModel.canCommitSwipe(action)` and having
+`CardStackLayer` check it *before* choosing fling-vs-snap-back, mirroring iOS's own
+`dragGesture.onEnded` ordering (block check before the exit animation, not after). Full writeup
+in `android/CLAUDE.md`'s new "Gesture-Layer Veto" subsection under Gesture Engine.
 
 ---
 

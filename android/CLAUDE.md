@@ -81,8 +81,14 @@ swipy-android/
 │   └── testing/                           # Fake repositories, coroutine test rules, Compose test utils
 │
 ├── domain/                                # Pure Kotlin module — no Android SDK import allowed
-│   ├── model/                             # PhotoItem, FilterCategory, SwipeAction (sealed classes/enums)
-│   ├── repository/                        # Interfaces: PhotoRepository, PhotoStateRepository, PersonaRepository
+│   ├── model/                             # PhotoItem, FilterCategory, SwipeAction, PremiumTier,
+│   │                                       # TierOffer (sealed classes/enums)
+│   ├── repository/                        # Interfaces: PhotoRepository, PhotoStateRepository, PersonaRepository,
+│   │                                       # PremiumRepository (state-only — isPremium/hasActiveSubscription/
+│   │                                       # hasResolvedEntitlements; implemented by :data:billing's
+│   │                                       # BillingManager — see "Paywall & Swipe Quota" below for why this
+│   │                                       # interface deliberately excludes products/purchase/restore),
+│   │                                       # SwipeQuotaRepository (implemented by :data:datastore)
 │   │                                       # (PhotoStateRepository is one interface covering kept/review-bin/
 │   │                                       # snoozed state — mirrors iOS's single PersistenceService rather
 │   │                                       # than splitting into a separate ReviewBinRepository; see Persistence)
@@ -108,7 +114,12 @@ swipy-android/
 │
 ├── data/
 │   ├── mediastore/                        # MediaStore query/pagination impl of PhotoRepository (see below)
-│   ├── datastore/                         # Preferences DataStore impl (UserDefaults analogue — see Persistence)
+│   ├── datastore/                         # Preferences DataStore impl (UserDefaults analogue — see Persistence).
+│   │                                       # Also hosts DataStoreSwipeQuotaRepository (SwipeQuotaRepository impl)
+│   ├── billing/                           # BillingManager — Play Billing Library impl of PremiumRepository,
+│   │                                       # PLUS its own concrete-only surface (tiers/isPurchasing/errorMessage/
+│   │                                       # launchPurchaseFlow) that :feature:paywall injects directly, never
+│   │                                       # through :domain — see "Paywall & Swipe Quota" below
 │   ├── cache/                             # Disk-backed blur/burst verdict cache (DataStore<Verdicts> proto)
 │   └── vision/                            # ML Kit / on-device analysis wrappers (blur, burst, aesthetic score)
 │
@@ -140,7 +151,10 @@ swipy-android/
 │   │                                       # decoder wired (no coil-video dependency), so a video
 │   │                                       # item's grid thumbnail renders blank rather than a frame —
 │   │                                       # tapping still restores it correctly, this is cosmetic.
-│   ├── paywall/                           # Billing/paywall screen
+│   ├── paywall/                           # IMPLEMENTED — PaywallContext (PostOnboarding/SwipeLimitReached),
+│   │                                       # PaywallUiState/PaywallIntent/PaywallViewModel, PaywallScreen
+│   │                                       # (+ EN/HE strings). See "Paywall & Swipe Quota" below for the full
+│   │                                       # design, presentation wiring, and Play Console product model.
 │   └── onboarding/
 │
 └── build-logic/                           # Convention plugins (build.gradle.kts composition, not copy-paste)
@@ -370,6 +384,14 @@ If a future field genuinely needs an expensive per-item signal (e.g. a live "is 
 
 Target frame budget is **8.3ms (120Hz)** on supported devices, degrading gracefully to **16.6ms (60Hz)** — never assume 60Hz as the baseline on a modern mid/high-tier Android device. Use `Modifier.graphicsLayer`'s `compositingStrategy = CompositingStrategy.Offscreen` (the Compose analogue of iOS `.drawingGroup()`) **only** for the same case iOS used it: flattening a static multi-layer composite (e.g. blur-background + sharp-foreground image) into one GPU texture. Do **not** apply it to the live video surface (`PlayerView` embedded via `AndroidView`) — same rationale as iOS: offscreen compositing doesn't reliably composite a live platform-native surface (`SurfaceView`/`TextureView` under `PlayerView`) the way it does a static Compose draw tree; prefer `TextureView` mode on `PlayerView` if compositing with Compose content above/below it is required, and profile before assuming it's necessary at all.
 
+### Gesture-Layer Veto — Checking a Business-Rule Gate Before, Not After, the Fling Animation
+
+A code-review pass on the Paywall/Swipe Quota work (see "Paywall & Swipe Quota" below) found a real bug in `CardStackLayer.endDrag()`: crossing the swipe threshold unconditionally played the fling-off-screen animation and called `onSwipeCommitted`, with zero awareness that `PhotoStackViewModel` was about to silently block a Keep/Delete once the daily quota was exhausted. The card would fly off-screen (with haptic feedback) while the ViewModel left `photoStack` untouched — since `CardStackLayer`'s per-card `offsetX`/`offsetY` `remember` state isn't reset by anything once the fling animation finishes, the blocked card was left stranded off-screen indefinitely once the Paywall (pushed on top of the same back-stack entry, not a fresh composition) was dismissed.
+
+Fixed by giving `CardStackLayer` a synchronous, cheap veto: `PhotoStackViewModel.canCommitSwipe(action: SwipeAction): Boolean` (the exact same `StateFlow.value` reads `handleSwipe` already used internally, now extracted to a public function so both call sites share one source of truth) is passed down as a new `canCommitSwipe: (SwipeAction) -> Boolean` parameter and checked inside `endDrag()` **before** deciding fling-vs-snap-back — a threshold-crossing Keep/Delete that fails the check is treated exactly like "no direction resolved" (snap back to center, no haptic), with one difference: `onSwipeCommitted` is still called once so the ViewModel can fire `PhotoStackEffect.ShowPaywall`. This mirrors iOS exactly — `CardStackView.dragGesture.onEnded` checks `shouldBlockSwipeForPaywall` before starting the exit-fly-out, not after.
+
+The general lesson (worth remembering for any future gesture-committing business rule, not just the swipe quota): **a `ViewModel`-side guard inside the intent handler is not sufficient on its own if the gesture layer has already played an animation implying the action succeeded.** The gesture layer needs its own cheap, synchronous read of the same guard to decide *which* animation to play — this is a second call site for the same predicate, not a duplication of the business logic itself (the predicate still lives in exactly one place, the ViewModel).
+
 ---
 
 ## Media & Storage Operations
@@ -435,6 +457,128 @@ Keys to port 1:1 from iOS `PersistenceService`:
 - `snoozedPhotos` — `Map<Long, Int>` snooze count, same exponential backoff schedule as iOS (50 → 150 → 500)
 
 The disk-backed blur/burst verdict + feature-vector cache (iOS `BlurBurstCacheService`) ports as a **Proto DataStore** with the same architecture: debounced writes (coalesce writes ~2s after the last mutation — implement via a `MutableSharedFlow` + `.debounce(2.seconds)` collector in a dedicated repository-owned `CoroutineScope`, not a raw `Handler`/`Timer`), a `schemaVersion` field checked at load time to invalidate only the feature-vector blob on an analysis-algorithm change (never the cheap verdict map), and incremental invalidation driven by the `ContentObserver` from the Media & Storage section above.
+
+---
+
+## Paywall & Swipe Quota
+
+Full port of iOS `PaywallView.swift` + `PremiumManager.swift` + `DailyLimitService.swift`. See
+`android/TODO.md` items 8/9 for the ongoing verification status (Play Console product setup,
+real purchase/restore testing) — this section documents the architecture that's actually shipped.
+
+### Two Repositories, Not One
+
+`PremiumRepository` (`:domain`) is deliberately **state-only** — `isPremium`,
+`hasActiveSubscription`, `hasResolvedEntitlements` — not the full iOS `PremiumManager` surface.
+`BillingClient.launchBillingFlow` requires an `Activity`, which `:domain` can never reference (zero-
+Android-SDK rule). Products, purchase, restore, `isPurchasing`, and `errorMessage` all live on
+`:data:billing`'s concrete `BillingManager` class instead — `:feature:paywall` injects it directly
+(the same pattern `:feature:swipe` already uses for `:data:mediastore`'s `VideoPlayerPool` via
+`VideoPlayerPoolAccess.kt`), never through the `:domain` interface. `:feature:swipe`'s swipe-block
+gate only ever needs the three state flows, so it depends on `:domain` alone — zero dependency on
+`:feature:paywall` or `:data:billing`.
+
+`SwipeQuotaRepository` (`:domain`, implemented by `:data:datastore`'s `DataStoreSwipeQuotaRepository`)
+is a separate interface from `PremiumRepository`, mirroring iOS exactly: `DailyLimitService` has
+zero StoreKit import and only ever *receives* `isPremium: Bool` as a parameter
+(`canSwipe(isPremium:)`) — it never reads `PremiumManager` itself.
+
+### Play Console Product Model — a Real Platform Difference From iOS
+
+iOS uses two flat subscription product ids (`monthlySubscription`/`yearlySubscription`) in one
+subscription *group* so StoreKit treats switching between them as upgrade/downgrade. Play
+Billing's equivalent is **one subscription product with two base plans**
+(`swipy_premium_subscription`, base plans `monthly`/`yearly`) — Google's documented recommended
+shape for the same upgrade/downgrade behavior, not two separate products — plus one separate
+one-time product (`swipy_lifetime_purchase`, `ProductType.INAPP`) for Lifetime/"Pay Once".
+`BillingManager.queryProductDetails()` queries the subscription product once and reads
+`subscriptionOfferDetails[].basePlanId` to map `monthly`/`yearly` → price + offer token — these
+three ids must exist in Play Console before any purchase/restore flow can be exercised.
+
+### Swipe-Block Gate
+
+`PhotoStackViewModel.canCommitSwipe(action: SwipeAction): Boolean` — public, synchronous
+(`StateFlow.value` reads only, no suspension) — is the direct port of iOS's
+`shouldBlockSwipeForPaywall` (`!canSwipe && hasResolvedEntitlements`). Only Keep/Delete are
+quota-gated (Snooze/Undo never are, matching iOS). The `hasResolvedEntitlements` guard mirrors
+iOS's own fresh-install cold-start race fix exactly: while Play Billing's first entitlement query
+is still in flight, the swipe is let through un-blocked rather than risk a false paywall for a
+real subscriber. `handleSwipe` calls this once to gate the actual stack mutation; `CardStackLayer`
+calls the *same* function once more at gesture-end to decide its animation — see "Gesture-Layer
+Veto" above for why the gesture layer needs its own check, not just the ViewModel's.
+
+`PhotoStackEffect.ShowPaywall` (a `data object`) is the "navigate to paywall" example this doc's
+own Architecture section already names as the canonical thing that must be an `Effect`, never a
+`showPaywall: Boolean` in `PhotoStackUiState`. A successful Keep/Delete additionally calls
+`swipeQuotaRepository.recordSwipe()` and, if that exhausts the quota for a non-premium,
+entitlement-resolved user, schedules the previously-dead `NotificationTrigger.SwipeLimitReset`
+alarm via `NotificationScheduler.scheduleExact(..., nextMidnightPlusOneMinuteMillis())` — the new
+public helper in `core/notifications/NotificationTiming.kt`. `NotificationForegroundCoordinator`
+(the `ProcessLifecycleOwner`-based foreground hook from the notifications work) opportunistically
+cancels a stale alarm on every foreground once the quota is no longer exhausted, mirroring iOS's
+own `resetIfNewDay()` cancellation (also not a dedicated day-boundary watcher there either).
+
+### Presentation Wiring — Why No Feature-to-Feature Dependency
+
+iOS embeds `PaywallView` as literally the last onboarding page (`step6_Paywall`), with its own
+dismiss calling `onComplete`. Porting that literally would require `:feature:onboarding` →
+`:feature:paywall`, a dependency this codebase has never needed before. Instead:
+
+- **`.swipeLimitReached`** — `SwipeStackScreen` takes an `onShowPaywall: () -> Unit` param (same
+  shape as `ReviewBinScreen`'s `onBack`), called from its effect collector on
+  `PhotoStackEffect.ShowPaywall`. `MainActivity` wires it to
+  `navController.navigate(ROUTE_PAYWALL)` — a plain push on top of `ROUTE_SWIPE`'s back-stack
+  entry, deliberately not part of `KNOWN_ROUTES`/bottom-nav/deep-links.
+- **`.postOnboarding`** — `MainActivity.AppRoot` (which already orchestrates
+  Splash → Onboarding → NavHost) owns a local one-shot `showPostOnboardingPaywall` boolean, flipped
+  by `OnboardingScreen`'s existing `onComplete` callback instead of falling straight through to
+  `SwipyNavHost`. Same end-to-end user sequence as iOS (onboarding → paywall → main app), zero new
+  module edges.
+
+`PaywallScreen`'s `LaunchedEffect(uiState.isPremium) { if (uiState.isPremium) onDismiss() }` is the
+direct port of iOS's `.onChange(of: premiumManager.isPremium)` auto-dismiss — legitimate reactive
+state, not the banned "one-shot event modeled as Boolean" pattern (`isPremium` is real persistent
+entitlement state, not an ephemeral navigation trigger).
+
+### `BillingManager` Error Handling (hardened by a code-review pass)
+
+Three failure modes Play Billing's KTX suspend wrappers do **not** surface as thrown exceptions —
+each returns a result object whose own `BillingResult.responseCode` must be checked, or a failure
+is silently indistinguishable from "nothing to show yet":
+
+- **`launchBillingFlow()`'s return value** — unlike the async `PurchasesUpdatedListener`, a
+  synchronous failure (`BILLING_UNAVAILABLE`, `ITEM_ALREADY_OWNED`, `DEVELOPER_ERROR`) never
+  invokes the listener at all. The return value is now checked; on non-`OK`, `errorMessage` is set
+  and `isPurchasing` is reset immediately — otherwise it stayed stuck `true` forever.
+- **`queryProductDetails()`/`queryPurchasesAsync()`** — a network drop mid-query used to look
+  identical to "no products configured," leaving the CTA disabled with no explanation. Both now
+  check their `BillingResult`; a failed `queryPurchases()` additionally leaves
+  `isPremium`/`hasActiveSubscription`/`hasResolvedEntitlements` untouched rather than resolving to
+  a false "confirmed not premium" — the swipe-block guard's existing safe default (let an
+  unresolved user through unblocked) is what should apply here too, not a wrong negative.
+- **`USER_CANCELED`** is now silent (no `errorMessage`), matching iOS's own
+  `case .pending, .userCancelled: break` — the user backing out of the purchase sheet is not an
+  error.
+
+**Pending/cross-device purchases**: Play Billing's `PurchasesUpdatedListener` only fires for
+purchases initiated via `launchBillingFlow()` in the *current* process — unlike iOS's
+`Transaction.updates`, a live async sequence for the whole app lifetime, it is never notified about
+a purchase that resolves elsewhere (a delayed payment method completing while the app is
+backgrounded, or an entitlement change from another device). `BillingManager` registers its own
+`ProcessLifecycleOwner` observer (`onStart`) that re-runs `queryPurchases()` when already
+connected, or reconnects when `connectionState == DISCONNECTED` — Play's documented mitigation for
+this structural gap, applied on every foreground rather than only at cold start.
+
+### Documented Platform Deviations (not oversights)
+
+- **Share-bonus completion detection**: iOS's `UIActivityViewController` has a completion handler
+  that can distinguish a genuine share from a cancel. Android's `Intent.createChooser` gives no
+  such signal — `PaywallIntent.ShareCompleted` fires optimistically the moment the
+  `ActivityResultLauncher` callback returns control to the app, regardless of which target (if
+  any) was picked. A real Android platform limitation, not a bug to chase.
+- **Double-billing note wording** — `paywall_tier_lifetime_double_billing_note` says "cancel your
+  active subscription in Play Store subscriptions," not "iOS Settings." Deliberate platform
+  adaptation of otherwise-identical copy.
 
 ---
 
