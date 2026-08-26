@@ -157,6 +157,9 @@ onAppear:
 `PhotoCardView` משתמש ב-`isCachedImageFinal` כדי לדלג על ה-reload dance וה-spinner לגמרי.  
 מנוקה ב-`resetAndLoad`, ב-`activateOfflineMode()`, ומנוקה per-item ב-eviction.
 
+**Reactive adoption (הצמדה חיה של prefetch לתצוגה):** `cachedImage` נקרא רק פעם אחת — ב-`init`, כ-seed ל-`@State image`. קלף שנכנס לחלון (`ForEach` של 3 קלפים) *לפני* שה-prefetch שלו סיים את ה-pass הסופי, נבנה עם `image == nil` ונופל למסלול ה-`loadImage()` העצמאי (thumbnail מטושטש + spinner) — וכש-ה-VM מסיים לפענח רגע אחר כך, שום דבר לא הזריק את התמונה המוכנה לקלף שכבר נבנה (אין observation; `State(initialValue:)` מתעלמים ממנו ב-re-diff). זה היה שורש ה-flicker של "הקלף מתחת עדיין בטעינה". התיקון: `PhotoCardView` מוסיף `.onChange(of: isCachedImageFinal)` — ברגע ש-`finalImageIDs` מקבל את ה-ID (⇒ `CardStackView.body` מבצע re-diff ⇒ `isCachedImageFinal` הופך `true`), הקלף מאמץ מיידית את התמונה הסופית מה-cache (crossfade אם מוצג thumbnail, אחרת השמה ישירה), מבטל spinner ומכבה `isLoading`. Guard מדלג על קלפים שכבר מציגים full-res נקי ועל assets לא-זמינים-מקומית ב-offline (final מסומן אך אין תמונה ב-cache).  
+**Invariant:** `isCachedImageFinal` **חייב** להישאר ב-`PhotoCardView.Equatable ==` — בלעדיו ה-body לא יבצע re-diff וה-`onChange` לעולם לא ייורה. (יש לכך כעת שתי סיבות: המסלול הזה, וה-clean-path ב-`onAppear`.)
+
 ### loadedScoreIDs — Score Readiness
 ```swift
 @Published var loadedScoreIDs: Set<String>

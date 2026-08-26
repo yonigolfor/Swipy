@@ -199,7 +199,10 @@ struct PhotoCardView: View {
                             .font(.system(size: 60))
                             .foregroundColor(.gray)
                     }
-                    loadingSpinnerOverlay(visible: showImageSpinner && image == nil)
+                    // Only spin when there is genuinely nothing to show — never on top of an
+                    // already-visible (thumbnail/degraded) frame, which reads as "still loading"
+                    // to the user even though a real image is on screen.
+                    loadingSpinnerOverlay(visible: showImageSpinner && image == nil && thumbnailImage == nil)
                 }
             }
 
@@ -403,6 +406,32 @@ struct PhotoCardView: View {
             playerItemStatusObserver = nil
             if let obs = videoEndObserver { NotificationCenter.default.removeObserver(obs) }
             videoEndObserver = nil
+        }
+        .onChange(of: isCachedImageFinal) { _, isFinal in
+            // Reconnect the ViewModel's prefetch pipeline to this view. The VM decodes
+            // upcoming card images ahead of time and flags them final via finalImageIDs,
+            // but this view only reads `cachedImage` once, at init. A card that entered the
+            // stack window *before* its prefetch resolved would otherwise stay stuck on its
+            // own slower loadImage() path (blurry Pass-1 + delayed spinner) and never adopt
+            // the ready bitmap. When the flag flips true, take the now-final image straight
+            // from cache — this is what makes the card below the top one appear instantly on
+            // promotion instead of visibly re-loading. Guard skips cards that already show a
+            // clean full-res frame (nothing to upgrade) and offline locally-unavailable
+            // assets (final flag set, but no cached image — onAppear intentionally leaves
+            // those blank rather than waiting).
+            guard isFinal, !item.isVideo,
+                  image == nil || thumbnailImage != nil,
+                  let cached = PhotoLibraryService.shared.cachedImage(for: item.id) else { return }
+            imageSpinnerTask?.cancel()
+            imageSpinnerTask = nil
+            showImageSpinner = false
+            if thumbnailImage != nil {
+                withAnimation(.easeIn(duration: 0.15)) { image = cached }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { thumbnailImage = nil }
+            } else {
+                image = cached
+            }
+            isLoading = false
         }
         .onChange(of: isTopCard) { _, nowTop in
             if nowTop {

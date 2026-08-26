@@ -1084,21 +1084,32 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 if !photoStack.isEmpty { precacheNextImages() }
                 pinDemoShuffleAssets()
             } else {
-                var (items, nextIdx) = photoService.fetchPageOfAssets(
-                    for: currentFilter,
-                    startIndex: randomStart,
-                    pageSize: initialPageSize,
-                    excluding: processedAssetIDs
-                )
+                // Off the Main Actor — activateShuffle() is @MainActor, so this Task inherits
+                // the main executor; running the fetch inline would block the main thread right
+                // as the shuffle transition animation plays (mirrors loadNextPageIfNeeded).
+                let service = photoService
+                let filter = currentFilter
+                let excludedIDs = processedAssetIDs
+                let pageSize = initialPageSize
+                var (items, nextIdx) = await Task.detached(priority: .userInitiated) {
+                    service.fetchPageOfAssets(
+                        for: filter,
+                        startIndex: randomStart,
+                        pageSize: pageSize,
+                        excluding: excludedIDs
+                    )
+                }.value
 
                 // Wrap around if nothing was found near the random position.
                 if items.isEmpty && randomStart > 0 {
-                    (items, nextIdx) = photoService.fetchPageOfAssets(
-                        for: currentFilter,
-                        startIndex: 0,
-                        pageSize: initialPageSize,
-                        excluding: processedAssetIDs
-                    )
+                    (items, nextIdx) = await Task.detached(priority: .userInitiated) {
+                        service.fetchPageOfAssets(
+                            for: filter,
+                            startIndex: 0,
+                            pageSize: pageSize,
+                            excluding: excludedIDs
+                        )
+                    }.value
                 }
 
                 await MainActor.run {
