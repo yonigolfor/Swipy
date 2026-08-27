@@ -137,10 +137,27 @@ func cancelShare()
 
 ---
 
+## App-Referral Share (Paywall) — Rich Link Preview
+
+Separate from the photo/video share above: `PaywallView`'s share button (shown while `!dailyLimit.hasSharedToday`, grants the one-time +50 swipe bonus via `applyShareBonus()`) shares the **app itself** — an App Store link, not a media asset. This path does **not** use `ActivityView`/`PhotoStackViewModel`; it uses `ShareSheet` (`Views/Components/ShareSheet.swift`) with items from `ShareSheet.makeShareItems()`.
+
+**The premium preview comes from `LPLinkMetadata`, not from appending a `UIImage`.** `makeShareItems()` returns two items:
+1. The marketing copy string (`paywall.share.message`) — kept so text-only targets (WhatsApp, Twitter) still carry the message.
+2. An `AppShareItemSource: UIActivityItemSource` whose `item(for:)`/`placeholderItem` return the App Store `URL`, and whose `activityViewControllerLinkMetadata` returns an `LPLinkMetadata` with `title` = the app display name, `url`/`originalURL` = the store link, and `iconProvider`/`imageProvider` = the app icon. This is what makes Messages/Mail/social render a proper app card (icon + name + link) instead of a bare text URL.
+
+**Two bugs this fixed:**
+- **No image ever showed.** The old code appended `UIImage(named: "AppIcon")` — the `AppIcon.appiconset` is *not* loadable via `UIImage(named:)` at runtime (app-icon asset-catalog entries compile into a separate bundle and return `nil`), so nothing was attached. Even if it had loaded, a standalone `UIImage` item only attaches as a separate file, never a unified preview card. Fixed by using the accessible `AppIconImage.imageset` as the `LPLinkMetadata` icon provider.
+- **Link didn't open the App Store page.** The old URL (`.../app/id6745854678`) was the wrong listing ID. Corrected to the official listing `https://apps.apple.com/il/app/swipy-photo-video-cleaner/id6772767520` (constant `ShareSheet.appStoreURL`).
+
+The app display name is read from `CFBundleDisplayName` → `CFBundleName` → `"Swipy"` fallback; using it (rather than the marketing message) as the card `title` avoids the message appearing twice in rich targets while still delivering it as the text item everywhere.
+
+---
+
 ## Files
 
 | File | Role |
 |------|------|
+| `Views/Components/ShareSheet.swift` | App-referral share: `ShareSheet` + `AppShareItemSource` (`LPLinkMetadata` rich App Store card) |
 | `Services/ShareHUDManager.swift` | `SharePhase` enum + `ShareHUDManager` UIWindow service |
 | `Views/Components/ShareHUDView.swift` | SwiftUI HUD hosted in the ShareHUDManager window |
 | `ViewModels/PhotoStackViewModel.swift` | `shareItem()`, `cancelShare()`, `ImageItemProvider`, `VideoItemProvider` |
