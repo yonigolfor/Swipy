@@ -535,7 +535,12 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             )
             cursor = next ?? service.totalAssetCount
             if !batch.isEmpty {
-                let analyzed = await BurstAnalyzer.shared.analyze(batch)
+                // yield hook — this on-demand Phase 2 scan can run while the user navigates
+                // back to the card stack (CLAUDE.md "Smart Filters navigation jank"), so back
+                // off mid-batch too, not just at the chunk boundary above.
+                let analyzed = await BurstAnalyzer.shared.analyze(batch, yield: {
+                    await Self.waitForGestureIdle(viewModel: self)
+                })
                 let analyzedIDs = Set(analyzed.map { $0.id })
                 BlurBurstCacheService.shared.setBurstVerdicts(
                     Dictionary(uniqueKeysWithValues: batch.map { ($0.id, analyzedIDs.contains($0.id)) })
@@ -641,7 +646,13 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                 filter: .burstPhotos, service: service, excluding: excluded,
                 pageSize: ScanTuning.burstPrescanPageSize, viewModel: self
             ) { batch in
-                let analyzed = await BurstAnalyzer.shared.analyze(batch, maxConcurrency: prescanConcurrency)
+                // yield hook — mirrors prescanBatches' own chunk-boundary backoff *inside*
+                // the 500-item burst analysis, so a gesture that starts mid-chunk isn't
+                // starved for the whole feature-print pass (the reported first-run freeze).
+                let analyzed = await BurstAnalyzer.shared.analyze(
+                    batch, maxConcurrency: prescanConcurrency,
+                    yield: { await Self.waitForGestureIdle(viewModel: self) }
+                )
                 let analyzedIDs = Set(analyzed.map { $0.id })
                 BlurBurstCacheService.shared.setBurstVerdicts(
                     Dictionary(uniqueKeysWithValues: batch.map { ($0.id, analyzedIDs.contains($0.id)) })
@@ -789,9 +800,15 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
             // entire prescan below behind it. scheduleDeferredPersonaBuild() fires it off on
             // its own delayed timer instead, so it never blocks the prescan's start and never
             // stacks GPU/ANE work on top of the user's very first real swipes.
+            // startBackgroundBlurBurstPrescan() is deliberately NOT called here (Approach B):
+            // pre-warming the secondary Smart Filters screen is not worth contending the
+            // primary Day-0 swipe session with a full-library Vision walk. The blur/burst
+            // cache now warms lazily — on-demand when the user opens Smart Filters
+            // (refreshCategoryCounts) or browses the Blurry/Burst category (scanUntilFull),
+            // plus incrementally via photoLibraryDidChange for newly-inserted assets. See
+            // CLAUDE.md → "Blurry/Burst Scanning" and ARCHITECTURE_SWIPE_LOADING.md §3b.
             await MainActor.run {
                 self.scheduleDeferredPersonaBuild()
-                self.startBackgroundBlurBurstPrescan()
             }
         }
     }
