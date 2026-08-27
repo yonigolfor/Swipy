@@ -73,6 +73,23 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
     /// poll this directly to yield GPU/CPU priority to an active gesture.
     var isUserInteracting = false
 
+    /// Timestamp of the most recent swipe's start (stamped in `beginSwipe`, which
+    /// `CardStackView.dragGesture.onEnded` calls synchronously the instant a fling
+    /// begins). Non-@Published for the same reason as `isUserInteracting`. Background
+    /// blur/burst scans back off for a short window after this — see `isScanBackoffActive`.
+    var lastSwipeAt: Date = .distantPast
+
+    /// True while a background blur/burst scan should hold off. Covers two windows,
+    /// not just one: (a) the user is actively touching the card stack, and (b) a swipe
+    /// just landed and its next-card decode (`PhotoCardView.prepareForDisplay` + the
+    /// `.utility` prefetch) hasn't drained yet — the post-swipe window where GPU/ANE
+    /// most needs to focus on the incoming card. `isUserInteracting` alone only covered
+    /// (a); CIFilter/Vision would resume at full tilt the instant a finger lifted, contending
+    /// with the very decode the user is waiting to see. See `waitForGestureIdle`.
+    var isScanBackoffActive: Bool {
+        isUserInteracting || Date().timeIntervalSince(lastSwipeAt) < ScanTuning.postSwipeCooldown
+    }
+
     /// Background pre-fetch task. Cancelled on drag start, restarted on drag end.
     private var prefetchTask: Task<Void, Never>?
     /// Long-lived task that observes NetworkMonitorService.$isOnline.
@@ -576,6 +593,12 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         /// Cooperative pause between prescan chunks, independent of gesture state — gives the
         /// compositor headroom even when the user isn't actively gesturing (e.g. reading a card).
         static let interChunkYieldDuration: Duration = .milliseconds(100)
+        /// How long after a swipe's start (beginSwipe) a background blur/burst scan keeps
+        /// backing off — see isScanBackoffActive. Covers the next-card decode window
+        /// (prepareForDisplay + .utility prefetch) that isUserInteracting alone misses,
+        /// since that flag clears the instant the finger lifts, before the decode finishes.
+        /// A TimeInterval (not Duration) — it's compared against Date.timeIntervalSince, not slept on.
+        static let postSwipeCooldown: TimeInterval = 0.5
         /// Blurry prescan chunk size — each verdict is fully independent per-asset (no chain
         /// state), so this can be small purely to give the gesture-guard check above frequent
         /// checkpoints, at zero accuracy cost.
@@ -629,20 +652,23 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         }
     }
 
-    /// Backs off entirely while the user is actively dragging/pinching before starting the
-    /// next page of a blur/burst scan — CIFilter/Vision work is GPU/ANE-bound, which GCD's
+    /// Backs off entirely — while the user is actively dragging/pinching AND for a short
+    /// cooldown after each swipe starts (see `isScanBackoffActive`) — before starting the
+    /// next page of a blur/burst scan. CIFilter/Vision work is GPU/ANE-bound, which GCD's
     /// .background QoS does not deprioritize (see CLAUDE.md's cold-start jank notes), so
     /// this is an explicit yield rather than relying on QoS alone to keep the compositor's
-    /// frame budget clear. Shared by `prescanBatches` (cache-warming pass) and
+    /// frame budget clear. The post-swipe cooldown specifically protects the next-card
+    /// decode window (prepareForDisplay + prefetch), which the touch-only signal misses.
+    /// Shared by `prescanBatches` (cache-warming pass) and
     /// `accurateBlurryCount`/`accurateBurstCount` (refreshCategoryCounts()'s Phase 2) —
     /// both page through the same expensive engines and must back off identically, or the
     /// one call site that forgets to poll silently reintroduces the exact swipe-gesture
     /// jank this mechanism exists to prevent.
     private nonisolated static func waitForGestureIdle(viewModel: PhotoStackViewModel) async {
         var waited: Duration = .zero
-        while await viewModel.isUserInteracting {
+        while await viewModel.isScanBackoffActive {
             if waited >= ScanTuning.gestureWaitTimeout {
-                print("[PhotoStackViewModel] blur/burst scan — isUserInteracting stuck true for \(ScanTuning.gestureWaitTimeout), proceeding anyway")
+                print("[PhotoStackViewModel] blur/burst scan — scan-backoff stuck active for \(ScanTuning.gestureWaitTimeout), proceeding anyway")
                 break
             }
             try? await Task.sleep(for: ScanTuning.gestureInteractionPollInterval)
@@ -1508,6 +1534,9 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
         pendingSwipe = (item, action)
         pendingSwipeIDs.insert(item.id)
         lastAction = (item, action)
+        // Opens the post-swipe scan-backoff window (see isScanBackoffActive) so a
+        // background blur/burst scan yields GPU/ANE while the next card decodes.
+        lastSwipeAt = Date()
     }
 
     /// Performs the deferred removal for a swipe marked via `beginSwipe`, once its exit
