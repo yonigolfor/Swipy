@@ -383,6 +383,18 @@ struct PhotoCardView: View {
                             try? await Task.sleep(nanoseconds: 1_000_000_000)
                             guard !Task.isCancelled, image == nil else { return }
                             withAnimation(.easeIn(duration: 0.2)) { showImageSpinner = true }
+                            // Failsafe ceiling (~8s total): if PHImageManager hangs and never
+                            // calls back at all — offline with no local proxy, or a stuck iCloud
+                            // fetch — no nil-completion ever arrives to clear the spinner, so
+                            // guarantee dismissal here. Mirrors FullScreenMediaView's 8s failsafe
+                            // for the identical never-callback hang. Folded into this same task
+                            // (not a separate one) so it's already cancelled at every site that
+                            // cancels imageSpinnerTask (onDisappear, isCachedImageFinal adoption,
+                            // and loadImage's nil branch); the image!=nil guard makes it a no-op
+                            // whenever a frame did land.
+                            try? await Task.sleep(nanoseconds: 7_000_000_000)
+                            guard !Task.isCancelled, image == nil else { return }
+                            withAnimation(.easeIn(duration: 0.2)) { showImageSpinner = false }
                         }
                     }
                 }
@@ -549,8 +561,15 @@ struct PhotoCardView: View {
             targetSize: PhotoLibraryService.shared.cardTargetSize
         ) { fullRes in
             guard let fullRes else {
-                // Asset missing or corrupt — stop the spinner so the card
-                // shows the error placeholder instead of loading forever (Bug #1 fix).
+                // Asset missing/corrupt, or the iCloud/full-res fetch failed with nil.
+                // Clear the spinner too, not just isLoading: the spinner overlay is gated
+                // independently on `showImageSpinner && image == nil`, and image stays nil
+                // on this branch, so clearing isLoading alone would leave it spinning
+                // forever over the preview. Symmetric with loadVideoPlayer()'s nil branch
+                // ("prevent infinite spinner").
+                self.imageSpinnerTask?.cancel()
+                self.imageSpinnerTask = nil
+                self.showImageSpinner = false
                 self.isLoading = false
                 return
             }
