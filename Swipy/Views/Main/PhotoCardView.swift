@@ -199,10 +199,12 @@ struct PhotoCardView: View {
                             .font(.system(size: 60))
                             .foregroundColor(.gray)
                     }
-                    // Only spin when there is genuinely nothing to show — never on top of an
-                    // already-visible (thumbnail/degraded) frame, which reads as "still loading"
-                    // to the user even though a real image is on screen.
-                    loadingSpinnerOverlay(visible: showImageSpinner && image == nil && thumbnailImage == nil)
+                    // Invariant: the preview (thumbnail/degraded frame) is displayed with a
+                    // centered spinner overlay whenever the full-res fetch is still in flight.
+                    // Gate on `image == nil` only — the spinner must stay visible ON TOP of the
+                    // preview until the full-native bitmap lands (the 1s imageSpinnerTask
+                    // debounce keeps it from flashing on fast local hits).
+                    loadingSpinnerOverlay(visible: showImageSpinner && image == nil)
                 }
             }
 
