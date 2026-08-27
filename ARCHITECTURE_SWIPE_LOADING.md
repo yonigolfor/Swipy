@@ -162,6 +162,8 @@ onAppear:
 
 **Invariant — preview + spinner overlay:** ה-preview (thumbnail / degraded frame) מוצג **עם ספינר ממורכז מעליו** כל עוד ה-fetch של האיכות המלאה בתהליך. גייט הספינר הוא `showImageSpinner && image == nil` בלבד — **אסור** להוסיף לו `&& thumbnailImage == nil` (הרגרסיה של `b5407ff`, שהוחזרה): זה מסתיר את הספינר ברגע שמופיע preview מטושטש, וחושף placeholder נמוך-רזולוציה בלי חיווי טעינה — בניגוד לסטנדרט האיכות. ה-debounce של שנייה ב-`imageSpinnerTask` הוא מה שמונע הבזק ספינר על טעינות מקומיות מהירות (Pass 2 נוחת מתחת לשנייה ⇒ `image != nil` ⇒ ה-guard חוסם), בעוד ש-fetch איטי (iCloud) חוצה את השנייה ומציג את הספינר מעל ה-preview עד שהתמונה הסופית נוחתת.
 
+**Invariant — נתיב הכשל חייב לכבות את הספינר.** מכיוון שגייט הספינר תלוי ב-`showImageSpinner` **בנפרד** מ-`isLoading`, כל נתיב שבו התמונה הסופית לא תגיע חייב לכבות את `showImageSpinner` במפורש — אחרת הספינר מסתובב לנצח מעל ה-preview. שני מקרים: (1) **completion עם `nil`** (asset חסר/פגום, fetch iCloud שנכשל, או offline שדוחה proxy מטושטש) — ה-`guard let fullRes else` ב-`loadImage()` מבטל את `imageSpinnerTask` ומאפס `showImageSpinner = false` (סימטרי ל-`loadVideoPlayer()`'s nil branch). (2) **PHImageManager שתקוע ולא קורא ל-completion בכלל** (offline בלי proxy מקומי, iCloud תקוע) — אין nil-callback לכבות, אז ל-`imageSpinnerTask` יש רגל-failsafe שנייה (~8 שניות סה"כ, כמו ה-failsafe של `FullScreenMediaView`) שמכבה את הספינר בכל מקרה. שתי הרגליים מוגנות ב-`guard image == nil` כך שהן no-op אם frame כן נחת.
+
 ### loadedScoreIDs — Score Readiness
 ```swift
 @Published var loadedScoreIDs: Set<String>
