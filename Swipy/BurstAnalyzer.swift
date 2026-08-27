@@ -21,7 +21,20 @@ class BurstAnalyzer {
     /// `maxConcurrency` bounds the feature-print precompute pass — interactive callers
     /// (scanUntilFull) use the default; background callers (the post-onboarding
     /// prescan) pass a lower value since nothing there is time-sensitive.
-    func analyze(_ items: [PhotoItem], maxConcurrency: Int = defaultConcurrency) async -> [PhotoItem] {
+    ///
+    /// `yield`, if provided, is awaited periodically during the feature-print precompute
+    /// (every `featurePrintYieldInterval` items) so a long batch can back off to an active
+    /// swipe gesture instead of running the whole 500-item chunk uninterrupted — the direct
+    /// cause of the first-run swipe freeze this closes. Deliberately a plain closure, not a
+    /// reference to the ViewModel: BurstAnalyzer stays decoupled and knows only "periodically
+    /// await this." Background/on-demand callers pass `{ await waitForGestureIdle(...) }`;
+    /// the interactive `scanUntilFull` browse passes nil (the user is waiting on exactly
+    /// these cards, so gating it on gesture-idle would stall the content they asked for).
+    func analyze(
+        _ items: [PhotoItem],
+        maxConcurrency: Int = defaultConcurrency,
+        yield: (() async -> Void)? = nil
+    ) async -> [PhotoItem] {
         guard items.count >= minGroupSize else { return [] }
 
         let sorted = items.sorted {
@@ -32,7 +45,7 @@ class BurstAnalyzer {
         // which one depends on the grouping decisions below, so precompute all of them
         // concurrently up front. The grouping pass itself is then pure CPU (dictionary
         // lookups + vector distance), no more sequential per-photo I/O waits.
-        let prints = await featurePrints(for: sorted, maxConcurrency: maxConcurrency)
+        let prints = await featurePrints(for: sorted, maxConcurrency: maxConcurrency, yield: yield)
 
         var groups: [[PhotoItem]] = []
         var currentGroup: [PhotoItem] = [sorted[0]]
@@ -98,6 +111,14 @@ class BurstAnalyzer {
     /// engines independent).
     static let defaultConcurrency = 6
 
+    /// How often the feature-print precompute awaits the caller's `yield` hook. Finer than
+    /// the blur pass's 30-item chunk boundary because burst feature prints are the heaviest
+    /// per-item Vision/ANE work in the app — a single 500-item chunk is exactly the window
+    /// that starved the compositor and froze the first-run swipe. The pause sits *before*
+    /// `addNext()`, so while backed off only the ≤`maxConcurrency` already-in-flight prints
+    /// finish and nothing new is dispatched.
+    private let featurePrintYieldInterval = 15
+
     /// Computes feature prints for every item concurrently, bounded to avoid decoding
     /// too many images at once. Order-independent — the grouping pass looks these up by ID.
     /// Cache-first: a feature print is reused instead of re-running Vision, which is
@@ -107,7 +128,16 @@ class BurstAnalyzer {
     /// in changedObjects — a PHAsset's localIdentifier survives in-app edits (crop/
     /// filter/markup) even though the pixels don't, so without that invalidation a
     /// cached print would silently go stale.
-    private func featurePrints(for items: [PhotoItem], maxConcurrency: Int) async -> [String: VNFeaturePrintObservation] {
+    ///
+    /// `yield` (see analyze) is awaited every `featurePrintYieldInterval` resolved items,
+    /// before enqueuing more work, so an active gesture throttles this to the in-flight
+    /// set rather than the full chunk. It's awaited in this parent drain loop (not a child
+    /// task), so it needs no `@Sendable`.
+    private func featurePrints(
+        for items: [PhotoItem],
+        maxConcurrency: Int,
+        yield: (() async -> Void)?
+    ) async -> [String: VNFeaturePrintObservation] {
         var result: [String: VNFeaturePrintObservation] = [:]
         await withTaskGroup(of: (String, VNFeaturePrintObservation?).self) { group in
             var iterator = items.makeIterator()
@@ -123,8 +153,13 @@ class BurstAnalyzer {
                 }
             }
             for _ in 0..<maxConcurrency { addNext() }
+            var processed = 0
             while let (id, fp) = await group.next() {
                 if let fp { result[id] = fp }
+                processed += 1
+                if let yield, processed % featurePrintYieldInterval == 0 {
+                    await yield()
+                }
                 addNext()
             }
         }
