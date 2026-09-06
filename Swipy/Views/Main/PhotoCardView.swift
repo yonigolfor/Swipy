@@ -44,6 +44,11 @@ struct PhotoCardView: View {
     @State private var videoEndObserver: (any NSObjectProtocol)?
     @State private var videoSpinnerTask: Task<Void, Never>?
     @State private var imageSpinnerTask: Task<Void, Never>?
+    /// Terminal image-load failure — full-res never arrived (fast iCloud/asset error or the
+    /// 8s failsafe hit with no frame). Drives a tappable retry overlay instead of leaving the
+    /// spinner silently dismissed over a stuck blurry preview. Image branch only; the video
+    /// branch has its own `playerItemFailed`.
+    @State private var imageLoadFailed = false
 
     /// 1–10 aesthetic match score. Nil while persona is building or for videos.
     let aestheticScore: Int?
@@ -205,6 +210,28 @@ struct PhotoCardView: View {
                     // preview until the full-native bitmap lands (the 1s imageSpinnerTask
                     // debounce keeps it from flashing on fast local hits).
                     loadingSpinnerOverlay(visible: showImageSpinner && image == nil)
+
+                    // Terminal failure: full-res never landed (fast iCloud/asset error, or the
+                    // 8s failsafe fired with no frame). Replaces the dismissed spinner with a
+                    // tappable retry so a stuck blurry preview is never a silent dead end.
+                    // Gated on image == nil so a late-arriving success never shows it over a
+                    // loaded photo (also cleared in loadImage's success path). Kept outside the
+                    // .drawingGroup() above — interactive content must stay live, not flattened.
+                    if imageLoadFailed && image == nil {
+                        Button { retryImageLoad() } label: {
+                            Circle()
+                                .fill(.black.opacity(0.5))
+                                .frame(width: 56, height: 56)
+                                .overlay(
+                                    Image(systemName: "arrow.clockwise")
+                                        .font(.system(size: 22, weight: .semibold))
+                                        .foregroundColor(.white)
+                                )
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .transition(.opacity)
+                    }
                 }
             }
 
@@ -379,23 +406,7 @@ struct PhotoCardView: View {
                     // Skip the spinner for isCachedImageFinal cards with nil image:
                     // the asset is locally unavailable in offline mode — no point waiting.
                     if !isCachedImageFinal {
-                        imageSpinnerTask = Task { @MainActor in
-                            try? await Task.sleep(nanoseconds: 1_000_000_000)
-                            guard !Task.isCancelled, image == nil else { return }
-                            withAnimation(.easeIn(duration: 0.2)) { showImageSpinner = true }
-                            // Failsafe ceiling (~8s total): if PHImageManager hangs and never
-                            // calls back at all — offline with no local proxy, or a stuck iCloud
-                            // fetch — no nil-completion ever arrives to clear the spinner, so
-                            // guarantee dismissal here. Mirrors FullScreenMediaView's 8s failsafe
-                            // for the identical never-callback hang. Folded into this same task
-                            // (not a separate one) so it's already cancelled at every site that
-                            // cancels imageSpinnerTask (onDisappear, isCachedImageFinal adoption,
-                            // and loadImage's nil branch); the image!=nil guard makes it a no-op
-                            // whenever a frame did land.
-                            try? await Task.sleep(nanoseconds: 7_000_000_000)
-                            guard !Task.isCancelled, image == nil else { return }
-                            withAnimation(.easeIn(duration: 0.2)) { showImageSpinner = false }
-                        }
+                        armImageSpinner()
                     }
                 }
             }
@@ -414,6 +425,7 @@ struct PhotoCardView: View {
             imageSpinnerTask = nil
             showImageSpinner = false
             showLoadingSpinner = false
+            imageLoadFailed = false
             isBufferingStall = false
             playerItemFailed = false
             timeControlObserver = nil
@@ -439,6 +451,7 @@ struct PhotoCardView: View {
             imageSpinnerTask?.cancel()
             imageSpinnerTask = nil
             showImageSpinner = false
+            imageLoadFailed = false
             if thumbnailImage != nil {
                 withAnimation(.easeIn(duration: 0.15)) { image = cached }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { thumbnailImage = nil }
@@ -532,6 +545,41 @@ struct PhotoCardView: View {
 
     // MARK: - Image Loading
 
+    /// Arms the delayed loading spinner and the terminal-failure failsafe for the image branch.
+    /// A 1s debounce before the spinner shows keeps it from flashing on fast local hits; then a
+    /// ~7s ceiling (8s total, mirroring FullScreenMediaView's failsafe) after which — if no frame
+    /// has landed — PHImageManager is treated as having terminally failed/hung (offline with no
+    /// local proxy, or a stuck iCloud fetch that never calls back). Unlike before, that ceiling
+    /// now also flips `imageLoadFailed`, surfacing a tappable retry instead of a silently
+    /// dismissed spinner over a stuck blurry preview. The `image == nil` guards make every stage
+    /// a no-op once a frame arrives. Extracted so `retryImageLoad()` can re-arm it; cancels any
+    /// previously-armed task first so a retry never leaves two failsafes racing.
+    private func armImageSpinner() {
+        imageSpinnerTask?.cancel()
+        imageSpinnerTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_000_000_000)
+            guard !Task.isCancelled, image == nil else { return }
+            withAnimation(.easeIn(duration: 0.2)) { showImageSpinner = true }
+            try? await Task.sleep(nanoseconds: 7_000_000_000)
+            guard !Task.isCancelled, image == nil else { return }
+            withAnimation(.easeIn(duration: 0.2)) {
+                showImageSpinner = false
+                imageLoadFailed = true
+            }
+        }
+    }
+
+    /// Re-attempts a failed image load (tapped from the retry overlay). Resets the failure
+    /// state, re-arms the spinner/failsafe, and re-fires the two-pass load. No-op if a frame has
+    /// since arrived. Any existing blurry thumbnail stays as the preview during the re-fetch.
+    private func retryImageLoad() {
+        guard image == nil else { return }
+        HapticService.shared.selection()
+        imageLoadFailed = false
+        armImageSpinner()
+        loadImage()
+    }
+
     private func loadImage() {
         // Pass 1 — instant local thumbnail, never touches iCloud.
         // Skip if onAppear already set a thumbnailImage (demoted cached image).
@@ -556,23 +604,33 @@ struct PhotoCardView: View {
         }
 
         // Pass 2 — full-res at retina card dimensions. Respects isOfflineMode via PhotoLibraryService.
+        // onSlowNetwork engages PhotoLibraryService.loadImage's 2s timeout → local fast-format
+        // fallback → keep-the-original-iCloud-request-alive-for-an-in-place-upgrade pipeline
+        // (Fix B). A no-op closure is enough — its only job is to select that branch (the branch
+        // is gated on `onSlowNetwork != nil`); the card already shows a Pass-1 thumbnail, so the
+        // fallback's own frame isn't needed for a placeholder, but the still-alive original is
+        // what finally lands a crisp frame on a slow iCloud asset instead of failing terminally.
         PhotoLibraryService.shared.loadImage(
             for: item.asset,
-            targetSize: PhotoLibraryService.shared.cardTargetSize
+            targetSize: PhotoLibraryService.shared.cardTargetSize,
+            onSlowNetwork: { }
         ) { fullRes in
             guard let fullRes else {
-                // Asset missing/corrupt, or the iCloud/full-res fetch failed with nil.
-                // Clear the spinner too, not just isLoading: the spinner overlay is gated
-                // independently on `showImageSpinner && image == nil`, and image stays nil
-                // on this branch, so clearing isLoading alone would leave it spinning
-                // forever over the preview. Symmetric with loadVideoPlayer()'s nil branch
-                // ("prevent infinite spinner").
-                self.imageSpinnerTask?.cancel()
-                self.imageSpinnerTask = nil
-                self.showImageSpinner = false
-                self.isLoading = false
+                // With the onSlowNetwork fallback engaged, completion can fire more than once
+                // and a nil is NOT reliably terminal: it may be the local fast-format fallback
+                // (no on-device proxy) while the original iCloud request is still in flight, or
+                // a trailing iCloud failure arriving *after* a frame already landed. So we don't
+                // dismiss the spinner or flag failure here — ignore a nil once we have pixels,
+                // and otherwise let armImageSpinner()'s 8s failsafe be the single, race-free
+                // terminal-failure authority (it re-checks image == nil before firing, so it can
+                // never fire over a late success). This is why the old immediate spinner-clear
+                // was removed: it would fire on the non-terminal fallback nil.
                 return
             }
+            // A frame landed — clear any prior failure/retry state so a late success (e.g. the
+            // original iCloud request resolving after the 8s failsafe already flagged failure)
+            // never leaves the retry overlay stranded over a loaded photo.
+            self.imageLoadFailed = false
             if self.thumbnailImage != nil {
                 withAnimation(.easeIn(duration: 0.18)) { self.image = fullRes }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
