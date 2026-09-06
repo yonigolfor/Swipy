@@ -162,7 +162,11 @@ onAppear:
 
 **Invariant — preview + spinner overlay:** ה-preview (thumbnail / degraded frame) מוצג **עם ספינר ממורכז מעליו** כל עוד ה-fetch של האיכות המלאה בתהליך. גייט הספינר הוא `showImageSpinner && image == nil` בלבד — **אסור** להוסיף לו `&& thumbnailImage == nil` (הרגרסיה של `b5407ff`, שהוחזרה): זה מסתיר את הספינר ברגע שמופיע preview מטושטש, וחושף placeholder נמוך-רזולוציה בלי חיווי טעינה — בניגוד לסטנדרט האיכות. ה-debounce של שנייה ב-`imageSpinnerTask` הוא מה שמונע הבזק ספינר על טעינות מקומיות מהירות (Pass 2 נוחת מתחת לשנייה ⇒ `image != nil` ⇒ ה-guard חוסם), בעוד ש-fetch איטי (iCloud) חוצה את השנייה ומציג את הספינר מעל ה-preview עד שהתמונה הסופית נוחתת.
 
-**Invariant — נתיב הכשל חייב לכבות את הספינר.** מכיוון שגייט הספינר תלוי ב-`showImageSpinner` **בנפרד** מ-`isLoading`, כל נתיב שבו התמונה הסופית לא תגיע חייב לכבות את `showImageSpinner` במפורש — אחרת הספינר מסתובב לנצח מעל ה-preview. שני מקרים: (1) **completion עם `nil`** (asset חסר/פגום, fetch iCloud שנכשל, או offline שדוחה proxy מטושטש) — ה-`guard let fullRes else` ב-`loadImage()` מבטל את `imageSpinnerTask` ומאפס `showImageSpinner = false` (סימטרי ל-`loadVideoPlayer()`'s nil branch). (2) **PHImageManager שתקוע ולא קורא ל-completion בכלל** (offline בלי proxy מקומי, iCloud תקוע) — אין nil-callback לכבות, אז ל-`imageSpinnerTask` יש רגל-failsafe שנייה (~8 שניות סה"כ, כמו ה-failsafe של `FullScreenMediaView`) שמכבה את הספינר בכל מקרה. שתי הרגליים מוגנות ב-`guard image == nil` כך שהן no-op אם frame כן נחת.
+**Invariant — כשל טרמינלי → retry, לא ספינר-לנצח ולא dead-end שקט.** גייט הספינר תלוי ב-`showImageSpinner` **בנפרד** מ-`isLoading`, אז כל נתיב שבו התמונה הסופית לא תגיע חייב לסיים באחת משתי צורות: או `image` נוחת (הגייט `image == nil` נסגר), או המצב נדחף במפורש ל-כשל טרמינלי (`imageLoadFailed = true`) שמכבה את הספינר וחושף overlay של **retry לחיץ** במקום preview מטושטש תקוע. הרשות היחידה שקובעת כשל טרמינלי היא ה-**failsafe של ~8 שניות** ב-`armImageSpinner()` (1s debounce → spinner → 7s → אם `image == nil`: `showImageSpinner = false` + `imageLoadFailed = true`), כמו ה-failsafe של `FullScreenMediaView`.
+
+**למה ה-nil-branch של `loadImage()` **לא** מסמן כשל בעצמו (שינוי מהגרסה הישנה):** מאז ש-Pass 2 מעביר `onSlowNetwork` (Fix B — ראו למטה), ה-completion יכול לירות **יותר מפעם אחת**, ו-`nil` **אינו טרמינלי באופן אמין**: הוא עשוי להיות ה-fallback המקומי (`.fastFormat`) בזמן שבקשת ה-iCloud המקורית עדיין בתעופה, או כשל iCloud שמגיע *אחרי* שכבר נחת frame. לכן ה-`guard let fullRes else { return }` פשוט **מתעלם** מ-`nil` (לא מבטל ספינר, לא מסמן כשל) — הוא רק מונע דריסת frame קיים; קביעת הכשל מרוכזת אך ורק ב-failsafe (שבודק מחדש `image == nil` לפני שהוא יורה, ולכן לעולם לא יורה מעל success מאוחר). כל delivery לא-`nil` מאפס `imageLoadFailed = false`, כך ש-frame שנוחת אחרי שה-failsafe כבר סימן כשל מחליף את ה-overlay בתמונה.
+
+**Retry:** ה-overlay (`imageLoadFailed && image == nil`, כפתור עם `.contentShape(Rectangle())` כדי לא להתנגש ב-drag של הקלף) קורא ל-`retryImageLoad()` — מאפס את דגל הכשל, מריץ מחדש `armImageSpinner()`, ויורה שוב את שני ה-passים. no-op אם בינתיים נחת frame; thumbnail מטושטש קיים נשאר כ-preview במהלך ה-re-fetch.
 
 ### loadedScoreIDs — Score Readiness
 ```swift
@@ -561,7 +565,7 @@ onAppear (תמונה):
       thumbnailImage = image   ← demote לplaceholder (אולי degraded)
       image = nil
     Task: diskCache.retrieveAsync() || loadImage()
-    imageSpinnerTask: spinner אחרי 1000ms אם image עדיין nil
+    armImageSpinner(): spinner אחרי 1000ms אם image==nil; ואז ב-8s failsafe → imageLoadFailed=true (retry overlay)
 
   נתיב offline+unavailable (isCachedImageFinal && image == nil):
     Task: loadImage()   ← ניסיון נוסף
@@ -575,13 +579,12 @@ loadImage() — שתי קריאות מקבילות:
     → דולג אם thumbnailImage כבר קיים (ה-demoted placeholder עדיף)
     → אחרת: thumbnailImage = thumb (< 50ms, תמיד מקומי)
 
-  Pass 2: loadImage()
+  Pass 2: loadImage(onSlowNetwork: { })   ← Fix B: מפעיל timeout 2s → fallback מקומי → upgrade in-place
     deliveryMode = .highQualityFormat, isNetworkAccessAllowed = !isOfflineMode
     targetSize = cardTargetSize (retina-pixel dimensions)
-    → ממתין לגרסה המלאה (iCloud כולל, בonline mode)
-    → אם thumbnailImage != nil → withAnimation(.easeIn(0.18)) { image = fullRes }
-    → אם thumbnailImage == nil → image = fullRes (ללא אנימציה — asset מהיר)
-    → asyncAfter(0.35s): thumbnailImage = nil
+    → ה-completion יכול לירות יותר מפעם אחת (fallback מקומי, ואז iCloud מקורי)
+    → fullRes != nil → imageLoadFailed = false; אם thumbnailImage != nil → withAnimation(.easeIn(0.18)) { image = fullRes } (+ asyncAfter(0.35s): thumbnailImage = nil), אחרת image = fullRes
+    → fullRes == nil → return (מתעלמים; לא טרמינלי — ראו Invariant הכשל למעלה; ה-failsafe הוא הרשות)
 ```
 
 **מה זה מבטיח**:
