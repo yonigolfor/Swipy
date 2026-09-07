@@ -6,6 +6,8 @@
 // between the Filters and Swipe destinations — the Android analogue of iOS's single
 // @EnvironmentObject VM shared by SmartFiltersView and SwipeStackView.
 
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -14,16 +16,63 @@ plugins {
     alias(libs.plugins.ksp)
 }
 
+// Release signing — credentials live in keystore.properties (gitignored, see .gitignore).
+// Not present in CI/fresh checkouts; the release signingConfig is only registered when found,
+// so `assembleDebug`/`bundleDebug` and all Debug-variant work never require it.
+val keystorePropertiesFile = rootProject.file("keystore.properties")
+val keystoreProperties = Properties().apply {
+    if (keystorePropertiesFile.exists()) {
+        keystorePropertiesFile.inputStream().use { load(it) }
+    }
+}
+
 android {
     namespace = "com.swipy.app"
     compileSdk = libs.versions.compileSdk.get().toInt()
 
     defaultConfig {
-        applicationId = "com.swipy.app"
+        // applicationId (Play Console package name) intentionally differs from `namespace`
+        // above (Kotlin source package, unchanged — renaming it would touch every file's
+        // package declaration for zero benefit). Set to match the app already created in
+        // Play Console.
+        applicationId = "com.yonigolfor.swipy"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 3
+        versionName = "1.0.0"
+    }
+
+    signingConfigs {
+        if (keystorePropertiesFile.exists()) {
+            create("release") {
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            // R8 code shrinking is OFF for now — confirmed via on-device testing (debug-vs-
+            // release comparison on the same emulator) that isMinifyEnabled = true causes a
+            // real, reproducible crash on launch: "IllegalStateException: CompositionLocal
+            // LocalLifecycleOwner not present", thrown from inside the composition triggered by
+            // AndroidComposeView.setOnViewTreeOwnersAvailable — i.e. R8 shrinking is corrupting
+            // something in the Compose/Hilt/activity-compose ViewTreeLifecycleOwner wiring at
+            // Activity startup. Ruled out android.enableR8.fullMode=false (still crashed after a
+            // full --rerun-tasks clean rebuild), so this isn't the common "full mode class
+            // merging" issue — it's a genuine missing-keep-rule-shaped bug that needs proper R8
+            // dump/-printusage investigation, not a guess under time pressure. Play Store does
+            // not require shrinking; correctness of an uploadable build outweighs the download-
+            // size win here. Revisit with isMinifyEnabled = true once the real cause is found —
+            // proguard-rules.pro already exists for that work.
+            isMinifyEnabled = false
+            if (keystorePropertiesFile.exists()) {
+                signingConfig = signingConfigs.getByName("release")
+            }
+        }
     }
 
     buildFeatures {

@@ -8,6 +8,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -21,6 +22,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -29,7 +31,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -62,14 +66,28 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Required since targetSdk 36 makes edge-to-edge mandatory (Android 15+ policy) — without
+        // this, WindowInsets dispatched to Scaffold/NavigationBar read as zero, so their own
+        // default WindowInsets.navigationBars padding never applies and 3-button nav bars paint
+        // directly over the bottom tab bar. See android/TODO.md for the on-device investigation.
+        enableEdgeToEdge()
         pendingDeepLinkRoute.value = intent?.getStringExtra(SwipyNotificationManager.EXTRA_DEEP_LINK_ROUTE)
         setContent {
-            MaterialTheme {
-                Surface(modifier = Modifier.fillMaxSize()) {
-                    AppRoot(
-                        pendingDeepLinkRoute = pendingDeepLinkRoute.value,
-                        onDeepLinkConsumed = { pendingDeepLinkRoute.value = null },
-                    )
+            // Pinned LTR app-wide, mirroring the iOS app's own root-level fix (root CLAUDE.md
+            // "Layout Direction — Pinned to LTR App-Wide") — see android/CLAUDE.md "Layout
+            // Direction" for why Android's default per-locale RTL mirroring, previously assumed
+            // to be correct here, was falsified by on-device testing under Hebrew locale (tab
+            // order reversed, numeric+unit badges reordered, Paywall's close button flipped
+            // corners). This only pins *container* layout — Hebrew text itself still renders
+            // correctly RTL via Unicode bidi shaping, which is independent of LayoutDirection.
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                MaterialTheme {
+                    Surface(modifier = Modifier.fillMaxSize()) {
+                        AppRoot(
+                            pendingDeepLinkRoute = pendingDeepLinkRoute.value,
+                            onDeepLinkConsumed = { pendingDeepLinkRoute.value = null },
+                        )
+                    }
                 }
             }
         }

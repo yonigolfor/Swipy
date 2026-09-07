@@ -1,0 +1,26 @@
+<resources>
+    <!-- No Material Components/AppCompat dependency in this project (pure Compose, see
+         android/CLAUDE.md "Core Tech Stack") — parent must be a native platform theme, not
+         Theme.Material3.*/Theme.MaterialComponents.* (those require the Material Components
+         AAR). `Theme.DeviceDefault.DayNight.NoActionBar` was tried first and rejected — DayNight
+         is an AppCompat-only naming convention, not a real framework resource (AAPT: "resource
+         android:style/Theme.DeviceDefault.DayNight.NoActionBar not found"); the app's actual
+         light/dark handling is already fully Compose-driven (`MaterialTheme{}`), so the native
+         theme parent's own day/night behavior is irrelevant here — only NoActionBar matters.
+         NoActionBar is required: with no android:theme declared at all, the OS fell back to a
+         theme that renders a native Window ActionBar (title "Swipy", from android:label) on
+         every screen — harmless pre-edge-to-edge (it just pushed content down), but after
+         targetSdk 36 made edge-to-edge mandatory, this decor paints on top of full-bleed Compose
+         content instead, e.g. hiding PaywallScreen's close button entirely. See android/TODO.md
+         for the on-device investigation that found this. -->
+    <style name="Theme.Swipy" parent="android:Theme.DeviceDefault.NoActionBar">
+        <!-- DeviceDefault's own windowBackground is intentionally OEM-customizable (that's the
+             point of "DeviceDefault") — leaving it unset risks a brief flash of whatever color a
+             given skin picks, visible for the one native-drawn frame before Compose's own first
+             frame (SplashScreen.kt's OnboardingBackground, #14141A) attaches. Pinned explicitly
+             to the same value so the native window background and the first Compose frame are
+             pixel-identical — no flash, on any OEM skin, without needing the
+             androidx.core:core-splashscreen library this project doesn't otherwise need. -->
+        <item name="android:windowBackground">#FF14141A</item>
+    </style>
+</resources>

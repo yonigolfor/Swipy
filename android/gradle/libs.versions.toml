@@ -1,19 +1,19 @@
 [versions]
 # Core & Build Plugins
-agp = "8.5.1"
+agp = "8.13.0"
 kotlin = "2.0.0"                       # Compose Compiler is now the in-tree K2 plugin — see [plugins] below
 ksp = "2.0.0-1.0.24"                   # Kotlin Symbol Processing — used for Hilt's KSP compiler (2.48+), not kapt
 
 # SDK levels — see android/CLAUDE.md "Media & Storage Operations" for why minSdk is 29
 # (Scoped Storage baseline: createTrashRequest/createDeleteRequest exist from API 30, but
 # the legacy pre-Scoped-Storage delete branch can be omitted entirely rather than kept as dead code)
-# compileSdk/targetSdk pinned to 34, not the newer 35/36 platforms also installed on this
-# machine — AGP 8.5.1 (pinned per this project's chosen version) is only tested up to
-# compileSdk 34; a higher value builds only via an unsupported-version override, which is a
-# real risk to take on deliberately, not a default to fall into.
-compileSdk = "34"
+# compileSdk/targetSdk bumped to 36 (Android 16) — Google Play requires targetSdk >= 36 for
+# new app submissions as of the 2026 policy cycle (was pinned at 34 pre-upload; see git history
+# / android/TODO.md item 11 for that original AGP-8.5.1-ceiling rationale, now obsolete since
+# AGP was bumped to 8.13.0 alongside this, which officially supports up to API 36.1).
+compileSdk = "36"
 minSdk = "29"
-targetSdk = "34"
+targetSdk = "36"
 
 # UI & Image Rendering
 composeBom = "2024.06.00"
@@ -40,8 +40,15 @@ kotlinxSerializationJson = "1.7.1"
 # Video — see android/CLAUDE.md "Video via Media3 ExoPlayer, pooled"
 media3 = "1.3.1"
 
-# Billing (:data:billing) — StoreKit 2 analogue, see android/CLAUDE.md "Core Tech Stack"
-billing = "7.1.1"
+# Billing (:data:billing) — StoreKit 2 analogue, see android/CLAUDE.md "Core Tech Stack".
+# Bumped 7.1.1 -> 8.0.0 per Play Console's "latest monetization features" requirement — a
+# drop-in bump per Google's official 7->8 migration guide; BillingManager.kt already used only
+# the modern KTX APIs (queryProductDetails, queryPurchasesAsync(QueryPurchasesParams), the
+# parameterized enablePendingPurchases(PendingPurchasesParams)) that survive unchanged, none of
+# the removed legacy ones (querySkuDetailsAsync, no-arg enablePendingPurchases, raw-skuType
+# queryPurchasesAsync, setOldSkuPurchaseToken/setReplaceProrationMode) — confirmed by reading
+# the file before bumping, not assumed.
+billing = "8.0.0"
 
 # Notifications (:core:notifications) — periodic background checks + Hilt-injected Workers
 workManager = "2.9.1"

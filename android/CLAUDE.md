@@ -178,7 +178,7 @@ swipy-android/
 | Video playback | Media3 `ExoPlayer` (+ `PlayerView` via `AndroidView`) | Bounded pool, mirrors iOS `VideoPlayerPool` |
 | On-device ML | ML Kit (on-device, no network) — Image Labeling / Face-adjacent APIs are **not** used; blur/burst/aesthetic scoring done via `RenderScript`-free custom analysis (see below) | Zero-network parity with iOS `Vision`/`CoreImage` usage |
 | Local persistence | Jetpack **DataStore** (Preferences + Proto) | Replaces `UserDefaults`; see Persistence |
-| Billing | Play Billing Library 7 (Kotlin coroutines KTX) | Analogue of StoreKit 2 |
+| Billing | Play Billing Library 8 (Kotlin coroutines KTX) | Analogue of StoreKit 2 |
 | Background work | `WorkManager` | Notification scheduling, deferred prescans |
 | Testing | JUnit5, Turbine (Flow testing), Compose UI Test, Robolectric (data layer only), Macrobenchmark | See Build & Testing |
 | Static analysis | `ktlint`, Android Lint (custom rules for the gesture/equality guardrails below), Detekt | Enforced in CI, not just pre-commit |
@@ -189,7 +189,7 @@ swipy-android/
 
 **Zero third-party product dependencies beyond the above infra layer** — mirroring the iOS app's "no RevenueCat/Mixpanel" stance: no third-party analytics SDK, no third-party crash reporter beyond Play Console's built-in ANR/crash reporting + Firebase Crashlytics *only if* the team explicitly opts in (not default-on). Telemetry follows the same **on-device-only counters + platform-native aggregation** philosophy as iOS `AnalyticsService` — see Analytics below.
 
-**SDK levels — decided, not placeholders:** `minSdk = 29`, `compileSdk = 34`, `targetSdk = 34` (`gradle/libs.versions.toml`). `compileSdk`/`targetSdk` are pinned to 34 rather than a newer installed platform (35/36 were also available locally) because AGP 8.5.1 — the AGP version this project is pinned to — is only tested up to compileSdk 34; building against 35 succeeds only via an explicit `android.suppressUnsupportedCompileSdk` override, which is a real risk to opt into deliberately later (e.g. once AGP is bumped), not a default to fall into now. `minSdk = 29` is what makes the legacy pre-Scoped-Storage delete branch in "Deletion & Trash" below deletable-on-sight rather than dead code kept "just in case."
+**SDK levels — decided, not placeholders:** `minSdk = 29`, `compileSdk = 36`, `targetSdk = 36`, `agp = 8.13.0` (`gradle/libs.versions.toml`; Gradle wrapper bumped to 8.13 to match — AGP 8.13.0's stated minimum). Originally pinned at `compileSdk`/`targetSdk = 34` with AGP 8.5.1 (only tested up to compileSdk 34 at the time); bumped to 36 once Play Console's pre-submission checks started hard-erroring on both `targetSdk < 36` and Play Billing `< 8.0.0` for this app's first upload — AGP 8.13.0 is the minimum in the 8.x line with official API 36.1 support (confirmed via release notes before bumping, not guessed), chosen over jumping to the 9.x line to keep the version delta from 8.5.1 as small as possible for a change made under upload pressure. `minSdk = 29` is unaffected and still what makes the legacy pre-Scoped-Storage delete branch in "Deletion & Trash" below deletable-on-sight rather than dead code kept "just in case."
 
 ---
 
@@ -255,9 +255,13 @@ Deep linking:
 
 Single-Activity architecture. Compose Navigation is the only nav framework — no Fragments, no legacy `Navigation` XML graphs. Full-screen media (Review Bin detail) is a **separate navigation destination** with a custom `enterTransition`/`exitTransition` (fade + scale from the tapped thumbnail's bounds using shared-element transitions, `SharedTransitionLayout`, API 34+ / Compose 1.7+) rather than a dialog — this matches the iOS `fullScreenCover` semantic of "genuinely new screen, not an overlay."
 
-### Layout Direction
+### Layout Direction — Pinned to LTR App-Wide (reversed decision — see below)
 
-Android's Compose `LocalLayoutDirection` already correctly mirrors RTL languages (Hebrew) at the system level — `Modifier.offset`, `Arrangement`, and `Alignment` all respect it automatically, unlike the iOS bug this app's `CLAUDE.md` documents working around (raw `.offset(x:)` needing an explicit LTR pin). **Do not port that iOS workaround.** However: swipe *gesture direction* (finger drag left = delete) is a spatial/physical gesture, not a text-flow concept, and must stay physically left/right regardless of layout direction — explicitly read raw pointer `Offset` in `pointerInput` (which is already direction-agnostic, unlike `Alignment.Start/End`) rather than any layout-direction-aware modifier for the drag math itself.
+**Update:** This section originally argued Android's native per-locale RTL mirroring was correct here and told contributors not to port iOS's LTR pin. On-device testing under Hebrew locale (`adb shell cmd locale set-app-locales <pkg> --locales he`) falsified that assumption: the bottom `NavigationBar`'s tab order fully reversed (Filters·Swipe·Review Bin → Review Bin·Swipe·Filters), `PaywallScreen`'s close button flipped from `Alignment.TopStart` to the opposite corner, and numeric+unit badges reordered ("0.2 MB" → "MB 0.2" — a Unicode bidi artifact of embedding an LTR digit+unit run inside an RTL paragraph, not a Compose bug per se, but real and user-visible). This is the exact class of problem iOS's own `CLAUDE.md` already documents fixing with a root-level LTR pin.
+
+`MainActivity.kt`'s `setContent` now wraps the whole app in `CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr)`, mirroring the iOS app's `.environment(\.layoutDirection, .leftToRight)` root override exactly. This pins **container** layout only (`Row`/`Arrangement`/`Alignment.Start`-`End` resolution, tab order, icon/badge positions) to always be LTR regardless of device/app locale — it does **not** affect Hebrew *text* rendering, which is still correctly RTL-shaped by Unicode bidi independent of `LayoutDirection`. Do not remove this pin without re-running the same on-device locale test that found the original bugs.
+
+Swipe *gesture direction* (finger drag left = delete) remains unaffected either way — it's a spatial/physical gesture, not a text-flow concept, and was already correctly implemented by reading raw pointer `Offset` in `pointerInput` (direction-agnostic) rather than any layout-direction-aware modifier for the drag math itself.
 
 ---
 
@@ -674,14 +678,41 @@ Beyond the infra layer explicitly named in Core Tech Stack (Compose, Hilt, Corou
 
 # Macrobenchmark — startup + scroll/drag jank, the Android analogue of profiling the
 # iOS gesture-performance regressions with Instruments; run against a release-like
-# (minified, non-debuggable) build variant, never against :app:debug
+# (non-debuggable — currently non-minified, see "Release Build & Play Console Signing"
+# below) build variant, never against :app:debug
 ./gradlew :benchmark:connectedBenchmarkAndroidTest
+
+# Signed release bundle for Play Console upload (requires keystore.properties — see below)
+./gradlew :app:bundleRelease
 ```
 
 **Known gotchas:**
 - The Compose Preview renderer (`@Preview`) does not execute real `pointerInput`/gesture code — verify gesture changes on a physical device or emulator, never trust Preview for anything touching `CardStackLayer`.
 - `MediaStore` behavior (especially `createTrashRequest`/`createDeleteRequest` availability and `RecoverableSecurityException` handling) genuinely differs across OEM skins on API 29-30 in practice, despite matching the documented AOSP contract — test deletion flows on at least one non-Pixel OEM device/image before shipping a change to that path, not just the emulator.
 - High refresh rate (90/120Hz) is not guaranteed by default on all devices even when hardware-capable — verify `Display.supportedModes`/`Surface.setFrameRate` is actually negotiating the high-refresh mode during gesture interaction, don't assume the system compositor picked it automatically.
+
+### Release Build & Play Console Signing
+
+`:app`'s `release` build type signs with an upload keystore whose credentials live in
+`android/keystore.properties` (gitignored, `storeFile`/`storePassword`/`keyAlias`/`keyPassword`
+keys — see `app/build.gradle.kts`'s `signingConfigs` block) pointing at
+`android/keystore/swipy-upload-key.jks` (also gitignored). Neither file exists in a fresh
+checkout; `bundleRelease`/`assembleRelease` only attach a `signingConfig` when
+`keystore.properties` is present, so their absence never breaks Debug-variant work or CI. Back up
+both files somewhere durable outside this repo — losing the upload key before Play App Signing
+enrollment means losing the ability to publish updates under this app's identity.
+
+**R8 code shrinking (`isMinifyEnabled`) is deliberately OFF** — see `android/TODO.md` item 11 for
+the full writeup. Short version: enabling it produces a build that crashes on every launch
+(`CompositionLocal LocalLifecycleOwner not present`, thrown from Compose/Hilt/`activity-compose`'s
+`ViewTreeLifecycleOwner` wiring at startup), confirmed via on-device A/B against the identical
+unminified build, and confirmed *not* to be the common "R8 full mode class merging" issue
+(`android.enableR8.fullMode=false` + a clean rebuild still crashed). Play Console accepts an
+unminified, signed AAB without issue — this only costs download size, not correctness or
+submission eligibility. `app/proguard-rules.pro` exists and already carries the one rule this
+project actually needs regardless of shrinking (`SwipyNotificationWorker`, resolved by class name
+at runtime by WorkManager) — re-enabling `isMinifyEnabled` is real, separate follow-up work that
+needs an R8 dump/`-printusage` investigation, not something to flip back on speculatively.
 
 ---
 

@@ -1,0 +1,18 @@
+<resources>
+    <!-- API 31+ (Android 12) shows a MANDATORY system SplashScreen for every app, whether or not
+         it opts in via androidx.core:core-splashscreen — this is a separate layer from
+         android:windowBackground (values/themes.xml), controlled by
+         android:windowSplashScreenBackground, which isn't a real attribute below API 31 (must
+         live in a -v31 qualifier, not the base themes.xml, or AAPT2 rejects it on minSdk 29).
+         Found by burst-capturing screenshots at cold start: the app's launcher icon rendered
+         correctly (that part already defaults sensibly), but on a plain WHITE background for
+         several frames before our own dark (#14141A) windowBackground/Compose content appeared —
+         a real, visible flash this project's minSdk-29 users on API 31+ devices would all hit.
+         This style must repeat every item from the base Theme.Swipy (values/themes.xml) — same
+         style name in a higher-priority qualifier folder replaces the whole style, it does not
+         merge item-by-item with the base definition. -->
+    <style name="Theme.Swipy" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">#FF14141A</item>
+        <item name="android:windowSplashScreenBackground">#FF14141A</item>
+    </style>
+</resources>

@@ -504,3 +504,174 @@ returned empty). `./gradlew :app:assembleDebug test` passes, but pinch-to-zoom i
 `graphicsLayer`-composition-order-sensitive gesture code — verify the actual zoom/pan feel,
 touch-slop threshold, and anchor-point accuracy on-device before considering this pixel-final,
 same caveat as item 2's RTL work.
+
+## 11. Release build / Play Console signing — ✅ RESOLVED (first AAB built + on-device verified), R8 shrinking deferred
+
+`:app` had no release `signingConfig` at all — `bundleRelease` would only have produced an
+unsigned bundle, which Play Console rejects. Added:
+- A new upload keystore (`android/keystore/swipy-upload-key.jks`, RSA 2048, PKCS12, ~27-year
+  validity) generated locally, referenced via `android/keystore.properties` (both gitignored —
+  see `.gitignore`). `app/build.gradle.kts`'s `signingConfigs`/`buildTypes.release` only register
+  a `release` signing config when `keystore.properties` exists, so `assembleDebug`/`bundleDebug`
+  and CI/fresh-checkout Debug work are unaffected by its absence.
+- `app/proguard-rules.pro` (new — none existed before) with one project-specific keep rule for
+  `SwipyNotificationWorker` (WorkManager resolves a scheduled Worker by fully-qualified class
+  name at runtime, so it needs protection from renaming independent of whether shrinking is on).
+
+**R8 code shrinking (`isMinifyEnabled`) is OFF for now — a real bug, not a placeholder.**
+Confirmed via on-device A/B (same emulator, same package, debug install vs. minified release
+install): the minified release build crashed on every launch with `IllegalStateException:
+CompositionLocal LocalLifecycleOwner not present`, thrown from inside the composition triggered
+by `AndroidComposeView.setOnViewTreeOwnersAvailable` — i.e. R8 shrinking corrupts something in
+the Compose/Hilt/`activity-compose` `ViewTreeLifecycleOwner` wiring at Activity startup. Ruled
+out the common "R8 full mode cross-class merging" explanation specifically: setting
+`android.enableR8.fullMode=false` and rebuilding clean (`--rerun-tasks`) still crashed with the
+identical exception. This is a genuine missing-keep-rule-shaped bug that needs real R8 dump/
+`-printusage`/`-printseeds` investigation to isolate, not a guess made under upload-deadline
+pressure. Play Console does not require code shrinking for submission — an unminified release
+build is a fully valid, fully signed upload; the only cost is a larger download size. Revisit
+`isMinifyEnabled = true` (proguard-rules.pro already exists as the place to add whatever rule
+this turns out to need) as a separate, dedicated pass — not blocking for the first Play Console
+submission.
+
+**Verification performed this pass**: `bundleRelease`/`assembleRelease` both build clean.
+Installed the signed, unminified release APK on a fresh emulator (previous debug install
+uninstalled first — debug/release signatures differ, `INSTALL_FAILED_UPDATE_INCOMPATIBLE`
+otherwise), launched via `am start`, confirmed no `FATAL EXCEPTION` in logcat, confirmed the app
+holds `mCurrentFocus`, and confirmed via screenshot that onboarding renders correctly end-to-end.
+**Not yet verified**: an actual Play Console upload/review pass, and real purchase/notification
+flows in this specific release-signed build (covered separately by items 7-9's own on-device
+verification gaps).
+
+**Follow-up, same session**: the first real Play Console pre-submission check came back with two
+hard errors — `targetSdk 34` needed to be `>= 36`, and Play Billing `7.1.1` needed to be
+`>= 8.0.0` for current monetization features. Both fixed:
+- `agp` bumped `8.5.1 -> 8.13.0` (the minimum 8.x release with official API 36.1 support — checked
+  official release notes before picking a version, not guessed) and `compileSdk`/`targetSdk`
+  bumped `34 -> 36` to match. Gradle wrapper bumped `8.7 -> 8.13` (AGP 8.13.0's stated minimum).
+- `billing` bumped `7.1.1 -> 8.0.0`. Confirmed via Google's official 7-to-8 migration guide that
+  this is a drop-in bump for this codebase specifically: `BillingManager.kt` already used only
+  the modern APIs that survive unchanged (`queryProductDetails`, `queryPurchasesAsync` with
+  `QueryPurchasesParams`, the parameterized `enablePendingPurchases(PendingPurchasesParams)`) —
+  none of the APIs removed in 8.0.0 (`querySkuDetailsAsync`, no-arg `enablePendingPurchases`,
+  raw-skuType `queryPurchasesAsync`, `setOldSkuPurchaseToken`/`setReplaceProrationMode`) appear
+  anywhere in the file. Zero code changes were needed.
+- Re-verified end to end after both bumps: `:app:assembleDebug`, `:app:bundleRelease`, and
+  `:app:assembleRelease` all build clean; reinstalled the release APK on a fresh emulator (new
+  `applicationId` this pass, see below) and confirmed no crash and correct onboarding render via
+  screenshot — same verification method as the first pass, repeated because an SDK/AGP/Gradle
+  bump is exactly the kind of change that could plausibly reintroduce or mask a runtime issue.
+- Separately, Play Console had already created the app listing under package name
+  `com.yonigolfor.swipy`, not `com.swipy.app` (this project's original placeholder
+  `applicationId`). Changed `defaultConfig.applicationId` to match — `namespace` (the Kotlin
+  source package, `com.swipy.app`) was deliberately left alone, since changing it would mean
+  editing every file's `package` declaration for no actual benefit; `applicationId` and
+  `namespace` are independent and commonly differ in real projects.
+- R8 shrinking was **not** re-attempted as part of this pass, even though AGP 8.13.0's release
+  notes mention unrelated R8 shrinker bugfixes — re-enabling `isMinifyEnabled` is still separate,
+  dedicated follow-up work (see above), not something to retry speculatively while already mid-
+  upgrade under upload pressure.
+
+## 12. UI/UX & Edge-to-Edge Insets Audit — ✅ RESOLVED (4 issues, all on-device verified)
+
+Internal testing across real devices surfaced four layout inconsistencies. All four were
+reproduced live (not inferred from code) before fixing — `uiautomator dump` pixel bounds,
+locale/nav-bar A/B toggles via `adb shell cmd locale`/`cmd overlay`, and before/after screenshots
+for every claim below. Root cause for three of the four: this project had **zero** lines of
+`WindowInsets`/`enableEdgeToEdge`/theme-XML handling anywhere, which happened to look fine only
+because pre-`targetSdk 35` the OS auto-reserves system-bar space — invisible until item 11's
+`targetSdk 34→36` bump (done earlier this session for Play Console) made edge-to-edge mandatory
+and removed that safety net.
+
+- **Phantom native ActionBar** (`app/src/main/AndroidManifest.xml` had no `android:theme` at
+  all) rendered a real `Window` ActionBar (title "Swipy", from `android:label`) on every screen —
+  confirmed via `uiautomator dump`: `action_bar_container` bounds `[0,0]-[1080,210]` fully
+  contained `PaywallScreen`'s close button (`[27,27]-[153,153]`), painting over it entirely (no X
+  visible in any screenshot). Fixed with a new `app/src/main/res/values/themes.xml`
+  (`Theme.Swipy`, parent `android:Theme.DeviceDefault.NoActionBar` — **not**
+  `Theme.Material3.*`/`Theme.MaterialComponents.*`, which need the Material Components AAR this
+  project doesn't depend on; DayNight is an AppCompat-only naming convention and isn't a real
+  framework resource, confirmed by AAPT rejecting it on the first attempt) referenced via
+  `android:theme="@style/Theme.Swipy"`.
+- **3-button nav bar overlapping the bottom tab bar** — confirmed via `adb shell cmd overlay
+  enable com.android.internal.systemui.navbar.threebutton` A/B test on the identical screen
+  state: all three tab labels' bounds (`Filters`/`Swipe`/`Review Bin`) sat entirely inside
+  `navigationBarBackground`'s bounds. Fixed with `enableEdgeToEdge()` in
+  `MainActivity.onCreate()` (before `setContent`) — Material3's `NavigationBar` then correctly
+  consumes its own default `WindowInsets.navigationBars`. **A related gap found only by
+  re-testing after this fix**: `PaywallScreen`'s `bottomBar` is a bespoke `BottomCtaSection`
+  composable, not a real `NavigationBar`/`BottomAppBar`, so it has no built-in inset defaults —
+  `enableEdgeToEdge()` alone left "Subscribe Now" rendering behind the 3-button nav bar. Fixed
+  with an explicit `.navigationBarsPadding()` on `BottomCtaSection`'s root `Column`.
+- **Paywall content not scrollable** (`PaywallScreen.kt`'s main `Column` had no
+  `verticalScroll`) — fixed by adding `.verticalScroll(rememberScrollState())`; the close button
+  and bottom CTA are separate `Box`/`Scaffold` children and correctly stay pinned outside the
+  scrollable region. On-device confirmed: "Restore Purchases"/legal links, previously below the
+  fold with no way to reach them, now scroll into view.
+- **A second Paywall-specific gap surfaced during the same re-verification pass**: the close
+  button lives outside the `Column` that receives `Scaffold`'s inset-aware `padding` (it's a
+  `Box` sibling positioned via a fixed `12.dp` offset), so once the phantom ActionBar was removed
+  it started overlapping the status bar instead (`uiautomator` bounds `[27,27]-[153,153]` vs.
+  status bar `0-63`) — not one of the 4 originally-reported issues, but a direct, immediate
+  consequence of fixing Issue 2 correctly, found by re-verifying on-device rather than assuming
+  the fix was complete. Fixed with `.statusBarsPadding()` on the same `IconButton`.
+- **RTL container-layout leak under Hebrew locale** — confirmed via
+  `adb shell cmd locale set-app-locales <pkg> --locales he` A/B test: bottom tab order fully
+  reversed (`Filters·Swipe·Review Bin` → `Review Bin·Swipe·Filters`), and a numeric+unit badge
+  ("0.2 MB") visually reordered to "MB 0.2" (a Unicode bidi artifact of an LTR digit+unit run
+  embedded in an RTL paragraph — real and user-visible even though the string itself contains no
+  Hebrew characters). This is the same class of bug iOS's own `CLAUDE.md` already documents
+  fixing with a root-level LTR pin; this doc previously argued (incorrectly, per this on-device
+  evidence) that Android's native per-locale RTL mirroring didn't need the same treatment. Fixed
+  by wrapping `MainActivity.kt`'s `setContent` body in
+  `CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr)`, mirroring iOS's
+  `.environment(\.layoutDirection, .leftToRight)` exactly — pins container layout only; Hebrew
+  *text* itself still renders correctly RTL via Unicode bidi shaping, which doesn't depend on
+  `LayoutDirection`. `android/CLAUDE.md`'s "Layout Direction" section rewritten to document the
+  reversal and why (see that file — do not revert this pin without re-running the same locale
+  A/B test that found the original bugs).
+
+**Verification**: `:app:assembleDebug`, `:app:bundleRelease`, `:app:assembleRelease`, and
+`:app:test` all pass. Every fix above was re-verified on-device after implementation (not just
+build-verified) — 3-button nav A/B, Hebrew-locale A/B, Paywall scroll-to-reveal, and close-button
+tap-to-dismiss were all re-run against the fixed build, not just the original bug repro.
+
+### Follow-up code review (same session) — one real bug found and fixed, two theories disproven with hard numbers
+
+A self-directed review pass checked three specific concerns before committing:
+
+- **Scroll-gesture conflicts on `PaywallScreen`** — none exist. The only nested scrollable is
+  `PricingRow`'s horizontal `LazyRow` inside the outer vertical `Column`'s `verticalScroll` —
+  orthogonal axes, which Compose's nested-scroll connection handles natively with no custom code
+  (the same pattern Google's own sample apps use for vertical-scroll-containing-carousel
+  layouts). There are no `pointerInput`/`draggable` gesture handlers anywhere else in this file,
+  and no "card" surface exists on this screen at all (that's `CardStackLayer`, a fully separate
+  screen) — this concern didn't apply here.
+- **Double-padding from stacking `enableEdgeToEdge()` + manual `navigationBarsPadding()`** —
+  checked with `uiautomator dump` pixel bounds rather than trusting Scaffold's documented
+  behavior on faith. Main tab bar: `NavigationBar`'s own container bounds ended at
+  `y=2274`, **exactly** matching `navigationBarBackground`'s top edge — zero gap, zero overlap.
+  Paywall CTA: the gap between the "Subscribe Now" button and the nav bar measured 37px (14dp),
+  which **exactly matches** `BottomCtaSection`'s own `vertical = 14.dp` `Modifier.padding` value
+  — proving `.navigationBarsPadding()` contributed precisely the inset needed and nothing more.
+  No double-padding in either location.
+- **`Theme.Swipy` launch flash — a real bug, but not the one initially suspected.** Burst-capturing
+  screenshots at cold start (5 shots fired back-to-back via `am start &` racing `screencap`)
+  showed white/light backgrounds in most early frames. Root cause: since API 31 (Android 12),
+  every app gets a **mandatory system SplashScreen** — a separate layer from
+  `android:windowBackground`, governed by `android:windowSplashScreenBackground`, which isn't a
+  real attribute below API 31 and must live in a `values-v31/` qualifier. The original
+  `themes.xml` only set `windowBackground` (correct for the classic pre-splash-API flash, but
+  irrelevant to this mandatory API 31+ layer, which defaulted to white). Fixed with a new
+  `app/src/main/res/values-v31/themes.xml` setting `android:windowSplashScreenBackground` to the
+  same `#FF14141A` as `SplashScreen.kt`'s `OnboardingBackground` — confirmed via a second burst
+  capture that 0/5 frames after this fix show white (the one apparently-white early frame in the
+  retest was independently confirmed, by viewing it directly, to be the home-screen launcher
+  itself captured before the app's window even started — not our app at all).
+- `themes.xml`'s base `Theme.Swipy` also gained an explicit `android:windowBackground` (was
+  previously unset, relying on `Theme.DeviceDefault.NoActionBar`'s own OEM-variable default) for
+  the same reason — pinned rather than left to chance across OEM skins.
+
+**Version bump**: `versionCode` 2→3, `versionName` "0.1.0"→"1.0.0" (Play Console rejects
+re-uploading an already-consumed `versionCode`; "1.0.0" reflects this being the actual first
+real submission candidate rather than the initial pre-review scaffolding version).
