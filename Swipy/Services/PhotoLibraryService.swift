@@ -459,12 +459,19 @@ class PhotoLibraryService: ObservableObject {
     /// Pass onSlowNetwork to enable a 2-second iCloud timeout: if the asset hasn't
     /// arrived in time, onSlowNetwork fires and a local fallback is delivered instead.
     /// Not applied when forceNetworkAccess:true (background prefetch) or in offline mode.
+    ///
+    /// The completion's `isFinal` flag distinguishes the two deliveries the timeout branch
+    /// can make: `false` is the low-quality local `.fastFormat` fallback frame (a stopgap
+    /// preview — a crisper frame is still on its way from the still-alive iCloud request),
+    /// `true` is the terminal `.highQualityFormat` result (crisp image, or nil on failure —
+    /// no further callback will follow). The single-request branch always delivers `true`.
+    /// Callers must keep any loading affordance up while `isFinal == false`.
     func loadImage(
         for asset: PHAsset,
         targetSize: CGSize,
         forceNetworkAccess: Bool = false,
         onSlowNetwork: (() -> Void)? = nil,
-        completion: @escaping (UIImage?) -> Void
+        completion: @escaping (_ image: UIImage?, _ isFinal: Bool) -> Void
     ) {
         let allowsNetwork = forceNetworkAccess || !isOfflineMode
         let options = PHImageRequestOptions()
@@ -483,9 +490,9 @@ class PhotoLibraryService: ObservableObject {
                     // partially-processed Smart HDR shots). nil → card stays blank rather than
                     // showing a blurry stand-in the user might mistake for the real photo.
                     let isDegraded = (info?[PHImageResultIsDegradedKey] as? Bool) ?? false
-                    completion(isDegraded ? nil : image)
+                    completion(isDegraded ? nil : image, true)
                 } else {
-                    completion(image)
+                    completion(image, true)
                 }
             }
             return
@@ -521,7 +528,9 @@ class PhotoLibraryService: ObservableObject {
                 lock.lock()
                 let beaten = didQualityDeliver
                 lock.unlock()
-                if !beaten { completion(image) }
+                // isFinal:false — this is the stopgap preview; the original request is
+                // still alive and will deliver the crisp frame (isFinal:true) shortly.
+                if !beaten { completion(image, false) }
             }
         }
 
@@ -536,7 +545,7 @@ class PhotoLibraryService: ObservableObject {
             didQualityDeliver = true
             lock.unlock()
             timeoutWork.cancel()
-            completion(image)
+            completion(image, true)
         }
 
         DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + 2.0, execute: timeoutWork)
