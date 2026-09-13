@@ -607,37 +607,58 @@ struct PhotoCardView: View {
         // onSlowNetwork engages PhotoLibraryService.loadImage's 2s timeout → local fast-format
         // fallback → keep-the-original-iCloud-request-alive-for-an-in-place-upgrade pipeline
         // (Fix B). A no-op closure is enough — its only job is to select that branch (the branch
-        // is gated on `onSlowNetwork != nil`); the card already shows a Pass-1 thumbnail, so the
-        // fallback's own frame isn't needed for a placeholder, but the still-alive original is
-        // what finally lands a crisp frame on a slow iCloud asset instead of failing terminally.
+        // is gated on `onSlowNetwork != nil`); the still-alive original is what finally lands a
+        // crisp frame on a slow iCloud asset instead of failing terminally.
+        //
+        // isFinal distinguishes the two frames that branch can deliver:
+        //  • isFinal == false — the low-quality `.fastFormat` fallback. Route it to
+        //    thumbnailImage (a preview upgrade over Pass-1), NEVER to `image`: the spinner is
+        //    gated on `image == nil`, so putting a low-res frame in `image` would dismiss the
+        //    spinner while the photo is still visibly non-final (the exact symptom this fixes).
+        //  • isFinal == true — the terminal `.highQualityFormat` result. A non-nil frame is the
+        //    genuine full-res: promote it to `image` (cross-fading off the preview) and dismiss
+        //    the spinner. A nil means the high-quality request itself failed — surface the retry
+        //    affordance (only if no frame ever landed; a fallback preview may still show beneath).
         PhotoLibraryService.shared.loadImage(
             for: item.asset,
             targetSize: PhotoLibraryService.shared.cardTargetSize,
             onSlowNetwork: { }
-        ) { fullRes in
-            guard let fullRes else {
-                // With the onSlowNetwork fallback engaged, completion can fire more than once
-                // and a nil is NOT reliably terminal: it may be the local fast-format fallback
-                // (no on-device proxy) while the original iCloud request is still in flight, or
-                // a trailing iCloud failure arriving *after* a frame already landed. So we don't
-                // dismiss the spinner or flag failure here — ignore a nil once we have pixels,
-                // and otherwise let armImageSpinner()'s 8s failsafe be the single, race-free
-                // terminal-failure authority (it re-checks image == nil before firing, so it can
-                // never fire over a late success). This is why the old immediate spinner-clear
-                // was removed: it would fire on the non-terminal fallback nil.
+        ) { frame, isFinal in
+            guard isFinal else {
+                // Fallback preview — keep it only until the real frame lands, and never
+                // overwrite an already-final image (defensive; the timeout branch won't fire
+                // the fallback once the original has delivered). Spinner stays up (image == nil).
+                if let frame, self.image == nil {
+                    self.thumbnailImage = frame
+                    self.isLoading = false
+                }
                 return
             }
-            // A frame landed — clear any prior failure/retry state so a late success (e.g. the
-            // original iCloud request resolving after the 8s failsafe already flagged failure)
-            // never leaves the retry overlay stranded over a loaded photo.
+            guard let frame else {
+                // Terminal failure: the high-quality request resolved to nil. Surface retry in
+                // place of the (now dismissed) spinner — but only if no crisp frame ever landed.
+                // A low-res fallback preview in thumbnailImage still shows beneath the retry.
+                self.isLoading = false
+                guard self.image == nil else { return }
+                self.imageSpinnerTask?.cancel()
+                self.imageSpinnerTask = nil
+                withAnimation(.easeIn(duration: 0.2)) {
+                    self.showImageSpinner = false
+                    self.imageLoadFailed = true
+                }
+                return
+            }
+            // Genuine full-res landed — clear any prior failure/retry state so a late success
+            // (e.g. the original resolving after the 8s failsafe already flagged failure) never
+            // leaves the retry overlay stranded over a loaded photo.
             self.imageLoadFailed = false
             if self.thumbnailImage != nil {
-                withAnimation(.easeIn(duration: 0.18)) { self.image = fullRes }
+                withAnimation(.easeIn(duration: 0.18)) { self.image = frame }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
                     self.thumbnailImage = nil
                 }
             } else {
-                self.image = fullRes
+                self.image = frame
             }
             self.isLoading = false
         }

@@ -1664,7 +1664,9 @@ class PhotoStackViewModel: NSObject, ObservableObject, @preconcurrency PHPhotoLi
                         for: item.asset,
                         targetSize: targetSize,
                         forceNetworkAccess: true   // always allow download during pre-fetch
-                    ) { image in
+                    ) { image, _ in
+                        // forceNetworkAccess path never uses the timeout branch, so this
+                        // fires exactly once with the final image (isFinal always true).
                         if let image {
                             OfflineCacheService.shared.store(image: image, for: item.id)
                         }
